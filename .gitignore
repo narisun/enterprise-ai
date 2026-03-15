@@ -43,3 +43,11 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+
+# Local tool binaries — install via package manager, never commit
+skaffold
+skaffold.exe
+opa
+opa.exe
+helm
+kubectl

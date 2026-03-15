@@ -34,13 +34,16 @@ dev-up: ## Start the full local stack (builds images if needed)
 	docker compose up --build -d
 	@echo ""
 	@echo "✅ Local stack is running:"
-	@echo "   LiteLLM Proxy  → http://localhost:4000"
-	@echo "   Data MCP       → http://localhost:8080"
-	@echo "   Agent Service  → http://localhost:8000"
-	@echo "   OTel Collector → http://localhost:4318"
-	@echo "   PostgreSQL     → localhost:5432"
 	@echo ""
-	@echo "   Run 'make dev-logs' to follow logs."
+	@echo "   🌐 Chat UI       → http://localhost:8501  (username: any, password: INTERNAL_API_KEY)"
+	@echo "   🤖 Agent API     → http://localhost:8000"
+	@echo "   🔀 LiteLLM Proxy → http://localhost:4000"
+	@echo "   🛠  Data MCP      → http://localhost:8080"
+	@echo "   📡 OTel Collector → http://localhost:4318"
+	@echo "   🗄  PostgreSQL    → localhost:5432"
+	@echo ""
+	@echo "   Run 'make dev-logs' to follow all logs."
+	@echo "   Run 'make ui-logs' to follow only the chat UI logs."
 
 dev-down: ## Stop and remove all containers
 	docker compose down
@@ -50,6 +53,9 @@ dev-restart: ## Restart all containers
 
 dev-logs: ## Follow logs from all services
 	docker compose logs -f
+
+ui-logs: ## Follow logs from the Chat UI only
+	docker compose logs -f chat-ui
 
 dev-status: ## Show container health status
 	docker compose ps

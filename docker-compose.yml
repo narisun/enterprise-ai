@@ -194,6 +194,48 @@ services:
     ports:
       - "8000:8000"
 
+  # ============================================================
+  # CHAT UI — Chainlit web interface
+  # ============================================================
+  chat-ui:
+    build:
+      context: .                           # Build from monorepo root
+      dockerfile: tools/chat-ui/Dockerfile
+    container_name: ai-chat-ui
+    environment:
+      LITELLM_BASE_URL: http://litellm:4000/v1    # Container name on ai-network
+      MCP_SSE_URL: http://data-mcp:8080/sse        # Container name on ai-network
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+      # Required by Chainlit to sign session JWTs — generate with:
+      #   python3 -c "import secrets; print(secrets.token_hex(32))"
+      CHAINLIT_AUTH_SECRET: ${CHAINLIT_AUTH_SECRET}
+      # Conversation history: Chainlit persists threads and messages into
+      # the shared PostgreSQL instance via SQLAlchemyDataLayer (asyncpg driver).
+      # Tables are created automatically on first startup.
+      DATABASE_URL: "postgresql+asyncpg://admin:${POSTGRES_PASSWORD}@pgvector:5432/ai_memory"
+      # Shown in the Help modal so users know which environment they are on
+      APP_VERSION: ${APP_VERSION:-1.0.0}
+      APP_ENV: ${APP_ENV:-development}
+      SERVICE_NAME: chat-ui
+      <<: *otel-env
+    depends_on:
+      litellm:
+        condition: service_healthy
+      data-mcp:
+        condition: service_healthy
+      pgvector:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8501/health"]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    networks:
+      - ai-network
+    ports:
+      - "8501:8501"    # Chat UI — open http://localhost:8501 in your browser
+
 # ============================================================
 # SHARED NETWORK & VOLUMES
 # ============================================================

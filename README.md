@@ -50,52 +50,65 @@ curl -X POST http://localhost:8000/chat \
 
 ### Windows
 
-**Recommended approach: use Git Bash or Windows Subsystem for Linux (WSL 2)** — the Makefile and shell scripts require a Unix-like environment. PowerShell alone is not sufficient.
+Windows development uses **WSL 2 (Windows Subsystem for Linux)** for full parity with CI and production. This gives you a real Linux kernel, native Docker integration, and identical `make` commands to macOS.
 
-**Option A — WSL 2 (recommended for full parity with CI/production)**
+**Step 1 — Enable WSL 2 and install Ubuntu**
 
 ```powershell
-# In PowerShell (Admin) — enable WSL 2 and install Ubuntu
+# In PowerShell (run as Administrator)
 wsl --install
-# Restart, then open the Ubuntu terminal and follow the macOS/Linux steps above.
-# Docker Desktop integrates with WSL 2 automatically once enabled in
-# Docker Desktop → Settings → Resources → WSL Integration.
+# Restart your machine when prompted.
+# Ubuntu will be installed automatically as the default distribution.
 ```
 
-**Option B — Git Bash (lighter-weight, no Linux kernel)**
+**Step 2 — Enable Docker Desktop WSL 2 integration**
+
+Open Docker Desktop → Settings → Resources → WSL Integration → enable your Ubuntu distro → Apply & Restart.
+
+**Step 3 — Access your Windows files from Ubuntu**
+
+Your Windows drives are mounted at `/mnt/c/`, `/mnt/d/`, etc. To work with a repo cloned to `C:\Users\you\work\enterprise-ai`:
 
 ```bash
-# Install Git for Windows from git-scm.com (includes Git Bash)
-# Install Docker Desktop from docker.com
-# Install Python 3.11+ from python.org (add to PATH during install)
-# Install make via winget:
-winget install GnuWin32.Make
-# Or via Chocolatey: choco install make
-
-# Install remaining tools via winget:
-winget install OpenPolicyAgent.OPA
-winget install GoogleContainerTools.Skaffold
-winget install Helm.Helm
-winget install Hashicorp.Terraform
-
-# Then open Git Bash and run the same steps as macOS:
-pip install -e platform-sdk/          # sdk-install (if make is unavailable)
-cp .env.example .env
-# Edit .env in VS Code or Notepad: code .env
-
-# Generate INTERNAL_API_KEY in Git Bash:
-python -c "import secrets; print('sk-ent-' + secrets.token_hex(24))"
-
-# Start the stack
-make dev-up
-# Or directly if make is not on PATH:
-docker compose up --build -d
+cd /mnt/c/users/you/work/enterprise-ai
 ```
 
-**Calling the agent from PowerShell** (if you prefer not to use Git Bash for curl):
+**Step 4 — Install Linux prerequisites inside Ubuntu**
+
+```bash
+# Python (Ubuntu 24.04 requires python3-full for venv support)
+sudo apt update && sudo apt install -y python3-full make curl
+
+# OPA CLI
+curl -L -o opa https://github.com/open-policy-agent/opa/releases/download/v0.65.0/opa_linux_amd64_static \
+  && chmod +x opa && sudo mv opa /usr/local/bin/opa
+
+# Helm
+curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
+# Skaffold (optional — only needed for Kubernetes workflows)
+curl -Lo skaffold https://storage.googleapis.com/skaffold/releases/latest/skaffold-linux-amd64 \
+  && chmod +x skaffold && sudo mv skaffold /usr/local/bin/skaffold
+```
+
+**Step 5 — Run the quick start**
+
+```bash
+# Same steps as macOS/Linux from here
+make sdk-install
+cp .env.example .env
+# Edit .env and fill in credentials:
+nano .env
+# Generate INTERNAL_API_KEY:
+python3 -c "import secrets; print('sk-ent-' + secrets.token_hex(24))"
+
+make dev-up
+```
+
+**Calling the agent from PowerShell** (optional — useful for quick ad-hoc tests):
 
 ```powershell
-# PowerShell 7+ — read INTERNAL_API_KEY from your .env file first
+# PowerShell 7+ — set your key first
 $env:INTERNAL_API_KEY = "sk-ent-your-key-here"
 
 Invoke-RestMethod -Method Post `
@@ -105,10 +118,10 @@ Invoke-RestMethod -Method Post `
 ```
 
 **Windows-specific notes:**
-- Line endings: Git may auto-convert `LF → CRLF` on checkout. Run `git config core.autocrlf false` before cloning to prevent this — Docker containers expect Unix line endings in shell scripts.
-- Docker Desktop must be running before `make dev-up`. If it is not started automatically, pin it to the taskbar.
-- If `make` is not found in Git Bash, add `C:\Program Files (x86)\GnuWin32\bin` to your Windows `PATH`, or use the `docker compose` commands directly as shown in the Makefile.
-- Port conflicts: Windows services (IIS, SQL Server) can occupy ports 4000, 5432, or 8080. Check with `netstat -ano | findstr :4000` and stop conflicting services before running the stack.
+- Line endings: run `git config core.autocrlf false` before cloning — Docker containers require Unix line endings in shell scripts.
+- Docker Desktop must be running before `make dev-up`. Pin it to the taskbar so it starts with Windows.
+- Port conflicts: Windows services (IIS, SQL Server) may occupy ports 4000, 5432, or 8080. Check with `netstat -ano | findstr :4000` and stop conflicting services.
+- If you see `python3: command not found` inside Ubuntu, run `sudo apt install python3-full`.
 
 ## Common Commands
 
@@ -159,4 +172,4 @@ All traces → OTel Collector → Dynatrace
 | Skaffold | v2+ | `brew install skaffold` | `winget install GoogleContainerTools.Skaffold` | [skaffold.dev](https://skaffold.dev/docs/install/) |
 | Helm | v3+ | `brew install helm` | `winget install Helm.Helm` | `curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 \| bash` |
 | Terraform | 1.5+ | `brew install terraform` | `winget install Hashicorp.Terraform` | [developer.hashicorp.com](https://developer.hashicorp.com/terraform/install) |
-| Git Bash (Windows only) | Latest | — | [git-scm.com](https://git-scm.com/download/win) | — |
+| WSL 2 (Windows only) | Any | — | `wsl --install` in PowerShell (Admin) | — |

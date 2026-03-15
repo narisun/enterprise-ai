@@ -1,0 +1,19 @@
+# Chat UI framework
+chainlit>=1.3.0
+sqlalchemy>=2.0.0        # Chainlit SQLAlchemyDataLayer — conversation history persistence
+asyncpg>=0.29.0          # Async PostgreSQL driver used by SQLAlchemy in Chainlit data layer
+
+# Agent orchestration (same versions as agents/ service)
+langgraph>=0.2.0
+langchain-openai>=0.1.8
+langchain-core>=0.2.0
+
+# MCP client (to connect to tool servers)
+mcp[cli]>=1.9.0
+
+# Prompt templating
+jinja2>=3.1.0
+
+# Observability
+opentelemetry-sdk>=1.24.0
+opentelemetry-exporter-otlp>=1.24.0
