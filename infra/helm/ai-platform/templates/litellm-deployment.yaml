@@ -1,0 +1,91 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: litellm-proxy
+  labels:
+    app: litellm
+spec:
+  replicas: {{ .Values.litellm.replicaCount }}
+  selector:
+    matchLabels:
+      app: litellm
+  template:
+    metadata:
+      labels:
+        app: litellm
+    spec:
+      # IRSA service account grants least-privilege access to Bedrock
+      serviceAccountName: litellm-bedrock-irsa
+      containers:
+        - name: litellm
+          image: "{{ .Values.litellm.image.repository }}:{{ .Values.litellm.image.tag }}"
+          imagePullPolicy: {{ .Values.litellm.image.pullPolicy }}
+          args: ["--config", "/app/config.yaml"]
+          ports:
+            - containerPort: 4000
+          envFrom:
+            - secretRef:
+                name: {{ .Values.secretName }}
+          # ---- Health Probes ------------------------------------------------
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 4000
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 4000
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            failureThreshold: 3
+          # ---- Resource Limits ----------------------------------------------
+          resources:
+            requests:
+              cpu: {{ .Values.litellm.resources.requests.cpu }}
+              memory: {{ .Values.litellm.resources.requests.memory }}
+            limits:
+              cpu: {{ .Values.litellm.resources.limits.cpu }}
+              memory: {{ .Values.litellm.resources.limits.memory }}
+          volumeMounts:
+            - name: config
+              mountPath: /app/config.yaml
+              subPath: config.yaml
+      volumes:
+        - name: config
+          configMap:
+            name: litellm-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: litellm
+spec:
+  selector:
+    app: litellm
+  ports:
+    - port: {{ .Values.litellm.service.port }}
+      targetPort: 4000
+---
+{{- if .Values.litellm.hpa.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: litellm-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: litellm-proxy
+  minReplicas: {{ .Values.litellm.hpa.minReplicas }}
+  maxReplicas: {{ .Values.litellm.hpa.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.litellm.hpa.targetCPUUtilizationPercentage }}
+{{- end }}

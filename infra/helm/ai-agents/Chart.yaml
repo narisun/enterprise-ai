@@ -1,0 +1,5 @@
+apiVersion: v2
+name: ai-agents
+description: Enterprise Agent Service — LangGraph ReAct agent with MCP tools
+type: application
+version: 0.1.0

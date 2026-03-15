@@ -1,0 +1,205 @@
+# ============================================================
+# enterprise-ai — Unified Local Development Stack
+#
+# All services share one Docker network (ai-network), so they
+# reach each other by service name. No host.docker.internal.
+#
+# Usage:
+#   cp .env.example .env && nano .env   # fill in credentials
+#   make dev-up
+# ============================================================
+
+name: enterprise-ai
+
+# Pinned image versions — update deliberately via PR, never use :latest
+x-versions:
+  pgvector:    &img-pgvector    pgvector/pgvector:pg16
+  redis:       &img-redis       redis:7.2-alpine
+  litellm:     &img-litellm     ghcr.io/berriai/litellm:main-v1.43.0
+  otel:        &img-otel        otel/opentelemetry-collector-contrib:0.103.0
+  opa:         &img-opa         openpolicyagent/opa:0.65.0-debug
+
+# Shared environment injected into every service
+x-otel-env: &otel-env
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318/v1/traces
+
+services:
+
+  # ============================================================
+  # INFRASTRUCTURE
+  # ============================================================
+  pgvector:
+    image: *img-pgvector
+    container_name: ai-pgvector
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ai_memory
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./platform/db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d ai_memory"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - ai-network
+    ports:
+      - "5432:5432"    # Expose for local DB clients (DBeaver, psql)
+
+  redis:
+    image: *img-redis
+    container_name: ai-redis
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - ai-network
+
+  otel-collector:
+    image: *img-otel
+    container_name: ai-otel-collector
+    environment:
+      DYNATRACE_ENDPOINT: ${DYNATRACE_ENDPOINT:-}
+      DYNATRACE_API_TOKEN: ${DYNATRACE_API_TOKEN:-}
+    volumes:
+      - ./platform/otel/otel-local.yaml:/etc/otelcol-contrib/config.yaml:ro
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    ports:
+      - "4317:4317"    # OTLP gRPC (expose for host-side tools)
+      - "4318:4318"    # OTLP HTTP (expose for host-side tools)
+    networks:
+      - ai-network
+
+  # ============================================================
+  # AI PLATFORM — LiteLLM Proxy
+  # ============================================================
+  litellm:
+    image: *img-litellm
+    container_name: ai-litellm
+    environment:
+      AZURE_API_KEY: ${AZURE_API_KEY}
+      AZURE_API_BASE: ${AZURE_API_BASE}
+      AZURE_API_VERSION: ${AZURE_API_VERSION:-2024-02-15-preview}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}      # read by litellm-local.yaml via os.environ/INTERNAL_API_KEY
+      LITELLM_MASTER_KEY: ${INTERNAL_API_KEY}    # LiteLLM auto-detects this env var as fallback
+      <<: *otel-env
+    volumes:
+      - ./platform/config/litellm-local.yaml:/app/config.yaml:ro
+    command: ["--config", "/app/config.yaml"]
+    depends_on:
+      redis:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+    healthcheck:
+      # LiteLLM uses a non-standard Python install path so we use absolute path.
+      # Falls back gracefully: if /usr/local/bin/python3 is absent the container
+      # will be marked unhealthy but ai-agents uses service_started (below) so
+      # the stack still comes up.
+      test: ["CMD", "/usr/local/bin/python3", "-c",
+             "import socket,sys; s=socket.socket(); r=s.connect_ex(('localhost',4000)); s.close(); sys.exit(0 if r==0 else 1)"]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    networks:
+      - ai-network
+    ports:
+      - "4000:4000"    # LiteLLM API
+
+  # ============================================================
+  # POLICY ENGINE
+  # ============================================================
+  opa:
+    image: *img-opa
+    container_name: ai-opa
+    volumes:
+      - ./tools/policies/opa:/policies:ro
+    command: ["run", "--server", "--addr", "0.0.0.0:8181", "--log-level", "info", "/policies"]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8181/health?plugins"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ai-network
+
+  # ============================================================
+  # MCP TOOLS
+  # ============================================================
+  data-mcp:
+    build:
+      context: .                           # Build from monorepo root
+      dockerfile: tools/data-mcp/Dockerfile
+    container_name: ai-data-mcp
+    environment:
+      MCP_TRANSPORT: sse
+      OPA_URL: http://opa:8181/v1/data/mcp/tools/allow
+      DB_HOST: pgvector                    # Container name on ai-network
+      DB_PORT: 5432
+      DB_USER: admin
+      DB_PASS: ${POSTGRES_PASSWORD}
+      DB_NAME: ai_memory
+      SERVICE_NAME: data-mcp
+      <<: *otel-env
+    depends_on:
+      pgvector:
+        condition: service_healthy
+      opa:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+    healthcheck:
+      # TCP check — python3 is always present as the container runtime.
+      # Avoids needing curl or wget, and works regardless of HTTP routes.
+      test: ["CMD", "python3", "-c",
+             "import socket,sys; s=socket.socket(); r=s.connect_ex(('localhost',8080)); s.close(); sys.exit(0 if r==0 else 1)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - ai-network
+    ports:
+      - "8080:8080"
+
+  # ============================================================
+  # AGENT SERVICE
+  # ============================================================
+  ai-agents:
+    build:
+      context: .                           # Build from monorepo root
+      dockerfile: agents/Dockerfile
+    container_name: ai-agents
+    environment:
+      LITELLM_BASE_URL: http://litellm:4000/v1    # Container name on ai-network
+      MCP_SSE_URL: http://data-mcp:8080/sse        # Container name on ai-network
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+      SERVICE_NAME: ai-agents
+      <<: *otel-env
+    depends_on:
+      litellm:
+        condition: service_healthy
+      data-mcp:
+        condition: service_healthy
+    networks:
+      - ai-network
+    ports:
+      - "8000:8000"
+
+# ============================================================
+# SHARED NETWORK & VOLUMES
+# ============================================================
+networks:
+  ai-network:
+    driver: bridge
+
+volumes:
+  pgdata:

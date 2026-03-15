@@ -1,0 +1,8 @@
+# Dev overrides — smaller footprint
+litellm:
+  replicaCount: 1
+  hpa:
+    minReplicas: 1
+    maxReplicas: 3
+otelCollector:
+  replicaCount: 1

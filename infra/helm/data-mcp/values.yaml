@@ -1,0 +1,32 @@
+image:
+  repository: enterprise-ai/data-mcp
+  tag: "latest"
+  pullPolicy: IfNotPresent
+
+replicaCount: 2
+
+resources:
+  requests:
+    cpu: "100m"
+    memory: "256Mi"
+  limits:
+    cpu: "500m"
+    memory: "512Mi"
+
+service:
+  port: 8080
+
+hpa:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 70
+
+env:
+  MCP_TRANSPORT: sse
+  DB_PORT: "5432"
+  DB_NAME: ai_memory
+  MAX_RESULT_BYTES: "15000"
+
+# Secret containing DB_PASS, INTERNAL_API_KEY, OTEL creds
+secretName: data-mcp-secrets

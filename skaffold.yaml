@@ -1,0 +1,111 @@
+# ============================================================
+# enterprise-ai — Skaffold Configuration
+#
+# ONE codebase for local Docker and Kubernetes deployment.
+#
+# Profiles:
+#   local        → docker compose (default for `skaffold dev`)
+#   dev-cluster  → Helm deploy to a dev EKS/AKS namespace
+#   production   → Helm deploy to production namespace
+#
+# Usage:
+#   skaffold dev --profile=local          # hot-reload locally
+#   skaffold run --profile=dev-cluster    # deploy to K8s dev
+#   skaffold run --profile=production     # deploy to K8s prod
+# ============================================================
+
+apiVersion: skaffold/v4beta6
+kind: Config
+metadata:
+  name: enterprise-ai
+
+# Images built from the monorepo root (context: .) so Dockerfiles
+# can COPY from both the service dir and the shared platform-sdk.
+build:
+  artifacts:
+    - image: enterprise-ai/ai-agents
+      context: .
+      docker:
+        dockerfile: agents/Dockerfile
+    - image: enterprise-ai/data-mcp
+      context: .
+      docker:
+        dockerfile: tools/data-mcp/Dockerfile
+  local:
+    push: false   # Keep images local; CI/CD pushes to registry
+
+profiles:
+  # ----------------------------------------------------------
+  # LOCAL: docker compose — mirrors production topology
+  # ----------------------------------------------------------
+  - name: local
+    activation:
+      - command: dev   # Default for `skaffold dev`
+    deploy:
+      docker:
+        useCompose: true
+        composefile: docker-compose.yml
+
+  # ----------------------------------------------------------
+  # DEV-CLUSTER: Helm deploy → dev namespace on EKS/AKS
+  # ----------------------------------------------------------
+  - name: dev-cluster
+    build:
+      local:
+        push: true
+    deploy:
+      helm:
+        releases:
+          - name: ai-platform
+            chartPath: infra/helm/ai-platform
+            namespace: ai-platform-dev
+            createNamespace: true
+            valuesFiles:
+              - infra/helm/ai-platform/values.yaml
+              - infra/helm/ai-platform/values-dev.yaml
+
+          - name: data-mcp
+            chartPath: infra/helm/data-mcp
+            namespace: ai-platform-dev
+            valuesFiles:
+              - infra/helm/data-mcp/values.yaml
+              - infra/helm/data-mcp/values-dev.yaml
+
+          - name: ai-agents
+            chartPath: infra/helm/ai-agents
+            namespace: ai-platform-dev
+            valuesFiles:
+              - infra/helm/ai-agents/values.yaml
+              - infra/helm/ai-agents/values-dev.yaml
+
+  # ----------------------------------------------------------
+  # PRODUCTION: Helm deploy → production namespace
+  # ----------------------------------------------------------
+  - name: production
+    build:
+      local:
+        push: true
+    deploy:
+      helm:
+        releases:
+          - name: ai-platform
+            chartPath: infra/helm/ai-platform
+            namespace: ai-platform
+            createNamespace: true
+            valuesFiles:
+              - infra/helm/ai-platform/values.yaml
+              - infra/helm/ai-platform/values-prod.yaml
+
+          - name: data-mcp
+            chartPath: infra/helm/data-mcp
+            namespace: ai-platform
+            valuesFiles:
+              - infra/helm/data-mcp/values.yaml
+              - infra/helm/data-mcp/values-prod.yaml
+
+          - name: ai-agents
+            chartPath: infra/helm/ai-agents
+            namespace: ai-platform
+            valuesFiles:
+              - infra/helm/ai-agents/values.yaml
+              - infra/helm/ai-agents/values-prod.yaml

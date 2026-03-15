@@ -1,0 +1,40 @@
+# Default values — override with values-dev.yaml or values-prod.yaml
+
+litellm:
+  image:
+    repository: ghcr.io/berriai/litellm
+    tag: "v1.43.0"          # Always pin — never use main-latest
+    pullPolicy: IfNotPresent
+  replicaCount: 2
+  resources:
+    requests:
+      cpu: "250m"
+      memory: "512Mi"
+    limits:
+      cpu: "1000m"
+      memory: "1Gi"
+  service:
+    port: 4000
+  hpa:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 8
+    targetCPUUtilizationPercentage: 70
+
+otelCollector:
+  image:
+    repository: otel/opentelemetry-collector-contrib
+    tag: "0.103.0"
+    pullPolicy: IfNotPresent
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "256Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+
+# Secret name containing INTERNAL_API_KEY, AZURE_API_KEY, DYNATRACE_API_TOKEN
+# Create with: kubectl create secret generic ai-platform-secrets --from-env-file=.env
+secretName: ai-platform-secrets

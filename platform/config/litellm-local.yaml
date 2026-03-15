@@ -1,0 +1,49 @@
+# ============================================================
+# platform/config/litellm-local.yaml
+#
+# LiteLLM config for local development.
+# Routes all traffic to Azure OpenAI.
+# Credentials injected from environment (via docker-compose → .env)
+# ============================================================
+
+model_list:
+
+  # ---- Complex reasoning (GPT-4o-mini for cost-effective local dev) --------
+  - model_name: complex-routing
+    litellm_params:
+      model: azure/gpt-4o-mini-deployment
+      api_base: os.environ/AZURE_API_BASE
+      api_key: os.environ/AZURE_API_KEY
+      api_version: os.environ/AZURE_API_VERSION
+
+  # ---- Fast / cheap routing (same model locally, swap for prod) -----------
+  - model_name: fast-routing
+    litellm_params:
+      model: azure/gpt-4o-mini-deployment
+      api_base: os.environ/AZURE_API_BASE
+      api_key: os.environ/AZURE_API_KEY
+      api_version: os.environ/AZURE_API_VERSION
+
+litellm_settings:
+  # Prompt caching via Redis — 90%+ token savings on repeated prompts
+  cache: true
+  cache_type: redis
+  redis_host: redis
+  redis_port: 6379
+
+  # Structured callback to OTel collector for every LLM call
+  success_callback: ["otel"]
+  failure_callback: ["otel"]
+
+  # Drop requests with tokens exceeding model limit rather than erroring
+  drop_params: true
+
+  # Global request timeout (seconds)
+  request_timeout: 60
+
+general_settings:
+  # Master key — all callers (agents, tests) must present this as Bearer token
+  master_key: os.environ/INTERNAL_API_KEY
+
+  # Rate limiting storage (Redis)
+  store_model_in_db: false

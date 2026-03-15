@@ -1,0 +1,56 @@
+# ============================================================
+# platform/config/litellm-prod.yaml
+#
+# LiteLLM config for production (EKS).
+# Azure OpenAI is primary; AWS Bedrock is the fallback.
+# Credentials come from EKS IRSA (for Bedrock) and Kubernetes
+# Secrets (for Azure), never from environment variables in prod.
+# ============================================================
+
+model_list:
+
+  # ---- Complex reasoning (GPT-4o via Azure, Claude 3.5 Sonnet fallback) ---
+  - model_name: complex-routing
+    litellm_params:
+      model: azure/gpt-4o
+      api_base: os.environ/AZURE_API_BASE
+      api_key: os.environ/AZURE_API_KEY
+      api_version: os.environ/AZURE_API_VERSION
+
+  - model_name: complex-routing
+    litellm_params:
+      model: bedrock/anthropic.claude-3-5-sonnet-20241022-v2:0
+      aws_region_name: us-east-1
+      # Credentials provided by IRSA — no key needed
+
+  # ---- Fast / cheap routing (GPT-4o-mini Azure, Claude 3 Haiku fallback) --
+  - model_name: fast-routing
+    litellm_params:
+      model: azure/gpt-4o-mini
+      api_base: os.environ/AZURE_API_BASE
+      api_key: os.environ/AZURE_API_KEY
+      api_version: os.environ/AZURE_API_VERSION
+
+  - model_name: fast-routing
+    litellm_params:
+      model: bedrock/anthropic.claude-3-haiku-20240307-v1:0
+      aws_region_name: us-east-1
+
+litellm_settings:
+  cache: true
+  cache_type: redis
+  redis_host: redis-master.ai-platform.svc.cluster.local
+  redis_port: 6379
+
+  success_callback: ["otel"]
+  failure_callback: ["otel"]
+
+  drop_params: true
+  request_timeout: 60
+
+  # Fallback: if Azure fails, automatically try Bedrock
+  fallbacks: [{"complex-routing": ["complex-routing"]}, {"fast-routing": ["fast-routing"]}]
+  allowed_fails: 1
+
+general_settings:
+  master_key: os.environ/INTERNAL_API_KEY
