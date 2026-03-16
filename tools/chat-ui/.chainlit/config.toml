@@ -18,6 +18,10 @@ multi_modal = true
 # Disable speech-to-text for now
 speech_to_text.enabled = false
 
+# Enable LaTeX rendering (KaTeX) so mathematical expressions like \(\frac{a}{b}\)
+# are rendered as proper math rather than shown as raw LaTeX source.
+latex = true
+
 [UI]
 name = "Enterprise AI"
 description = "Internal AI platform — powered by LangGraph, LiteLLM, and MCP"

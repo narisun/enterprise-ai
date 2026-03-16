@@ -43,7 +43,8 @@ log = get_logger(__name__)
 # ---- Configuration ----------------------------------------------------------
 MCP_SSE_URL = os.environ.get("MCP_SSE_URL", "http://localhost:8080/sse")
 INTERNAL_API_KEY = os.environ.get("INTERNAL_API_KEY", "")
-RECURSION_LIMIT = int(os.environ.get("AGENT_RECURSION_LIMIT", "10"))
+_raw_recursion = int(os.environ.get("AGENT_RECURSION_LIMIT", "10"))
+RECURSION_LIMIT = max(1, min(_raw_recursion, 50))  # M5: bounds-checked (1–50)
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 
 # ---- Conversation History — Chainlit SQLAlchemy data layer ------------------
@@ -96,8 +97,9 @@ def auth_callback(username: str, password: str) -> cl.User | None:
     and set OAUTH_AZURE_AD_CLIENT_ID / OAUTH_AZURE_AD_CLIENT_SECRET in .env.
     """
     if not INTERNAL_API_KEY:
-        log.warning("auth_misconfigured", reason="INTERNAL_API_KEY not set — allowing all logins")
-        return cl.User(identifier=username or "user", metadata={"role": "user"})
+        # H1: fail closed — never allow logins when auth is not configured
+        log.error("auth_misconfigured", reason="INTERNAL_API_KEY not set — rejecting all logins")
+        return None
 
     if password == INTERNAL_API_KEY and username:
         log.info("auth_success", username=username)
@@ -125,6 +127,7 @@ async def _init_session(thread_id: str, username: str) -> bool:
 
         cl.user_session.set("bridge", bridge)
         cl.user_session.set("agent", agent)
+        cl.user_session.set("tool_names", [t.name for t in tools])  # M3: cached here, avoids second call
 
         log.info("session_initialised", username=username, thread_id=thread_id,
                  tools=[t.name for t in tools])
@@ -156,10 +159,8 @@ async def on_chat_start() -> None:
     ok = await _init_session(session_id, username)
 
     if ok:
-        agent = cl.user_session.get("agent")
-        bridge = cl.user_session.get("bridge")
-        tools = await bridge.get_langchain_tools()
-        tool_names = [t.name for t in tools]
+        # M3: read tool_names cached by _init_session — no second MCP round-trip
+        tool_names = cl.user_session.get("tool_names") or []
         tool_list = "\n".join(f"- `{name}`" for name in tool_names)
 
         await status.remove()
@@ -237,6 +238,19 @@ async def on_message(message: cl.Message) -> None:
       - on_chat_model_stream  → individual tokens → streamed to answer bubble
       - on_tool_start         → tool invocation   → shown as a Step widget
       - on_tool_end           → tool result       → updates the Step widget
+
+    Persistence note
+    ────────────────
+    Chainlit's SQLAlchemyDataLayer.get_thread() only returns steps where
+    "streaming" = FALSE.  When stream_token() is called, Chainlit sets
+    message.streaming = True in memory.  If update() is called while that
+    flag is True, the step is persisted as streaming=True and disappears
+    from the history view.
+
+    Fix: we buffer tokens in content_parts ourselves, then in the finally
+    block we explicitly set answer.streaming = False and answer.content to
+    the full buffered text before calling update().  This guarantees the DB
+    always ends up with streaming=False and the complete content.
     """
     agent = cl.user_session.get("agent")
     if not agent:
@@ -254,6 +268,10 @@ async def on_message(message: cl.Message) -> None:
     # Track open Step widgets by LangGraph run_id so we can update them
     # when the tool call completes
     active_steps: dict[str, cl.Step] = {}
+
+    # Buffer every streamed token so we can reliably persist the full content
+    # even if stream_token() doesn't accumulate into answer.content correctly.
+    content_parts: list[str] = []
 
     try:
         async for event in agent.astream_events(
@@ -273,12 +291,15 @@ async def on_message(message: cl.Message) -> None:
                     continue
                 content = chunk.content
                 if isinstance(content, str) and content:
+                    content_parts.append(content)
                     await answer.stream_token(content)
                 elif isinstance(content, list):
                     # Some models return content as a list of typed blocks
                     for block in content:
                         if isinstance(block, dict) and block.get("type") == "text":
-                            await answer.stream_token(block["text"])
+                            token = block["text"]
+                            content_parts.append(token)
+                            await answer.stream_token(token)
 
             # ── Open a collapsible Step when a tool is invoked ────────────
             elif kind == "on_tool_start":
@@ -315,5 +336,23 @@ async def on_message(message: cl.Message) -> None:
         ).send()
 
     finally:
-        # Finalise the answer bubble (flushes any buffered content)
+        # ── Persist the complete assistant response ───────────────────────
+        # Explicitly set content from our buffer (belt-and-suspenders: ensures
+        # the correct text is saved even if stream_token accumulation differs
+        # across Chainlit versions).
+        #
+        # CRITICAL: reset streaming=False before calling update().
+        # stream_token() sets message.streaming=True in memory; if we call
+        # update() with streaming=True, Chainlit persists it to the DB and
+        # get_thread() silently excludes the step (it filters streaming=False
+        # only), making the assistant response invisible in the history view.
+        if content_parts:
+            answer.content = "".join(content_parts)
+        answer.streaming = False
         await answer.update()
+
+        # Close any tool-call steps that were never completed (error path).
+        # Leaving steps without a finalised output can break thread rendering.
+        for orphan_step in active_steps.values():
+            orphan_step.output = "(interrupted)"
+            await orphan_step.update()

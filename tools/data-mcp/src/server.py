@@ -7,14 +7,14 @@ parameterised, read-only SQL against per-session isolated schemas.
 Key improvements over original:
 - Resources initialised via FastMCP lifespan (same event loop as request handlers)
 - httpx.AsyncClient is a singleton (no new TCP connection per OPA call)
-- Structured logging replaces print()
+- Structured logging via platform_sdk (consistent JSON schema across all services)
 - Retry logic for transient OPA failures (max 2 retries, fail closed)
 - /health endpoint via TCP check (no fastapi dependency required)
 - No hardcoded credentials anywhere
+- ENVIRONMENT and AGENT_ROLE are server-stamped into OPA input (H3)
 """
 import asyncio
 import json
-import logging
 import os
 import re
 import uuid
@@ -25,17 +25,13 @@ import asyncpg
 import httpx
 from mcp.server.fastmcp import FastMCP
 from opentelemetry import trace
-from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
-from opentelemetry.sdk.resources import Resource
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
-# ---- Logging ----------------------------------------------------------------
-logging.basicConfig(
-    level=os.getenv("LOG_LEVEL", "INFO"),
-    format="%(asctime)s %(levelname)s %(name)s %(message)s",
-)
-log = logging.getLogger(__name__)
+# L1: use platform_sdk structured logging for consistent JSON schema across services
+# setup_telemetry is idempotent (guarded by _initialized flag) — safe on reconnect
+from platform_sdk import configure_logging, get_logger, setup_telemetry
+
+configure_logging()
+log = get_logger(__name__)
 
 # ---- Configuration (all from environment, NO hardcoded defaults) ------------
 DB_HOST = os.environ.get("DB_HOST", "localhost")
@@ -45,6 +41,10 @@ DB_PASS = os.environ.get("DB_PASS", "")
 DB_NAME = os.environ.get("DB_NAME", "ai_memory")
 OPA_URL = os.environ.get("OPA_URL", "http://localhost:8181/v1/data/mcp/tools/allow")
 TRANSPORT = os.environ.get("MCP_TRANSPORT", "stdio")
+
+# H3: server-stamped values — callers cannot override these in OPA input
+ENVIRONMENT = os.environ.get("ENVIRONMENT", "prod")
+AGENT_ROLE = os.environ.get("AGENT_ROLE", "data_analyst_agent")
 
 # Row limit protects LLM context windows
 MAX_RESULT_BYTES = int(os.environ.get("MAX_RESULT_BYTES", "15000"))
@@ -69,19 +69,12 @@ async def _lifespan(server: FastMCP) -> AsyncIterator[None]:
     """
     global _db_pool, _opa_client, _tracer
 
-    # --- Telemetry (sync — safe to initialise here) ---
-    endpoint = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT")
+    # --- Telemetry ---
+    # Use platform_sdk's idempotent setup_telemetry() instead of inline OTel
+    # calls.  The _initialized guard in telemetry.py prevents
+    # "Overriding of current TracerProvider is not allowed" on reconnect.
     service_name = os.environ.get("SERVICE_NAME", "data-mcp")
-    if endpoint:
-        resource = Resource(attributes={"service.name": service_name})
-        provider = TracerProvider(resource=resource)
-        provider.add_span_processor(
-            BatchSpanProcessor(OTLPSpanExporter(endpoint=endpoint))
-        )
-        trace.set_tracer_provider(provider)
-        log.info("telemetry_ready service=%s endpoint=%s", service_name, endpoint)
-    else:
-        log.info("OTEL_EXPORTER_OTLP_ENDPOINT not set — telemetry disabled")
+    setup_telemetry(service_name)
     _tracer = trace.get_tracer(__name__)
 
     # --- OPA HTTP client (one connection pool, reused across all requests) ---
@@ -144,7 +137,12 @@ async def _authorize_with_opa(tool_name: str, payload: dict) -> bool:
     """
     assert _opa_client is not None, "OPA client not initialised"
 
-    request_body = {"input": {"tool": tool_name, **payload}}
+    # H3: stamp environment and agent_role from server config — callers cannot
+    # inject these via tool arguments, preventing the local-env bypass attack.
+    input_data = {"tool": tool_name, **payload}
+    input_data["environment"] = ENVIRONMENT   # always overrides any caller-supplied value
+    input_data["agent_role"] = AGENT_ROLE     # service-level identity, not caller-controlled
+    request_body = {"input": input_data}
 
     for attempt in range(2):   # one retry on transient failure
         try:
@@ -202,16 +200,21 @@ async def execute_read_query(query: str, session_id: str) -> str:
         if not _is_valid_uuid(session_id):
             return "ERROR: Invalid session_id — must be a valid UUID."
 
-        # 3. Regex guard: only SELECT statements allowed
-        if not re.match(r"^\s*SELECT", query, re.IGNORECASE):
-            return "ERROR: Security policy violation — only SELECT queries are permitted."
+        # 3. Regex guard: only single SELECT statements allowed
+        # M8: \b prevents prefix bypass (e.g. "SELECTBAD"); semicolon check blocks
+        #     multi-statement injection (readonly=True transaction is the primary guard)
+        if not re.match(r"^\s*SELECT\b", query, re.IGNORECASE) or ";" in query:
+            return "ERROR: Security policy violation — only single SELECT queries are permitted."
 
         schema_name = f"ws_{session_id.replace('-', '_')}"
 
         try:
             async with _db_pool.acquire() as conn:
                 async with conn.transaction(readonly=True):
-                    await conn.execute(f"SET search_path TO {schema_name}, public")
+                    # H2: SET LOCAL scopes this to the current transaction only,
+                    # preventing schema leakage to the next request on the same
+                    # connection when it is returned to the pool.
+                    await conn.execute(f"SET LOCAL search_path TO {schema_name}, public")
                     records = await conn.fetch(query)
 
                     span.set_attribute("db.row_count", len(records))

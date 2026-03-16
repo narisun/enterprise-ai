@@ -1,12 +1,15 @@
 """
-init_db.py — Create Chainlit data-layer tables in PostgreSQL.
+init_db.py — Create / migrate Chainlit data-layer tables in PostgreSQL.
 
 Called from entrypoint.sh before the Chainlit server starts.
 Uses asyncpg directly so we are not dependent on `chainlit db upgrade`
 (which relies on Alembic being wired up correctly).
 
-All statements use CREATE TABLE IF NOT EXISTS, so this script is fully
-idempotent and safe to run on every container start.
+Structure:
+  _SCHEMA_SQL    — CREATE TABLE IF NOT EXISTS for fresh databases.
+  _MIGRATION_SQL — ALTER TABLE … ADD COLUMN IF NOT EXISTS for columns
+                   added in newer Chainlit releases. Safe to run against
+                   both old and new schemas (fully idempotent).
 
 Schema source: chainlit/backend/chainlit/data/sql_alchemy.py (Chainlit 1.x)
 """
@@ -58,7 +61,9 @@ CREATE TABLE IF NOT EXISTS steps (
     "generation"    JSONB,
     "showInput"     TEXT,
     "language"      TEXT,
-    "indent"        INT
+    "indent"        INT,
+    "defaultOpen"   BOOLEAN  DEFAULT FALSE,  -- added in Chainlit 1.x (later releases)
+    "autoCollapse"  BOOLEAN  DEFAULT FALSE   -- added in Chainlit 1.x (later releases)
 );
 
 CREATE TABLE IF NOT EXISTS elements (
@@ -74,7 +79,8 @@ CREATE TABLE IF NOT EXISTS elements (
     "page"        INT,
     "language"    TEXT,
     "forId"       UUID,
-    "mime"        TEXT
+    "mime"        TEXT,
+    "props"       JSONB DEFAULT '{}'   -- added in Chainlit 1.x (later releases)
 );
 
 CREATE TABLE IF NOT EXISTS feedbacks (
@@ -84,6 +90,28 @@ CREATE TABLE IF NOT EXISTS feedbacks (
     "value"    INT   NOT NULL,
     "comment"  TEXT
 );
+"""
+
+# ---------------------------------------------------------------------------
+# Additive migrations — columns added in newer Chainlit point releases.
+# Each statement is fully idempotent: ADD COLUMN IF NOT EXISTS is a no-op
+# when the column already exists (PostgreSQL 9.6+).
+# ---------------------------------------------------------------------------
+_MIGRATION_SQL = """
+-- Chainlit added "props" to elements for storing element metadata (e.g. tool
+-- call payloads). Without it the SQL layer raises UndefinedColumnError on every
+-- thread load.  See: chainlit/backend/chainlit/data/sql_alchemy.py
+ALTER TABLE elements
+    ADD COLUMN IF NOT EXISTS "props" JSONB DEFAULT '{}';
+
+-- Chainlit added "defaultOpen" and "autoCollapse" to steps for controlling
+-- how Step widgets are displayed in the UI.  Without them, every INSERT into
+-- steps raises UndefinedColumnError and NO messages (user or assistant) are
+-- persisted — making the history view appear completely empty.
+ALTER TABLE steps
+    ADD COLUMN IF NOT EXISTS "defaultOpen"  BOOLEAN DEFAULT FALSE;
+ALTER TABLE steps
+    ADD COLUMN IF NOT EXISTS "autoCollapse" BOOLEAN DEFAULT FALSE;
 """
 
 
@@ -100,7 +128,8 @@ async def main() -> None:
 
     print("[init_db] Connecting to PostgreSQL…")
     try:
-        conn = await asyncpg.connect(dsn)
+        # M7: explicit timeout so a slow/absent DB fails fast at container startup
+        conn = await asyncpg.connect(dsn, timeout=30)
     except Exception as exc:
         print(f"[init_db] ERROR: Could not connect: {exc}", file=sys.stderr)
         sys.exit(1)
@@ -108,8 +137,10 @@ async def main() -> None:
     try:
         await conn.execute(_SCHEMA_SQL)
         print("[init_db] Chainlit tables created / verified OK.")
+        await conn.execute(_MIGRATION_SQL)
+        print("[init_db] Migrations applied OK.")
     except Exception as exc:
-        print(f"[init_db] ERROR: Schema creation failed: {exc}", file=sys.stderr)
+        print(f"[init_db] ERROR: Schema / migration failed: {exc}", file=sys.stderr)
         sys.exit(1)
     finally:
         await conn.close()

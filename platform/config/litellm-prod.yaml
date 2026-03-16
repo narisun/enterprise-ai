@@ -20,7 +20,7 @@ model_list:
   - model_name: complex-routing
     litellm_params:
       model: bedrock/anthropic.claude-3-5-sonnet-20241022-v2:0
-      aws_region_name: us-east-1
+      aws_region_name: os.environ/AWS_DEFAULT_REGION  # L5: use env var, not hardcoded
       # Credentials provided by IRSA — no key needed
 
   # ---- Fast / cheap routing (GPT-4o-mini Azure, Claude 3 Haiku fallback) --
@@ -34,13 +34,14 @@ model_list:
   - model_name: fast-routing
     litellm_params:
       model: bedrock/anthropic.claude-3-haiku-20240307-v1:0
-      aws_region_name: us-east-1
+      aws_region_name: os.environ/AWS_DEFAULT_REGION  # L5: use env var, not hardcoded
 
 litellm_settings:
   cache: true
   cache_type: redis
   redis_host: redis-master.ai-platform.svc.cluster.local
   redis_port: 6379
+  redis_password: os.environ/REDIS_PASSWORD  # H5: authenticated Redis
 
   success_callback: ["otel"]
   failure_callback: ["otel"]
@@ -48,8 +49,11 @@ litellm_settings:
   drop_params: true
   request_timeout: 60
 
-  # Fallback: if Azure fails, automatically try Bedrock
-  fallbacks: [{"complex-routing": ["complex-routing"]}, {"fast-routing": ["fast-routing"]}]
+  # M2: cross-tier fallback — complex falls back to fast (Haiku) if both
+  # Azure GPT-4o and Bedrock Claude Sonnet fail; and vice versa.
+  # Within-route Azure→Bedrock failover is handled automatically by LiteLLM
+  # because both models share the same model_name above.
+  fallbacks: [{"complex-routing": ["fast-routing"]}, {"fast-routing": ["complex-routing"]}]
   allowed_fails: 1
 
 general_settings:

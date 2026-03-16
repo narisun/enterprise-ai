@@ -56,10 +56,15 @@ allow if {
 
 # ---- Helper Rules -----------------------------------------------------------
 
-# Session ID must be non-empty (UUID format is further validated in the MCP server)
+# L7: Session ID must be a well-formed UUID (both layers enforce the same constraint).
+# The MCP server performs the same check; having it here makes the policy
+# independently enforceable and self-documenting.
+_UUID_PATTERN := `^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`
+
 _valid_session_id if {
     input.session_id != ""
     input.session_id != null
+    regex.match(_UUID_PATTERN, input.session_id)
 }
 
 # Only SELECT statements are authorised at policy level
@@ -77,7 +82,11 @@ _agent_is_authorized if {
     }
 }
 
-# Bypass for local development — any role is accepted in the local environment
+# Bypass for local development — any role is accepted in the local environment.
+# H3: input.environment is ALWAYS stamped by the MCP server from its own
+# ENVIRONMENT env var — it is never supplied by the calling agent.
+# This makes the bypass safe: only a server configured with ENVIRONMENT=local
+# (i.e. a local-dev instance) can trigger this rule.
 _agent_is_authorized if {
     input.environment == "local"
 }

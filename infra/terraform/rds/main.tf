@@ -39,12 +39,9 @@ resource "aws_security_group" "rds_sg" {
     cidr_blocks = var.allowed_cidr_blocks
   }
 
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
+  # M9: RDS instances never initiate outbound connections — no egress rule needed.
+  # AWS security groups are stateful: responses to allowed inbound connections
+  # are permitted automatically without an explicit egress rule.
 
   tags = local.common_tags
 }
@@ -83,6 +80,11 @@ resource "aws_db_instance" "ai_memory" {
 
   db_name  = "ai_memory"
   username = "dbadmin"
+  # M10: If the secret is stored as a JSON object (e.g. {"password":"..."})
+  # use jsondecode to extract just the password value:
+  #   password = jsondecode(data.aws_secretsmanager_secret_version.db_password.secret_string)["password"]
+  # If the secret is a plain string, use secret_string directly as below.
+  # Document the expected format in variables.tf so future engineers don't guess.
   password = data.aws_secretsmanager_secret_version.db_password.secret_string
 
   db_subnet_group_name   = aws_db_subnet_group.ai_memory.name

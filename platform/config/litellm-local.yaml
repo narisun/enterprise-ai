@@ -30,6 +30,7 @@ litellm_settings:
   cache_type: redis
   redis_host: redis
   redis_port: 6379
+  redis_password: os.environ/REDIS_PASSWORD  # H5: authenticated Redis
 
   # Structured callback to OTel collector for every LLM call
   success_callback: ["otel"]

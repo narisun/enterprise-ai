@@ -47,13 +47,18 @@ services:
     networks:
       - ai-network
     ports:
-      - "5432:5432"    # Expose for local DB clients (DBeaver, psql)
+      - "127.0.0.1:5432:5432"    # L4: bind to loopback — DB clients on same machine only
 
   redis:
     image: *img-redis
     container_name: ai-redis
+    # H5: require authentication; REDIS_PASSWORD from .env
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD}"]
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      # Pass the password so redis-cli can authenticate during health checks
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
       interval: 10s
       timeout: 3s
       retries: 5
@@ -70,8 +75,8 @@ services:
       - ./platform/otel/otel-local.yaml:/etc/otelcol-contrib/config.yaml:ro
     command: ["--config=/etc/otelcol-contrib/config.yaml"]
     ports:
-      - "4317:4317"    # OTLP gRPC (expose for host-side tools)
-      - "4318:4318"    # OTLP HTTP (expose for host-side tools)
+      - "127.0.0.1:4317:4317"    # L4: OTLP gRPC — loopback only in dev
+      - "127.0.0.1:4318:4318"    # L4: OTLP HTTP — loopback only in dev
     networks:
       - ai-network
 
@@ -87,6 +92,7 @@ services:
       AZURE_API_VERSION: ${AZURE_API_VERSION:-2024-02-15-preview}
       REDIS_HOST: redis
       REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}          # H5: authenticated Redis
       INTERNAL_API_KEY: ${INTERNAL_API_KEY}      # read by litellm-local.yaml via os.environ/INTERNAL_API_KEY
       LITELLM_MASTER_KEY: ${INTERNAL_API_KEY}    # LiteLLM auto-detects this env var as fallback
       <<: *otel-env
@@ -112,7 +118,7 @@ services:
     networks:
       - ai-network
     ports:
-      - "4000:4000"    # LiteLLM API
+      - "127.0.0.1:4000:4000"    # L4: loopback only in dev
 
   # ============================================================
   # POLICY ENGINE
@@ -148,6 +154,8 @@ services:
       DB_PASS: ${POSTGRES_PASSWORD}
       DB_NAME: ai_memory
       SERVICE_NAME: data-mcp
+      ENVIRONMENT: ${ENVIRONMENT:-local}    # H3: stamped into OPA input
+      AGENT_ROLE: ${AGENT_ROLE:-data_analyst_agent}
       <<: *otel-env
     depends_on:
       pgvector:
@@ -168,7 +176,7 @@ services:
     networks:
       - ai-network
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"    # L4: loopback only in dev
 
   # ============================================================
   # AGENT SERVICE
@@ -189,10 +197,19 @@ services:
         condition: service_healthy
       data-mcp:
         condition: service_healthy
+    # M4: healthcheck so dependent services and orchestrators know when the
+    # agent is fully ready (MCP handshake + LangGraph init included in startup)
+    healthcheck:
+      test: ["CMD", "python3", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     networks:
       - ai-network
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"  # L4: bind to loopback only in dev
 
   # ============================================================
   # CHAT UI — Chainlit web interface
@@ -234,7 +251,7 @@ services:
     networks:
       - ai-network
     ports:
-      - "8501:8501"    # Chat UI — open http://localhost:8501 in your browser
+      - "127.0.0.1:8501:8501"    # Chat UI — open http://localhost:8501 in your browser
 
 # ============================================================
 # SHARED NETWORK & VOLUMES

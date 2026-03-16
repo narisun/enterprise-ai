@@ -47,13 +47,17 @@ class TestBuildEnterpriseAgent:
 
     def test_raises_on_missing_api_key(self, monkeypatch):
         """Clear error is raised when INTERNAL_API_KEY is not set."""
+        # L3: reload the module BEFORE entering pytest.raises so the reload
+        # itself doesn't accidentally trigger the error outside the assertion
+        # context.  The ValueError is raised inside build_enterprise_agent(),
+        # not at import time, so the call must be inside the context manager.
+        import importlib
+        import src.graph as graph_module
+
         monkeypatch.delenv("INTERNAL_API_KEY", raising=False)
+        importlib.reload(graph_module)
+
         with pytest.raises(ValueError, match="INTERNAL_API_KEY"):
-            from src.graph import build_enterprise_agent
-            # Must re-import after env change since module may be cached
-            import importlib
-            import src.graph as graph_module
-            importlib.reload(graph_module)
             graph_module.build_enterprise_agent([])
 
 

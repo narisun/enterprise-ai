@@ -77,6 +77,17 @@ test_empty_session_id_is_denied if {
     }
 }
 
+# L7: malformed session_id (not a UUID) must be denied
+test_non_uuid_session_id_is_denied if {
+    not allow with input as {
+        "tool": "execute_read_query",
+        "session_id": "not-a-uuid",
+        "query": "SELECT 1",
+        "agent_role": "commercial_banking_agent",
+        "environment": "prod",
+    }
+}
+
 test_unknown_role_in_prod_is_denied if {
     not allow with input as {
         "tool": "execute_read_query",

@@ -14,7 +14,7 @@ from typing import Optional
 from fastapi import Depends, FastAPI, HTTPException, Request, Security
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from langchain_core.messages import HumanMessage
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from .graph import build_enterprise_agent
 from .mcp_bridge import MCPToolBridge
@@ -31,7 +31,8 @@ log = get_logger(__name__)
 
 MCP_SSE_URL = os.environ.get("MCP_SSE_URL", "http://localhost:8080/sse")
 INTERNAL_API_KEY = os.environ.get("INTERNAL_API_KEY", "")
-RECURSION_LIMIT = int(os.environ.get("AGENT_RECURSION_LIMIT", "10"))
+_raw_recursion = int(os.environ.get("AGENT_RECURSION_LIMIT", "10"))
+RECURSION_LIMIT = max(1, min(_raw_recursion, 50))  # M5: bounds-checked (1–50)
 
 # ---- Lifespan (replaces deprecated @app.on_event) ---------------------------
 
@@ -78,7 +79,9 @@ async def verify_api_key(
     Replace with JWT validation (Azure AD / Okta) for production.
     """
     if not INTERNAL_API_KEY:
-        raise HTTPException(status_code=500, detail="Server misconfigured: INTERNAL_API_KEY not set")
+        # M6: log detail internally; never expose config info to callers
+        log.error("server_misconfigured", reason="INTERNAL_API_KEY not set")
+        raise HTTPException(status_code=500, detail="Service temporarily unavailable. Contact your administrator.")
     if credentials.credentials != INTERNAL_API_KEY:
         log.warning("auth_rejected", reason="invalid_api_key")
         raise HTTPException(status_code=401, detail="Unauthorized")
@@ -88,8 +91,9 @@ async def verify_api_key(
 # ---- Request / Response Models ----------------------------------------------
 
 class ChatRequest(BaseModel):
-    message: str
-    session_id: Optional[str] = "default-session"
+    # H4: length limits prevent context-overflow and runaway token spend
+    message: str = Field(..., min_length=1, max_length=32_000)
+    session_id: Optional[str] = Field("default-session", max_length=128)
 
 
 class ChatResponse(BaseModel):
