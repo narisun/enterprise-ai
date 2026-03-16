@@ -1,6 +1,6 @@
 # ============================================================
-# tools/chat-ui/Dockerfile
-# Build context: monorepo root (docker build -f tools/chat-ui/Dockerfile .)
+# frontends/chat-ui/Dockerfile
+# Build context: monorepo root (docker build -f frontends/chat-ui/Dockerfile .)
 # ============================================================
 FROM python:3.11-slim
 
@@ -10,12 +10,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         curl \
     && rm -rf /var/lib/apt/lists/*
 
-# ---- Shared SDK (logging, telemetry) --------------------------------
+# ---- Shared SDK (logging, telemetry, config, security, agent factory) -------
 COPY platform-sdk/ /platform-sdk/
 RUN pip install --no-cache-dir /platform-sdk/
 
 # ---- Service dependencies -------------------------------------------
-COPY tools/chat-ui/requirements.txt .
+COPY frontends/chat-ui/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # ---- Reuse agent source (MCPToolBridge + graph builder) -------------
@@ -24,13 +24,13 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY agents/src/ /app/agent_src/
 
 # ---- Copy Chainlit app and config -----------------------------------
-COPY tools/chat-ui/ /app/
+COPY frontends/chat-ui/ /app/
 
 # ---- Make agent_src importable --------------------------------------
 ENV PYTHONPATH=/app
 
 # ---- Entrypoint — runs DB migration before starting the server ------
-COPY tools/chat-ui/entrypoint.sh /entrypoint.sh
+COPY frontends/chat-ui/entrypoint.sh /entrypoint.sh
 # Strip Windows CRLF line endings (safe no-op on files already using LF)
 RUN sed -i 's/\r$//' /entrypoint.sh && chmod +x /entrypoint.sh
 

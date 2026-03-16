@@ -15,15 +15,19 @@ enterprise-ai/
 │   ├── Dockerfile
 │   └── requirements.txt
 │
-├── tools/
-│   ├── data-mcp/            MCP server: secure read-only SQL tool
-│   │   ├── src/server.py    FastMCP server (uses platform-sdk)
-│   │   ├── Dockerfile
-│   │   └── requirements.txt
+├── frontends/               User-facing interfaces — web UI, future plugins
 │   ├── chat-ui/             Chainlit web chat UI with history
 │   │   ├── chainlit_app.py  Chainlit app (uses platform-sdk)
 │   │   ├── init_db.py       PostgreSQL schema init/migration
 │   │   └── Dockerfile
+│   ├── teams-plugin/        (future) Microsoft Teams / Copilot integration
+│   └── office-addin/        (future) Microsoft 365 Office add-in
+│
+├── tools/                   MCP backend tool servers (called by agents, not users)
+│   ├── data-mcp/            MCP server: secure read-only SQL tool
+│   │   ├── src/server.py    FastMCP server (uses platform-sdk)
+│   │   ├── Dockerfile
+│   │   └── requirements.txt
 │   └── policies/opa/        Open Policy Agent Rego policies + unit tests
 │
 ├── platform-sdk/            Shared Python package — installed into every service
@@ -141,10 +145,14 @@ make dev-up
 ## Architecture
 
 ```
-                    ┌──────────────────────────────┐
-                    │  Chat UI (Chainlit)  :8501    │
-                    │  tools/chat-ui/               │
-                    └──────────────┬───────────────┘
+         ┌───────────────────────────────────────────────┐
+         │  frontends/                                   │
+         │  ┌─────────────────┐  ┌────────────────────┐ │
+         │  │ chat-ui  :8501  │  │ teams-plugin (tbd) │ │
+         │  │ (Chainlit)      │  │ copilot-plugin(tbd)│ │
+         │  └────────┬────────┘  └────────────────────┘ │
+         └───────────┼───────────────────────────────────┘
+                    ┌──────────────▼───────────────┐
                                    │ or
          curl / REST client        │
                     ┌──────────────▼───────────────┐
@@ -190,6 +198,18 @@ All cross-cutting concerns are in `platform-sdk/platform_sdk/`. Services import 
 | `llm_client` | `EnterpriseLLMClient` | Standalone LLM usage |
 
 See [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md) for step-by-step guides to building new agents and MCP servers using the SDK.
+
+## Adding a New Frontend (Teams, Copilot, Office)
+
+```bash
+# Create a new frontend under frontends/
+mkdir -p frontends/teams-plugin/src
+# Implement the plugin, using platform_sdk for agent calls, auth, and logging
+# Add the service to docker-compose.yml under the FRONTENDS section
+# Point it at the agent REST API (http://ai-agents:8000/chat) or directly at MCP servers
+```
+
+Frontends talk **to** agents (via REST or SSE) — they do not contain agent logic themselves. The `platform_sdk.AgentConfig` and `make_api_key_verifier()` are available for auth and configuration consistency.
 
 ## Adding a New MCP Tool Server
 

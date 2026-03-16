@@ -225,12 +225,12 @@ services:
       - "127.0.0.1:8000:8000"  # L4: bind to loopback only in dev
 
   # ============================================================
-  # CHAT UI — Chainlit web interface
+  # FRONTENDS — User-facing interfaces (chat UI, future plugins)
   # ============================================================
   chat-ui:
     build:
       context: .                           # Build from monorepo root
-      dockerfile: tools/chat-ui/Dockerfile
+      dockerfile: frontends/chat-ui/Dockerfile
     container_name: ai-chat-ui
     environment:
       LITELLM_BASE_URL: http://litellm:4000/v1    # Container name on ai-network

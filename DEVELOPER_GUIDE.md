@@ -19,12 +19,15 @@ This guide explains the architecture, the role of every component, and how to bu
 ## 1. System Overview
 
 ```
-                    ┌──────────────────────────────┐
-                    │  Chat UI (Chainlit)  :8501    │
-                    │  tools/chat-ui/               │
-                    └──────────────┬───────────────┘
-                                   │ or
-         curl / REST client        │
+         ┌──────────────────────────────────────────────────────┐
+         │  frontends/   (user-facing interfaces)               │
+         │  ┌────────────────────────┐  ┌─────────────────────┐│
+         │  │ chat-ui  :8501         │  │ teams-plugin  (tbd) ││
+         │  │ frontends/chat-ui/     │  │ copilot-plugin(tbd) ││
+         │  │ Chainlit web + history │  │ M365 Office (tbd)   ││
+         │  └──────────┬─────────────┘  └─────────────────────┘│
+         └─────────────┼────────────────────────────────────────┘
+                       │ or curl / REST client
                     ┌──────────────▼───────────────┐
                     │  Agent Service  :8000         │
                     │  agents/src/server.py         │
@@ -286,10 +289,18 @@ Two independent uses, both on the same container:
 
 When Redis is unavailable, both degrade gracefully: LiteLLM falls through to the provider, `ToolResultCache.from_env()` returns `None` and the `@cached_tool` decorator becomes a no-op.
 
-### Chainlit (Chat UI)
-**Location:** `tools/chat-ui/chainlit_app.py`
+### Frontends
+**Location:** `frontends/`
 
-Web chat interface with streaming, collapsible tool-call steps, and conversation history. Sessions are persisted to PostgreSQL via `SQLAlchemyDataLayer`. The `on_chat_resume` hook reconnects MCP and rebuilds the agent so users can continue past conversations seamlessly.
+The `frontends/` layer holds all user-facing interfaces. These are consumers of the agent REST API — they do not contain agent logic themselves. The separation is intentional: frontends can evolve independently of the agent and tool layers.
+
+**`frontends/chat-ui/`** — Chainlit web chat interface with streaming responses, collapsible tool-call steps, and full conversation history. Sessions are persisted to PostgreSQL via `SQLAlchemyDataLayer`. The `on_chat_resume` hook reconnects MCP and rebuilds the agent so users can continue past conversations seamlessly.
+
+**`frontends/teams-plugin/` (planned)** — Microsoft Teams / Microsoft 365 Copilot plugin. Will use the same agent REST API (`/chat`) and `make_api_key_verifier()` from the SDK. Teams bots use the Bot Framework SDK; Copilot plugins use the declarative plugin manifest format.
+
+**`frontends/office-addin/` (planned)** — Microsoft Office add-in (Word, Excel, Outlook). Uses Office.js with a backend that calls the agent service. The agent's MCP tools can be invoked to pull workspace data directly into Office documents.
+
+The key design rule: **frontends call agents, they do not embed agents.** All LLM calls, tool calls, and OPA checks stay in the agent and MCP layers. Frontends handle presentation, auth UX, and streaming only.
 
 ---
 
