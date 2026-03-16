@@ -156,9 +156,17 @@ services:
       SERVICE_NAME: data-mcp
       ENVIRONMENT: ${ENVIRONMENT:-local}    # H3: stamped into OPA input
       AGENT_ROLE: ${AGENT_ROLE:-data_analyst_agent}
+      # Tool-result caching via platform_sdk.ToolResultCache
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}    # H5: authenticated Redis
+      ENABLE_TOOL_CACHE: "true"
+      TOOL_CACHE_TTL: "300"                # 5 minutes — tune based on data freshness
       <<: *otel-env
     depends_on:
       pgvector:
+        condition: service_healthy
+      redis:
         condition: service_healthy
       opa:
         condition: service_healthy
@@ -191,6 +199,11 @@ services:
       MCP_SSE_URL: http://data-mcp:8080/sse        # Container name on ai-network
       INTERNAL_API_KEY: ${INTERNAL_API_KEY}
       SERVICE_NAME: ai-agents
+      # Agent behaviour — all tunable via AgentConfig.from_env()
+      AGENT_MODEL_ROUTE: ${AGENT_MODEL_ROUTE:-complex-routing}
+      ENABLE_COMPACTION: ${ENABLE_COMPACTION:-true}
+      AGENT_CONTEXT_TOKEN_LIMIT: ${AGENT_CONTEXT_TOKEN_LIMIT:-6000}
+      AGENT_RECURSION_LIMIT: ${AGENT_RECURSION_LIMIT:-10}
       <<: *otel-env
     depends_on:
       litellm:
@@ -234,6 +247,11 @@ services:
       APP_VERSION: ${APP_VERSION:-1.0.0}
       APP_ENV: ${APP_ENV:-development}
       SERVICE_NAME: chat-ui
+      # Agent behaviour — keeps chat-ui in sync with ai-agents service settings
+      AGENT_MODEL_ROUTE: ${AGENT_MODEL_ROUTE:-complex-routing}
+      ENABLE_COMPACTION: ${ENABLE_COMPACTION:-true}
+      AGENT_CONTEXT_TOKEN_LIMIT: ${AGENT_CONTEXT_TOKEN_LIMIT:-6000}
+      AGENT_RECURSION_LIMIT: ${AGENT_RECURSION_LIMIT:-10}
       <<: *otel-env
     depends_on:
       litellm:

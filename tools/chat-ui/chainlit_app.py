@@ -33,7 +33,7 @@ from langchain_core.messages import HumanMessage
 
 from agent_src.graph import build_enterprise_agent
 from agent_src.mcp_bridge import MCPToolBridge
-from platform_sdk import configure_logging, get_logger, setup_telemetry
+from platform_sdk import AgentConfig, configure_logging, get_logger, setup_telemetry
 
 # ---- Observability ----------------------------------------------------------
 configure_logging()
@@ -43,9 +43,12 @@ log = get_logger(__name__)
 # ---- Configuration ----------------------------------------------------------
 MCP_SSE_URL = os.environ.get("MCP_SSE_URL", "http://localhost:8080/sse")
 INTERNAL_API_KEY = os.environ.get("INTERNAL_API_KEY", "")
-_raw_recursion = int(os.environ.get("AGENT_RECURSION_LIMIT", "10"))
-RECURSION_LIMIT = max(1, min(_raw_recursion, 50))  # M5: bounds-checked (1–50)
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
+
+# Read agent config from SDK — recursion_limit is bounds-checked (1–50) inside
+# AgentConfig.from_env() so we don't need an inline max/min call here.
+_agent_config = AgentConfig.from_env()
+RECURSION_LIMIT = _agent_config.recursion_limit
 
 # ---- Conversation History — Chainlit SQLAlchemy data layer ------------------
 # Using the @cl.data_layer decorator (public API) rather than the private
