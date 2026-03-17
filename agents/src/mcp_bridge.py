@@ -108,14 +108,34 @@ class MCPToolBridge:
     different asyncio tasks.
     """
 
-    def __init__(self, sse_url: str) -> None:
+    def __init__(self, sse_url: str, agent_context: Any | None = None) -> None:
+        """
+        Args:
+            sse_url:       Full SSE URL, e.g. http://salesforce-mcp:8081/sse
+            agent_context: Optional AgentContext from a verified JWT.  When set,
+                           serialized as base64-JSON in the X-Agent-Context header
+                           on the SSE connection and every MCP tool call POST.
+                           MCP servers extract this header to enforce row-level
+                           and column-level security before querying the database.
+        """
         self.sse_url = sse_url
+        self._agent_context = agent_context
         self._session: Optional[ClientSession] = None
         # Lifecycle primitives — initialised in connect()
         self._stop_event: Optional[asyncio.Event] = None
         self._connected_event: Optional[asyncio.Event] = None
         self._connect_error: Optional[BaseException] = None
         self._bg_task: Optional[asyncio.Task] = None  # type: ignore[type-arg]
+
+    def _build_auth_headers(self) -> dict[str, str]:
+        """Return HTTP headers carrying the agent context for this session."""
+        if self._agent_context is None:
+            return {}
+        try:
+            return {"X-Agent-Context": self._agent_context.to_header_value()}
+        except Exception:
+            log.warning("failed_to_encode_agent_context")
+            return {}
 
     async def connect(self) -> "MCPToolBridge":
         """Establish the SSE connection and MCP handshake.
@@ -129,19 +149,24 @@ class MCPToolBridge:
         self._stop_event = asyncio.Event()
         self._connected_event = asyncio.Event()
         self._connect_error = None
+        auth_headers = self._build_auth_headers()
 
         async def _connection_task() -> None:
             """Background task: owns the SSE + MCP context managers."""
             try:
                 async with AsyncExitStack() as stack:
                     streams = await stack.enter_async_context(
-                        sse_client(self.sse_url)
+                        sse_client(self.sse_url, headers=auth_headers or None)
                     )
                     self._session = await stack.enter_async_context(
                         ClientSession(streams[0], streams[1])
                     )
                     await self._session.initialize()
-                    log.info("mcp_connected", url=self.sse_url)
+                    log.info(
+                        "mcp_connected",
+                        url=self.sse_url,
+                        with_auth=bool(auth_headers),
+                    )
                     # Signal connect() that we are ready
                     self._connected_event.set()
                     # Hold the connection open until disconnect() is called

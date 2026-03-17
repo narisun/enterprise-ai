@@ -37,6 +37,42 @@ allow if {
 }
 
 # ============================================================
+# RULE: Salesforce CRM Tools (get_salesforce_summary)
+#
+# RM Prep Agent retrieves Salesforce account, contact, activity,
+# opportunity and task data for meeting preparation.
+# ============================================================
+
+allow if {
+    input.tool == "get_salesforce_summary"
+    _agent_is_authorized
+}
+
+# ============================================================
+# RULE: Payment Transaction Tools (get_payment_summary)
+#
+# RM Prep Agent retrieves bank payment transaction data including
+# volumes, corridors, and counterparty analysis.
+# ============================================================
+
+allow if {
+    input.tool == "get_payment_summary"
+    _agent_is_authorized
+}
+
+# ============================================================
+# RULE: News Search Tools (search_company_news)
+#
+# RM Prep Agent searches internet news for company intelligence
+# using Tavily API or mock data in development.
+# ============================================================
+
+allow if {
+    input.tool == "search_company_news"
+    _agent_is_authorized
+}
+
+# ============================================================
 # FUTURE TOOLS — add rules here as new MCP servers are added
 #
 # allow if {
@@ -79,6 +115,7 @@ _agent_is_authorized if {
         "commercial_banking_agent",
         "data_analyst_agent",
         "compliance_agent",
+        "rm_prep_agent",
     }
 }
 

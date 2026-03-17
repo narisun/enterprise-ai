@@ -1,7 +1,7 @@
 # ============================================================
 # enterprise-ai — Developer Commands
 # ============================================================
-.PHONY: help dev-up dev-down dev-restart dev-logs dev-status \
+.PHONY: help dev-up dev-test-up dev-down dev-reset dev-restart dev-logs dev-status \
         test test-agents test-mcp test-policies \
         lint format build sdk-install \
         k8s-dev k8s-prod k8s-down clean
@@ -28,14 +28,20 @@ help:  ## Show available commands
 
 # ---- Local Development (Docker Compose) --------------------
 
-dev-up: ## Start the full local stack (builds images if needed)
+# Base compose files used by every dev target.
+# dev-test-up adds the test overlay which seeds salesforce + bankdw schemas.
+COMPOSE_BASE := docker compose -f docker-compose.yml
+COMPOSE_TEST := $(COMPOSE_BASE) -f docker-compose.test.yml
+
+dev-up: ## Start the stack without test fixtures (prod-schema only)
 	@echo "→ Checking for .env file..."
 	@test -f .env || (echo "ERROR: .env not found. Run: cp .env.example .env" && exit 1)
-	docker compose up --build -d
+	$(COMPOSE_BASE) up --build -d
 	@echo ""
-	@echo "✅ Local stack is running:"
+	@echo "✅ Local stack is running (no test fixtures — salesforce/bankdw schemas absent)."
+	@echo "   Use 'make dev-test-up' to include Salesforce + bankdw test data."
 	@echo ""
-	@echo "   🌐 Chat UI       → http://localhost:8501  (username: any, password: INTERNAL_API_KEY)"
+	@echo "   🌐 Chat UI       → http://localhost:8501"
 	@echo "   🤖 Agent API     → http://localhost:8000"
 	@echo "   🔀 LiteLLM Proxy → http://localhost:4000"
 	@echo "   🛠  Data MCP      → http://localhost:8080"
@@ -43,13 +49,41 @@ dev-up: ## Start the full local stack (builds images if needed)
 	@echo "   🗄  PostgreSQL    → localhost:5432"
 	@echo ""
 	@echo "   Run 'make dev-logs' to follow all logs."
-	@echo "   Run 'make ui-logs' to follow only the chat UI logs."
 
-dev-down: ## Stop and remove all containers
-	docker compose down
+dev-test-up: ## Start the full stack WITH Salesforce + bankdw test fixtures (use for local dev)
+	@echo "→ Checking for .env file..."
+	@test -f .env || (echo "ERROR: .env not found. Run: cp .env.example .env" && exit 1)
+	$(COMPOSE_TEST) up --build -d
+	@echo ""
+	@echo "✅ Local stack is running with test fixtures:"
+	@echo "   salesforce.* and bankdw.* schemas seeded from testdata/ CSVs."
+	@echo ""
+	@echo "   🌐 Chat UI       → http://localhost:8501  (SHOW_TEST_LOGIN=true)"
+	@echo "   🤖 Agent API     → http://localhost:8000"
+	@echo "   🔀 LiteLLM Proxy → http://localhost:4000"
+	@echo "   🛠  Data MCP      → http://localhost:8080"
+	@echo "   📡 OTel Collector → http://localhost:4318"
+	@echo "   🗄  PostgreSQL    → localhost:5432"
+	@echo ""
+	@echo "   Run 'make dev-logs' to follow all logs."
+
+dev-down: ## Stop and remove all containers (works for both dev-up and dev-test-up)
+	$(COMPOSE_TEST) down
+
+dev-reset: ## Wipe the pgdata volume and restart with test fixtures (required after first dev-up)
+	@echo "→ Stopping containers and removing pgdata volume..."
+	$(COMPOSE_TEST) down -v
+	@echo "→ Rebuilding and starting with test fixtures..."
+	$(COMPOSE_TEST) up --build -d
+	@echo ""
+	@echo "✅ Fresh stack with test fixtures:"
+	@echo "   salesforce.* and bankdw.* schemas seeded from testdata/ CSVs."
+	@echo ""
+	@echo "   🌐 Chat UI  → http://localhost:8501  (SHOW_TEST_LOGIN=true)"
+	@echo "   🗄  PostgreSQL → localhost:5432"
 
 dev-restart: ## Restart all containers
-	docker compose restart
+	$(COMPOSE_TEST) restart
 
 dev-logs: ## Follow logs from all services
 	docker compose logs -f

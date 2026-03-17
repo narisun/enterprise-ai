@@ -9,53 +9,53 @@ This guide explains the architecture, the role of every component, and how to bu
 1. [System Overview](#1-system-overview)
 2. [Platform SDK — Separation of Concerns](#2-platform-sdk--separation-of-concerns)
 3. [Component Reference](#3-component-reference)
-4. [Step-by-Step: Building a New Agent](#4-step-by-step-building-a-new-agent)
-5. [Step-by-Step: Building a New MCP Server](#5-step-by-step-building-a-new-mcp-server)
-6. [Environment Variables](#6-environment-variables)
-7. [Data Flow: A Single Chat Request](#7-data-flow-a-single-chat-request)
+4. [Authorization Chain — JWT → AgentContext → OPA → PostgreSQL](#4-authorization-chain--jwt--agentcontext--opa--postgresql)
+5. [Test Data Architecture](#5-test-data-architecture)
+6. [Step-by-Step: Building a New Agent](#6-step-by-step-building-a-new-agent)
+7. [Step-by-Step: Building a New MCP Server](#7-step-by-step-building-a-new-mcp-server)
+8. [Environment Variables](#8-environment-variables)
+9. [Data Flow: Generic Chat Request](#9-data-flow-generic-chat-request)
+10. [Data Flow: RM Prep Brief Request](#10-data-flow-rm-prep-brief-request)
 
 ---
 
 ## 1. System Overview
 
+This platform hosts two independently deployable agents:
+
+**Generic Chat Agent** — a LangGraph ReAct loop connected to a secure read-only SQL tool (`data-mcp`). It serves the Chainlit `chat-ui` and a REST `/chat` endpoint.
+
+**RM Prep Agent** — a LangGraph `StateGraph` orchestrator that prepares relationship manager client briefs. It fans out to three specialist MCP servers in parallel (Salesforce CRM, bank payments, news), synthesises the results with a larger model, and returns structured Markdown.
+
 ```
-         ┌──────────────────────────────────────────────────────┐
-         │  frontends/   (user-facing interfaces)               │
-         │  ┌────────────────────────┐  ┌─────────────────────┐│
-         │  │ chat-ui  :8501         │  │ teams-plugin  (tbd) ││
-         │  │ frontends/chat-ui/     │  │ copilot-plugin(tbd) ││
-         │  │ Chainlit web + history │  │ M365 Office (tbd)   ││
-         │  └──────────┬─────────────┘  └─────────────────────┘│
-         └─────────────┼────────────────────────────────────────┘
-                       │ or curl / REST client
-                    ┌──────────────▼───────────────┐
-                    │  Agent Service  :8000         │
-                    │  agents/src/server.py         │
-                    │  · Bearer auth  ──────── SDK  │
-                    │  · AgentConfig  ──────── SDK  │
-                    │  · build_agent  ──────── SDK  │
-                    └──────┬───────────────┬────────┘
-                           │ LLM calls     │ MCP tool calls (SSE)
-                           ▼               ▼
-            ┌──────────────────┐  ┌────────────────────────┐
-            │  LiteLLM  :4000  │  │  Data MCP Server :8080 │
-            │  Azure OpenAI    │  │  tools/data-mcp/       │
-            │  AWS Bedrock     │  │  · OpaClient  ─── SDK  │
-            │  Redis cache     │  │  · ToolCache  ─── SDK  │
-            └──────────────────┘  └───────────┬────────────┘
-                                              │
-              ┌───────────────────────────────┼────────────────────┐
-              ▼                               ▼                    ▼
-   ┌──────────────────┐          ┌──────────────────┐  ┌──────────────────┐
-   │  PostgreSQL :5432│          │  OPA Engine :8181│  │  Redis           │
-   │  · Agent memory  │          │  · Rego policies │  │  · LiteLLM cache │
-   │  · Workspace data│          │  · tool_auth.rego│  │  · Tool results  │
-   │  · Chat history  │          └──────────────────┘  └──────────────────┘
-   └──────────────────┘
-              All traces → OTel Collector :4318 → Dynatrace
+  ┌─────────────────────────┐        ┌───────────────────────────────────┐
+  │  Chainlit Chat UI :8501  │        │  Streamlit RM Prep UI :8502       │
+  └────────────┬────────────┘        └──────────────┬────────────────────┘
+               │ API key (Bearer)                    │ JWT (Bearer)
+               ▼                                     ▼
+  ┌────────────────────────┐        ┌────────────────────────────────────┐
+  │  Agent Service  :8000  │        │  RM Prep Agent  :8003              │
+  │  ReAct loop            │        │  StateGraph orchestrator           │
+  │  · data-mcp  :8080     │        │  · salesforce-mcp  :8081           │
+  │    (SQL tool)          │        │  · payments-mcp    :8082           │
+  └────────┬───────────────┘        │  · news-search-mcp :8083           │
+           │                        └──────────┬──────────┬──────────────┘
+           │                                   │          │
+           └──────────────────────────┬────────┘          │
+                                      ▼                    ▼
+                           ┌──────────────────┐  ┌──────────────────┐
+                           │  PostgreSQL :5432 │  │  OPA  :8181      │
+                           │  · agent memory   │  │  · tool_auth     │
+                           │  · salesforce.*   │  │  · rm_prep_authz │
+                           │  · bankdw.*       │  └──────────────────┘
+                           └──────────────────┘
+                    ┌────────────────────────────────┐
+                    │  Shared infra (one container each)│
+                    │  LiteLLM :4000  Redis  OTel :4318 │
+                    └────────────────────────────────┘
 ```
 
-All services run on one Docker bridge network (`ai-network`). Containers reach each other by service name (`http://litellm:4000`, `http://opa:8181`) — no hardcoded IPs.
+All services run on one Docker bridge network (`ai-network`). Containers reach each other by service name — no hardcoded IPs.
 
 ---
 
@@ -63,266 +63,379 @@ All services run on one Docker bridge network (`ai-network`). Containers reach e
 
 ### Why a shared SDK?
 
-Without a shared SDK, every new service would need to independently implement: authentication, OPA integration, Redis caching, context compaction, structured logging, and OpenTelemetry tracing. That means duplicated code, inconsistent behaviour across services, and bugs fixed in one place but not another.
+Without a shared SDK every new service independently implements authentication, OPA integration, Redis caching, context compaction, structured logging, and OpenTelemetry tracing — duplicated code, inconsistent behaviour, bugs fixed in one place but not others.
 
-The `platform-sdk` moves these **cross-cutting concerns** — things that every service needs but that are not the business logic of any single service — into one tested, versioned package. A new service simply imports and calls; it never re-implements.
+The `platform-sdk` moves these **cross-cutting concerns** into one tested, versioned package. A new service imports and calls; it never re-implements.
 
-### The eight SDK modules
+### The SDK modules
 
 ```
 platform-sdk/platform_sdk/
 │
+├── auth.py          ← "Who is calling, and what are they allowed to see?"
 ├── config.py        ← "What does this service need to know?"
 ├── security.py      ← "Is this request allowed?"
 ├── cache.py         ← "Have we seen this before?"
 ├── compaction.py    ← "Is the context window getting too full?"
-├── agent.py         ← "Build me a LangGraph agent"
+├── agent.py         ← "Build me a LangGraph agent or specialist node"
 │
 ├── logging.py       ← "Write structured JSON logs"
 ├── telemetry.py     ← "Emit OpenTelemetry traces"
 └── llm_client.py    ← "Call the LLM directly (no agent loop)"
 ```
 
-Each module has a single, focused responsibility. Here is what each one does and why it belongs in the SDK rather than in individual services.
+---
+
+### `auth.py` — AgentContext
+
+**The problem:** The RM Prep agent needs to enforce row-level security (which accounts an RM can see) and column-level security (which compliance fields are visible) across three different MCP servers. Passing raw JWT tokens through every layer is insecure; re-verifying the JWT in each MCP server adds crypto overhead and couples all servers to the auth secret.
+
+**The solution:** `AgentContext` — a frozen dataclass that carries verified identity and permission claims for one RM session. The orchestrator verifies the JWT once and serialises the context as base64-JSON in `X-Agent-Context`. Each MCP server reads and deserialises the header (no JWT re-verification needed) and uses the context to build OPA row/col filters before querying PostgreSQL.
+
+```python
+from platform_sdk import AgentContext
+
+# At the API boundary (RM Prep agent server.py):
+ctx = AgentContext.from_jwt(request.headers["Authorization"].removeprefix("Bearer "))
+
+# Forward to every MCP bridge:
+bridge = MCPToolBridge(sf_url, agent_context=ctx)
+
+# In an MCP server tool handler (tools/shared/mcp_auth.py):
+ctx = get_agent_context()          # reads ContextVar set by AgentContextMiddleware
+row_filter = ctx.build_row_filters_crm()   # {"Account": ["001AAA", "002AAA"]} for rm role
+col_mask   = ctx.build_col_mask()          # ["AMLRiskCategory", ...] for standard clearance
+
+if not ctx.can_access_account(resolved_account_id):
+    return json.dumps({"error": "access_denied"})
+```
+
+The `AgentContext.anonymous()` class method provides a fully-cleared dev context when `AUTH_MODE=none` in local development.
 
 ---
 
 ### `config.py` — Typed configuration
 
-**The problem:** Services scattered `os.environ.get("FOO", "default")` calls everywhere. When a default changed or a variable was added, every service had to be updated.
-
-**The solution:** Two typed dataclasses — `AgentConfig` for agent services and `MCPConfig` for MCP servers — each with a `from_env()` classmethod that reads all environment variables once, validates them, and applies bounds-checked defaults.
+Two typed dataclasses — `AgentConfig` for agent services and `MCPConfig` for MCP servers — each with a `from_env()` classmethod that reads all environment variables once, validates them, and applies bounds-checked defaults.
 
 ```python
-from platform_sdk import AgentConfig
+from platform_sdk import AgentConfig, MCPConfig
 
 config = AgentConfig.from_env()
-# config.model_route         = "complex-routing" (or AGENT_MODEL_ROUTE)
-# config.recursion_limit     = 10 (or AGENT_RECURSION_LIMIT, clamped 1–50)
-# config.enable_compaction   = True (or ENABLE_COMPACTION)
-# config.context_token_limit = 6000 (or AGENT_CONTEXT_TOKEN_LIMIT)
-# config.enable_tool_cache   = True (or ENABLE_TOOL_CACHE)
-# config.tool_cache_ttl_seconds = 300 (or TOOL_CACHE_TTL)
-```
-
-```python
-from platform_sdk import MCPConfig
+# config.model_route, config.recursion_limit, config.enable_compaction ...
 
 config = MCPConfig.from_env()
-# config.opa_url             = "http://opa:8181/v1/data/mcp/tools/allow"
-# config.opa_timeout_seconds = 2.0
-# config.max_result_bytes    = 15_000
-# config.environment         = "local" (or ENVIRONMENT)
-# config.agent_role          = "data_analyst_agent" (or AGENT_ROLE)
+# config.opa_url, config.opa_timeout_seconds, config.max_result_bytes ...
 ```
 
 ---
 
 ### `security.py` — OPA client and API key verification
 
-**The problem:** The `data-mcp` service had 40 lines of httpx OPA boilerplate (retry logic, timeout, fail-closed handling, environment stamping). The agent service had 15 lines of inline Bearer token validation. Both would need to be replicated in every new service.
-
-**The solution:** Two reusable components.
-
-`OpaClient` — async OPA decision client:
+`OpaClient` — async OPA decision client with retry, timeout, and fail-closed handling:
 
 ```python
 from platform_sdk import OpaClient, MCPConfig
 
-config = MCPConfig.from_env()
-opa    = OpaClient(config)
-
-# In a tool handler:
+opa = OpaClient(MCPConfig.from_env())
 allowed = await opa.authorize("my_tool_name", {"query": q, "session_id": sid})
 if not allowed:
     return "ERROR: Unauthorized."
 ```
 
-`make_api_key_verifier()` — FastAPI dependency that validates `Authorization: Bearer <key>`:
+`make_api_key_verifier()` — FastAPI dependency for `Authorization: Bearer <key>`:
 
 ```python
 from platform_sdk import make_api_key_verifier
-from fastapi import Depends
-
-verify_api_key = make_api_key_verifier()   # reads INTERNAL_API_KEY from env
+verify_api_key = make_api_key_verifier()
 
 @app.post("/chat")
 async def chat(body: ChatRequest, _: str = Depends(verify_api_key)):
     ...
 ```
 
-Both are **fail-closed**: if OPA is unreachable the tool call is denied; if `INTERNAL_API_KEY` is not set all requests are rejected.
+Both are **fail-closed**: OPA unreachable → deny; `INTERNAL_API_KEY` not set → all requests rejected.
 
 ---
 
 ### `cache.py` — Tool-result caching
 
-**The problem:** Identical SQL queries (e.g. "show me all orders for session X") were hitting PostgreSQL on every agent turn, even when the data hadn't changed.
-
-**The solution:** `ToolResultCache` stores results in Redis keyed by `sha256(tool_name + args)`. It degrades gracefully when `REDIS_HOST` is not set (returns `None` everywhere), so services work in environments without Redis.
-
-`cached_tool(cache)` is a decorator that adds cache get/set transparently:
+`ToolResultCache` stores results in Redis keyed by `sha256(tool_name + args)`. Degrades gracefully when Redis is unavailable.
 
 ```python
-from platform_sdk import ToolResultCache, cached_tool, MCPConfig
+# Preferred pattern — explicit cache check inside the tool handler
+from platform_sdk import ToolResultCache
+from platform_sdk.cache import make_cache_key
 
-config = MCPConfig.from_env()
-cache  = ToolResultCache.from_env(ttl_seconds=config.tool_cache_ttl_seconds)
+_cache = ToolResultCache.from_env(ttl_seconds=1800)
 
 @mcp.tool()
-@cached_tool(cache)
-async def my_tool(query: str, session_id: str) -> str:
-    # This body is only called on a cache miss.
-    # Results that start with "ERROR:" are never cached.
-    return await db.fetch(query)
-```
+async def my_tool(client_name: str) -> str:
+    if _cache:
+        key = make_cache_key("my_tool", {"client_name": client_name})
+        cached = await _cache.get(key)
+        if cached:
+            return cached
 
-The decorator is a transparent no-op when `cache` is `None`.
+    result = await _do_work(client_name)
+
+    if _cache and not result.startswith('{"error"'):
+        await _cache.set(key, result)
+
+    return result
+```
 
 ---
 
 ### `compaction.py` — Context window trimming
 
-**The problem:** Long multi-turn conversations accumulate messages until the LLM's context window is exceeded, causing `context_length_exceeded` errors.
-
-**The solution:** `make_compaction_modifier(config)` returns a LangGraph `state_modifier` that trims the oldest messages when the estimated token count exceeds `config.context_token_limit`, while always preserving the system message.
+`make_compaction_modifier(config)` returns a LangGraph `state_modifier` that trims the oldest messages when the token count exceeds `config.context_token_limit`, always preserving the system message.
 
 ```python
-from platform_sdk import AgentConfig
 from platform_sdk.compaction import make_compaction_modifier
-
-config   = AgentConfig.from_env()
 modifier = make_compaction_modifier(config)
-# Pass to create_react_agent via build_agent() — you rarely need this directly.
+# Passed to build_agent() — you rarely need this directly.
 ```
-
-Token counting uses `tiktoken` (accurate) with a character-count heuristic as fallback. When compaction fires it logs `before_tokens` and `after_tokens` so you can tune `AGENT_CONTEXT_TOKEN_LIMIT`.
 
 ---
 
-### `agent.py` — ReAct agent factory
+### `agent.py` — LangGraph agent factories
 
-**The problem:** Every agent service was duplicating the same 25-line `build_enterprise_agent()` function: create `ChatOpenAI`, wire it to LiteLLM, handle the system prompt, call `create_react_agent`. Compaction wasn't wired in at all.
+Two factories:
 
-**The solution:** `build_agent(tools, config, prompt)` encapsulates everything — LLM construction, compaction wiring, LangGraph version compatibility — in one call:
+`build_agent(tools, config, prompt)` — ReAct agent for the generic chat service:
 
 ```python
 from platform_sdk import AgentConfig, build_agent
-
 config = AgentConfig.from_env()
 agent  = build_agent(tools, config=config, prompt=system_prompt)
-
-result = await agent.ainvoke(
-    {"messages": [HumanMessage(content=user_msg)]},
-    config={"recursion_limit": config.recursion_limit},
-)
+result = await agent.ainvoke({"messages": [HumanMessage(content=msg)]}, ...)
 ```
 
-Internally, `build_agent` detects whether the installed LangGraph supports `state_modifier` or `messages_modifier` and uses the right one automatically.
+`build_specialist_agent(tools, config, prompt, model_override)` — single-tool-call node for the RM Prep pipeline (Haiku by default, callers can override):
+
+```python
+from platform_sdk import build_specialist_agent
+crm_agent = build_specialist_agent(sf_tools, config, crm_prompt, model_override=config.specialist_model_route)
+result = await crm_agent.ainvoke({"messages": [HumanMessage(content=f"Client: {name}")]})
+```
 
 ---
 
 ### `logging.py` and `telemetry.py` — Observability
 
-Every service calls these at startup:
-
 ```python
 from platform_sdk import configure_logging, get_logger, setup_telemetry
 
-configure_logging()                          # structlog JSON in containers
-setup_telemetry("my-service-name")          # OpenTelemetry (idempotent)
+configure_logging()
+setup_telemetry("my-service-name")
 log = get_logger(__name__)
 
-log.info("event_name", key="value", count=42)
-# → {"event": "event_name", "key": "value", "count": 42, "timestamp": "..."}
+log.info("event_name", client=name, duration_ms=42)
+# → {"event": "event_name", "client": "...", "duration_ms": 42, "timestamp": "..."}
 ```
-
-`setup_telemetry` is guarded by an `_initialized` flag — safe to call multiple times (e.g. on MCP client reconnect).
 
 ---
 
 ## 3. Component Reference
 
-### FastAPI
-**Location:** `agents/src/server.py`
+### Generic Agent Service
+**Location:** `agents/src/`
 
-HTTP server exposing `/chat` and `/health`. Uses lifespan context manager (not `@app.on_event`) to manage the MCP connection. Agent executor and bridge are stored on `app.state`, not as module-level globals. Bearer auth is wired via `make_api_key_verifier()` from the SDK.
+FastAPI + LangGraph ReAct agent. Connects to `data-mcp` at startup via the `MCPToolBridge`. The bridge converts MCP tool schemas (JSON Schema) into typed LangChain `StructuredTool` objects. Bearer auth via `make_api_key_verifier()`. SSE connection lifecycle owned by a background `asyncio.Task` to avoid AnyIO cancel-scope cross-task errors.
 
-### LangGraph
-**Location:** `agents/src/graph.py` (uses `platform_sdk.agent.build_agent`)
+### RM Prep Agent
+**Location:** `agents/rm-prep/src/`
 
-Orchestrates the ReAct (Reason + Act) loop. The LLM decides whether to call a tool or return a final answer; LangGraph handles the loop, tool invocation, and message accumulation. `create_react_agent` returns a compiled `CompiledGraph` ready for `ainvoke` / `astream_events`.
+A LangGraph `StateGraph` (not a ReAct loop). Stages:
+
+1. **parse_intent** — Haiku structured extraction: client name, intent type, meeting date
+2. **route** — Python dict lookup: maps intent to which agents to invoke (`full_brief` → all three)
+3. **gather_crm / gather_payments / gather_news** — parallel specialist nodes, each backed by a dedicated MCP server
+4. **synthesize** — Sonnet structured output into `RMBrief` Pydantic model
+5. **format_brief** — Jinja2 render to Markdown
+
+Model tiering is intentional: fast/cheap Haiku for extraction and tool calls; Sonnet only for the synthesis step that requires coherent writing.
+
+### Salesforce MCP (`salesforce-mcp` :8081)
+**Location:** `tools/salesforce-mcp/src/server.py`
+
+Queries the `salesforce.*` PostgreSQL schema (mirroring standard Salesforce object names). One tool: `get_salesforce_summary(client_name)`. Makes 7 queries per call: account lookup, contacts, activities (Events UNION Tasks), open opportunities, open tasks, open service cases, active contracts. Returns a flat JSON object including `account_id` (used by the payments tool as a join key) and `account_name` (the exact string used in `bankdw` as the party name).
+
+Cache TTL: 1800s.
+
+### Payments MCP (`payments-mcp` :8082)
+**Location:** `tools/payments-mcp/src/server.py`
+
+Queries `bankdw.fact_payments` and `bankdw.dim_party` using `client_name` (= `Account.Name` = `dim_party.PartyName`) as the join key. One tool: `get_payment_summary(client_name, days=90)`. Makes 7 queries: outbound by rail, inbound by rail, prior-period trend, top counterparties, status mix, sending bank diversity, party compliance profile. The compliance profile fields (`AMLRiskCategory`, `SanctionsScreeningStatus`, etc.) are subject to column-level masking by the `AgentContextMiddleware`.
+
+Cache TTL: 3600s.
+
+### News Search MCP (`news-search-mcp` :8083)
+**Location:** `tools/news-search-mcp/src/server.py`
+
+One tool: `search_company_news(company_name)`. Uses Tavily Search API when `TAVILY_API_KEY` is set; falls back to deterministic mock data for the 4 seed companies in development. Derives an `aggregate_signal` label (RISK / OPPORTUNITY / POSITIVE / NEUTRAL / NO_NEWS) from article sentiment and signal types.
+
+Cache TTL: 1800s.
+
+### Shared Auth Helpers (`tools/shared/mcp_auth.py`)
+
+`AgentContextMiddleware` — Starlette ASGI middleware. Reads `X-Agent-Context` header, base64-decodes it, stores in a `ContextVar`. Tool handlers call `get_agent_context()` to retrieve the per-request context without passing it through every function argument.
+
+Policy helpers: `can_access_account()`, `build_row_filters_crm()`, `build_row_filters_payments()`, `build_col_mask()`, `check_access()`.
+
+### MCPToolBridge (`agents/src/mcp_bridge.py`)
+SSE client that connects to one MCP server and converts all its tools to LangChain `StructuredTool` objects. Accepts optional `agent_context` and forwards it as `X-Agent-Context` on the connection. The SSE connection lifecycle is owned by a dedicated `asyncio.Task` to avoid AnyIO cancel-scope errors in frameworks like Chainlit where request start and end run in different tasks.
+
+### OPA Policies (`tools/policies/opa/`)
+
+**`tool_auth.rego`** — data-mcp policy. Checks session UUID, query type (SELECT-only), and agent role. Package `mcp.tools`.
+
+**`rm_prep_authz.rego`** — RM Prep policy. Package `rm_prep.authz`. Role hierarchy (readonly=0 … compliance_officer=3). Outputs `result` object:
+- `allow` — boolean
+- `reason` — human-readable denial reason
+- `row_filters` — `{"Account": [...account_ids...]}` for `rm` role; `{}` for elevated roles
+- `col_mask` — list of column names to redact (AML columns for standard; all compliance columns for aml_view; empty for compliance_full)
 
 ### LiteLLM
 **Location:** `platform/config/litellm-local.yaml`, `litellm-prod.yaml`
 
-Multi-cloud LLM proxy. All agent LLM calls go through it — the agent code never knows which cloud provider it is using. LiteLLM handles: routing (`complex-routing` → Azure GPT-4o, `fast-routing` → Azure GPT-4o-mini), failover (Azure → AWS Bedrock in prod), Redis prompt caching, and rate limiting.
-
-The `master_key` in the LiteLLM YAML must match `INTERNAL_API_KEY` in `.env`.
-
-### MCP (Model Context Protocol)
-**Location:** `tools/*/src/server.py`, `agents/src/mcp_bridge.py`
-
-Open protocol (by Anthropic) for connecting agents to tools. The agent connects to an MCP server via SSE at startup, discovers its tools (name + JSON Schema), and holds the connection for the service's lifetime. `MCPToolBridge` in `mcp_bridge.py` converts MCP tool schemas into LangChain `StructuredTool` objects that LangGraph can call.
-
-### FastMCP
-**Location:** `tools/data-mcp/src/server.py`
-
-Python framework for writing MCP servers. Handles SSE transport, tool registration, and protocol handshake. You decorate async functions with `@mcp.tool()` and they become MCP-callable tools with schemas derived from type hints automatically.
-
-### Open Policy Agent (OPA)
-**Location:** `tools/policies/opa/`
-
-Policy-as-code engine. Every MCP tool call is authorised by OPA before execution — **fail closed** (deny on error). The `OpaClient` in the SDK handles retries, timeouts, and environment/role stamping. Policy logic lives in `tool_auth.rego` and can be updated without redeploying any service (just restart the OPA container).
-
-Test policies without a running container: `make test-policies` (runs `opa test`).
-
-### asyncpg
-**Location:** `tools/data-mcp/src/server.py`
-
-Async PostgreSQL driver. Connection pool created once in the FastMCP lifespan and shared across all requests. Queries run in `readonly=True` transactions with `SET search_path TO ws_{session_id}` for per-session schema isolation.
-
-### Redis
-Two independent uses, both on the same container:
-- **LiteLLM prompt cache** — caches complete LLM responses for identical prompts.
-- **Tool result cache** — `ToolResultCache` from the SDK caches MCP tool results.
-
-When Redis is unavailable, both degrade gracefully: LiteLLM falls through to the provider, `ToolResultCache.from_env()` returns `None` and the `@cached_tool` decorator becomes a no-op.
-
-### Frontends
-**Location:** `frontends/`
-
-The `frontends/` layer holds all user-facing interfaces. These are consumers of the agent REST API — they do not contain agent logic themselves. The separation is intentional: frontends can evolve independently of the agent and tool layers.
-
-**`frontends/chat-ui/`** — Chainlit web chat interface with streaming responses, collapsible tool-call steps, and full conversation history. Sessions are persisted to PostgreSQL via `SQLAlchemyDataLayer`. The `on_chat_resume` hook reconnects MCP and rebuilds the agent so users can continue past conversations seamlessly.
-
-**`frontends/teams-plugin/` (planned)** — Microsoft Teams / Microsoft 365 Copilot plugin. Will use the same agent REST API (`/chat`) and `make_api_key_verifier()` from the SDK. Teams bots use the Bot Framework SDK; Copilot plugins use the declarative plugin manifest format.
-
-**`frontends/office-addin/` (planned)** — Microsoft Office add-in (Word, Excel, Outlook). Uses Office.js with a backend that calls the agent service. The agent's MCP tools can be invoked to pull workspace data directly into Office documents.
-
-The key design rule: **frontends call agents, they do not embed agents.** All LLM calls, tool calls, and OPA checks stay in the agent and MCP layers. Frontends handle presentation, auth UX, and streaming only.
+Multi-cloud LLM proxy. Routes `complex-routing` → Azure GPT-4o (synthesis), `fast-routing` → Azure GPT-4o-mini (extraction/tool calls). The RM Prep agent uses both routes. LiteLLM handles failover (Azure → Bedrock in prod) and Redis prompt caching. The `master_key` must match `INTERNAL_API_KEY`.
 
 ---
 
-## 4. Step-by-Step: Building a New Agent
+## 4. Authorization Chain — JWT → AgentContext → OPA → PostgreSQL
 
-This walkthrough builds a **Document Analysis Agent** — an agent that can read documents from a hypothetical `docs-mcp` server and answer questions about them. The pattern is identical for any other agent.
+```
+ RM Prep UI
+     │  Authorization: Bearer <JWT>
+     ▼
+ rm-prep-agent/src/server.py
+     │  AgentContext.from_jwt(token)
+     │  Raises jwt.InvalidSignatureError on tampered tokens
+     │  Raises jwt.ExpiredSignatureError on expired tokens
+     ▼
+ AgentContext(
+   rm_id="rm-001", role="rm", team_id="treasury-west",
+   assigned_account_ids=("001AAA","002AAA"),
+   compliance_clearance=("standard",)
+ )
+     │  MCPToolBridge(sf_url, agent_context=ctx)
+     │  → SSE connection header: X-Agent-Context: <base64-JSON>
+     ▼
+ salesforce-mcp / payments-mcp
+     │  AgentContextMiddleware reads header → ContextVar
+     │  get_agent_context() in tool handler
+     ▼
+ OPA rm_prep_authz.rego
+     │  input = {rm_id, role, assigned_account_ids, clearance, tool, resource}
+     │  → result.allow, result.row_filters, result.col_mask
+     ▼
+ PostgreSQL
+     │  WHERE "AccountId" = ANY($assigned_account_ids)   ← row filter
+     │  NULL-out AMLRiskCategory, RiskRating, ...         ← col mask
+     ▼
+ JSON response (masked fields absent or null)
+```
+
+**Role matrix:**
+
+| Role | Accounts visible | AML columns | Sanctions/PEP columns |
+|---|---|---|---|
+| `readonly` | none (tool denied) | — | — |
+| `rm` | assigned only | masked | masked |
+| `senior_rm` | all | visible | masked |
+| `manager` | all | visible | masked |
+| `compliance_officer` | all | visible | visible |
+
+**Test JWT personas** (generated by `tests/fixtures/test_tokens.py`):
+
+| Persona | Role | Accounts | Clearance |
+|---|---|---|---|
+| `alice_rm` | rm | 4 assigned | standard |
+| `eve_rm_single` | rm | 1 assigned | standard |
+| `frank_rm_empty` | rm | 0 (all denied) | standard |
+| `bob_senior_rm` | senior_rm | all | standard + aml_view |
+| `carol_manager` | manager | all | standard + aml_view |
+| `dan_compliance` | compliance_officer | all | standard + aml_view + compliance_full |
+| `grace_readonly` | readonly | none | standard |
+
+```bash
+# Generate tokens for manual testing:
+python tests/fixtures/test_tokens.py
+
+# Use alice_rm token against the RM Prep API:
+TOKEN=$(python -c "from tests.fixtures.test_tokens import get_token; print(get_token('alice_rm'))")
+curl -X POST http://localhost:8003/brief \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Prepare a brief for Microsoft Corp."}'
+```
+
+---
+
+## 5. Test Data Architecture
+
+### Why PostgreSQL for both test and prod?
+
+Using the same PostgreSQL engine in test eliminates the main source of test-vs-prod divergence: SQL dialect differences, type handling, and query planner behaviour. No adapter abstraction layer, no code switches, no `if test: use_duckdb() else: use_postgres()`.
+
+### How the overlay works
+
+`docker-compose.test.yml` adds volume mounts to the existing `pgvector` service. PostgreSQL's Docker image runs all files in `/docker-entrypoint-initdb.d/` alphabetically on the **first start of a fresh volume**:
+
+```
+01-init.sql               → base extensions, roles
+02-rm_prep_schema.sql     → rm_prep tables (public schema)
+03-rm_prep_seed.sql       → rm_prep seed data
+20_test_sfcrm_schema.sql  → CREATE SCHEMA salesforce + 15 tables
+21_test_sfcrm_seed.sql    → COPY FROM /testdata/sfcrm/*.csv
+30_test_bankdw_schema.sql → CREATE SCHEMA bankdw + 5 tables
+31_test_bankdw_seed.sql   → COPY FROM /testdata/bankdw/*.csv
+```
+
+**Key:** scripts only run on a brand-new volume. If a volume already exists from a previous `docker compose up`, PostgreSQL silently skips init. Run `make dev-reset` (which does `down -v` then `up --build`) after any schema change.
+
+### Schema cross-domain identity spine
+
+All 45 Salesforce accounts in `sfcrm/Account.csv` have a 1:1 match in `bankdw/dim_party.csv` by `Name` = `PartyName`. This is the join key that allows `payments-mcp` to look up payment data by the company name retrieved from Salesforce. The `payments-mcp` tool signature uses `client_name` (not `client_id`) for this reason.
+
+### testdata contents
+
+| File | Rows | Purpose |
+|---|---|---|
+| `sfcrm/Account.csv` | 45 | Fortune 500 companies — all major industries |
+| `sfcrm/Contact.csv` | ~180 | 4 contacts per account |
+| `sfcrm/Opportunity.csv` | ~135 | 3 open opps per account |
+| `sfcrm/Task.csv` | ~225 | 5 tasks per account |
+| `sfcrm/Event.csv` | ~90 | 2 events per account |
+| `sfcrm/Case.csv` | ~90 | 2 cases per account |
+| `sfcrm/Contract.csv` | ~45 | 1 contract per account |
+| `bankdw/fact_payments.csv` | 1000 | Synthetic payment transactions |
+| `bankdw/dim_party.csv` | 45 | Same 45 companies with compliance profiles |
+| `bankdw/dim_bank.csv` | 8 | Realistic US banks |
+| `bankdw/dim_product.csv` | 4 | ACH, Wire, RTP, SWIFT |
+| `bankdw/bridge_party_account.csv` | 2000 | Account-to-bank relationships |
+
+Compliance profiles are deliberately varied to cover authorization test paths: some accounts are KYC:Pending, some AML:High, some PEP-flagged — ensuring tests exercise masking logic at all clearance levels.
+
+---
+
+## 6. Step-by-Step: Building a New Agent
+
+This walkthrough builds a **Document Analysis Agent** — a ReAct agent that reads documents from a hypothetical `docs-mcp` server. The pattern is identical for any other single-domain ReAct agent.
 
 ### Step 1 — Create the project structure
 
 ```bash
 mkdir -p agents-docanalysis/src/prompts
-touch agents-docanalysis/src/__init__.py
-touch agents-docanalysis/src/server.py
-touch agents-docanalysis/src/graph.py
-touch agents-docanalysis/Dockerfile
-touch agents-docanalysis/requirements.txt
+touch agents-docanalysis/src/{__init__,server,graph}.py
+touch agents-docanalysis/Dockerfile agents-docanalysis/requirements.txt
 ```
 
-### Step 2 — Write the requirements
+### Step 2 — Write `requirements.txt`
 
 ```
-# agents-docanalysis/requirements.txt
 fastapi>=0.111.0
 uvicorn[standard]>=0.30.0
 langchain-core>=0.2.0
@@ -331,90 +444,46 @@ langgraph>=0.2.0
 httpx>=0.27.0
 ```
 
-The `platform-sdk` is **not** listed here — it is installed separately via the `Dockerfile` using `pip install /platform-sdk/`. This keeps it version-controlled in one place.
+The `platform-sdk` is **not** listed here — it is installed via `Dockerfile` from the monorepo root.
 
 ### Step 3 — Write the Dockerfile
 
 ```dockerfile
-# agents-docanalysis/Dockerfile
 FROM python:3.11-slim
-
 WORKDIR /app
-
-# Install platform SDK first (changes infrequently → good layer caching)
 COPY platform-sdk/ /platform-sdk/
 RUN pip install --no-cache-dir /platform-sdk/
-
-# Install service dependencies
 COPY agents-docanalysis/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-
-# Copy service source
 COPY agents-docanalysis/src/ ./src/
-
 CMD ["uvicorn", "src.server:app", "--host", "0.0.0.0", "--port", "8001"]
 ```
 
-### Step 4 — Write a system prompt template
-
-```jinja2
-{# agents-docanalysis/src/prompts/doc_agent.j2 #}
-You are a document analysis assistant. You have access to the following tools:
-{% for name in tool_names %}- {{ name }}
-{% endfor %}
-
-Use these tools to read documents and answer questions accurately.
-Always cite which document you read and what section the answer came from.
-
-RESPONSE FORMAT
-- Be concise and factual.
-- If a document does not contain the answer, say so explicitly — do not guess.
-- When writing mathematical expressions, always use $ for inline math (e.g. $\frac{a}{b}$).
-```
-
-### Step 5 — Write `graph.py`
-
-This is the only agent-specific file. It loads the system prompt and calls `build_agent` from the SDK — nothing else is needed.
+### Step 4 — Write `graph.py`
 
 ```python
-# agents-docanalysis/src/graph.py
 from pathlib import Path
 from jinja2 import Environment, FileSystemLoader
 from platform_sdk import AgentConfig, build_agent
 
-_PROMPT_DIR = Path(__file__).parent / "prompts"
-_jinja_env = Environment(loader=FileSystemLoader(str(_PROMPT_DIR)), autoescape=False)
-
-
-def load_system_prompt(template_name: str, **context) -> str:
-    return _jinja_env.get_template(template_name).render(**context)
-
+_jinja_env = Environment(loader=FileSystemLoader(str(Path(__file__).parent / "prompts")), autoescape=False)
 
 def build_doc_agent(tools: list):
     config = AgentConfig.from_env()
-    tool_names = [t.name for t in tools]
-    system_prompt = load_system_prompt("doc_agent.j2", tool_names=tool_names)
-    return build_agent(tools, config=config, prompt=system_prompt)
+    prompt = _jinja_env.get_template("doc_agent.j2").render(tool_names=[t.name for t in tools])
+    return build_agent(tools, config=config, prompt=prompt)
 ```
 
-That's it. The SDK handles: LLM construction, LiteLLM routing, compaction, context injection, and LangGraph version compatibility.
-
-### Step 6 — Write `server.py`
+### Step 5 — Write `server.py`
 
 ```python
-# agents-docanalysis/src/server.py
 import os
 from contextlib import asynccontextmanager
-from typing import Optional
-
 from fastapi import Depends, FastAPI, HTTPException, Request
 from langchain_core.messages import HumanMessage
 from pydantic import BaseModel, Field
-
 from platform_sdk import AgentConfig, configure_logging, get_logger, make_api_key_verifier, setup_telemetry
-
-# Import the bridge and builder from the same service (not from agents/)
-from .mcp_bridge import MCPToolBridge   # copy agents/src/mcp_bridge.py or create a shared one
+from .mcp_bridge import MCPToolBridge
 from .graph import build_doc_agent
 
 configure_logging()
@@ -424,58 +493,40 @@ log = get_logger(__name__)
 _config = AgentConfig.from_env()
 verify_api_key = make_api_key_verifier()
 
-DOCS_MCP_URL = os.environ.get("DOCS_MCP_SSE_URL", "http://docs-mcp:8082/sse")
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    bridge = MCPToolBridge(DOCS_MCP_URL)
+    bridge = MCPToolBridge(os.environ["DOCS_MCP_SSE_URL"])
     await bridge.connect()
     tools = await bridge.get_langchain_tools()
     app.state.agent = build_doc_agent(tools)
     app.state.bridge = bridge
-    log.info("agent_ready", tools=[t.name for t in tools])
     yield
     await bridge.disconnect()
 
-
-app = FastAPI(title="Document Analysis Agent", lifespan=lifespan)
-
+app = FastAPI(lifespan=lifespan)
 
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=_config.max_message_length)
-    session_id: Optional[str] = "default"
-
-
-class ChatResponse(BaseModel):
-    content: str
-    role: str = "assistant"
-    session_id: str
-
+    session_id: str = "default"
 
 @app.get("/health")
 async def health():
     return {"status": "ok"}
 
-
-@app.post("/chat", response_model=ChatResponse)
+@app.post("/chat")
 async def chat(body: ChatRequest, req: Request, _: str = Depends(verify_api_key)):
-    agent = req.app.state.agent
     try:
-        result = await agent.ainvoke(
+        result = await req.app.state.agent.ainvoke(
             {"messages": [HumanMessage(content=body.message)]},
-            config={
-                "recursion_limit": _config.recursion_limit,
-                "configurable": {"thread_id": body.session_id},
-            },
+            config={"recursion_limit": _config.recursion_limit, "configurable": {"thread_id": body.session_id}},
         )
-        return ChatResponse(content=result["messages"][-1].content, session_id=body.session_id)
+        return {"content": result["messages"][-1].content, "session_id": body.session_id}
     except Exception as exc:
-        log.error("chat_error", error=str(exc), exc_info=True)
+        log.error("chat_error", error=str(exc))
         raise HTTPException(status_code=500, detail="Internal error")
 ```
 
-### Step 7 — Register in `docker-compose.yml`
+### Step 6 — Register in `docker-compose.yml`
 
 ```yaml
   doc-analysis-agent:
@@ -488,9 +539,7 @@ async def chat(body: ChatRequest, req: Request, _: str = Depends(verify_api_key)
       DOCS_MCP_SSE_URL: http://docs-mcp:8082/sse
       INTERNAL_API_KEY: ${INTERNAL_API_KEY}
       SERVICE_NAME: doc-analysis-agent
-      AGENT_MODEL_ROUTE: ${AGENT_MODEL_ROUTE:-complex-routing}
       ENABLE_COMPACTION: "true"
-      AGENT_CONTEXT_TOKEN_LIMIT: "8000"
       <<: *otel-env
     depends_on:
       litellm:
@@ -503,227 +552,117 @@ async def chat(body: ChatRequest, req: Request, _: str = Depends(verify_api_key)
       - "127.0.0.1:8001:8001"
 ```
 
-### Step 8 — Test it
-
-```bash
-docker compose up --build doc-analysis-agent -d
-
-curl -X POST http://localhost:8001/chat \
-  -H "Authorization: Bearer $INTERNAL_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"message": "Summarise document id 42", "session_id": "test-001"}'
-```
-
 ---
 
-## 5. Step-by-Step: Building a New MCP Server
+## 7. Step-by-Step: Building a New MCP Server
 
-This walkthrough builds a **Web Search MCP Server** — an MCP server that lets agents search the web via a hypothetical search API. The pattern applies to any external API (Salesforce, Jira, S3, etc.).
+This walkthrough builds a **Web Search MCP Server**. The pattern applies to any external API.
 
 ### Step 1 — Create the project structure
 
 ```bash
 mkdir -p tools/search-mcp/src
-touch tools/search-mcp/src/__init__.py
-touch tools/search-mcp/src/server.py
-touch tools/search-mcp/Dockerfile
-touch tools/search-mcp/requirements.txt
+touch tools/search-mcp/src/{__init__,server}.py
+touch tools/search-mcp/Dockerfile tools/search-mcp/requirements.txt
 ```
 
-### Step 2 — Write the requirements
-
-```
-# tools/search-mcp/requirements.txt
-fastmcp>=0.1.0
-httpx>=0.27.0
-```
-
-The `platform-sdk` is installed via the Dockerfile, not listed here.
-
-### Step 3 — Write the Dockerfile
-
-```dockerfile
-# tools/search-mcp/Dockerfile
-FROM python:3.11-slim
-
-WORKDIR /app
-
-COPY platform-sdk/ /platform-sdk/
-RUN pip install --no-cache-dir /platform-sdk/
-
-COPY tools/search-mcp/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-COPY tools/search-mcp/src/ ./src/
-
-CMD ["python", "-m", "src.server"]
-```
-
-### Step 4 — Write `server.py`
+### Step 2 — Write `server.py`
 
 ```python
-# tools/search-mcp/src/server.py
-import os
+import json, os
 from contextlib import asynccontextmanager
-from typing import AsyncIterator, Optional
-
+from typing import Optional
 import httpx
 from mcp.server.fastmcp import FastMCP
-
-from platform_sdk import (
-    MCPConfig,
-    OpaClient,
-    ToolResultCache,
-    cached_tool,
-    configure_logging,
-    get_logger,
-    setup_telemetry,
-)
+from platform_sdk import MCPConfig, ToolResultCache, configure_logging, get_logger
+from platform_sdk.cache import make_cache_key
 
 configure_logging()
 log = get_logger(__name__)
 
 _config = MCPConfig.from_env()
-SEARCH_API_KEY = os.environ.get("SEARCH_API_KEY", "")
-SEARCH_API_URL = os.environ.get("SEARCH_API_URL", "https://api.search-provider.com/v1/search")
-TRANSPORT = os.environ.get("MCP_TRANSPORT", "sse")
-
-# Module-level singletons — set inside lifespan
-_opa: Optional[OpaClient] = None
 _cache: Optional[ToolResultCache] = None
-_http: Optional[httpx.AsyncClient] = None
+_http:  Optional[httpx.AsyncClient] = None
 
+TRANSPORT = os.environ.get("MCP_TRANSPORT", "sse")
+PORT = int(os.environ.get("PORT", 8084))
 
 @asynccontextmanager
-async def _lifespan(server: FastMCP) -> AsyncIterator[None]:
-    global _opa, _cache, _http
-
-    setup_telemetry(os.environ.get("SERVICE_NAME", "search-mcp"))
-
-    # 1. OPA client — fail-closed policy enforcement (from SDK)
-    _opa = OpaClient(_config)
-
-    # 2. Tool-result cache — Redis-backed (from SDK, degrades gracefully)
-    _cache = ToolResultCache.from_env(ttl_seconds=_config.tool_cache_ttl_seconds) \
-             if _config.enable_tool_cache else None
-
-    # 3. HTTP client for the upstream search API
-    _http = httpx.AsyncClient(
-        base_url=SEARCH_API_URL,
-        headers={"Authorization": f"Bearer {SEARCH_API_KEY}"},
+async def _lifespan(server: FastMCP):
+    global _cache, _http
+    _cache = ToolResultCache.from_env(ttl_seconds=60)
+    _http  = httpx.AsyncClient(
+        base_url=os.environ.get("SEARCH_API_URL", ""),
+        headers={"Authorization": f"Bearer {os.environ.get('SEARCH_API_KEY', '')}"},
         timeout=10.0,
     )
-
-    log.info("startup_complete", transport=TRANSPORT)
+    log.info("search_mcp_ready")
     yield
+    await _http.aclose()
 
-    # Teardown
-    if _http:
-        await _http.aclose()
-    if _opa:
-        await _opa.aclose()
-    if _cache:
-        await _cache.aclose()
-    log.info("shutdown_complete")
-
-
-if TRANSPORT == "sse":
-    mcp = FastMCP("Web Search MCP", lifespan=_lifespan, host="0.0.0.0", port=8082)
-else:
-    mcp = FastMCP("Web Search MCP", lifespan=_lifespan)
-
+mcp = FastMCP("search-mcp", lifespan=_lifespan, host="0.0.0.0", port=PORT)
 
 @mcp.tool()
-@cached_tool(_cache)  # Note: _cache is None at decoration time — SDK handles this correctly
-async def web_search(query: str, session_id: str, max_results: int = 5) -> str:
+async def web_search(query: str, max_results: int = 5) -> str:
     """
-    Search the web and return a summary of the top results.
+    Search the web and return top results as JSON.
 
     Args:
         query:       The search query.
-        session_id:  The agent's session UUID (used for audit logging).
-        max_results: Maximum number of results to return (1–10).
-
+        max_results: Number of results (1–10).
     Returns:
-        JSON-encoded list of results, or an error string.
+        JSON string with articles list, or error JSON.
     """
-    # 1. OPA authorisation — every tool call, every time
-    allowed = await _opa.authorize("web_search", {"query": query, "session_id": session_id})
-    if not allowed:
-        return "ERROR: Unauthorized. Execution blocked by policy engine."
+    if _cache:
+        key = make_cache_key("web_search", {"query": query, "max_results": max_results})
+        cached = await _cache.get(key)
+        if cached:
+            return cached
 
-    # 2. Input validation
-    max_results = max(1, min(max_results, 10))
-    if not query.strip():
-        return "ERROR: Query must not be empty."
-
-    # 3. Call the upstream API
+    log.info("web_search_call", query=query)
     try:
-        response = await _http.get("", params={"q": query, "count": max_results})
-        response.raise_for_status()
-        results = response.json().get("results", [])
-
-        if not results:
-            return "No results found for the given query."
-
-        # Format for the agent — structured text is easier to reason about than raw JSON
-        formatted = "\n\n".join(
-            f"[{i+1}] {r['title']}\nURL: {r['url']}\n{r.get('snippet', '')}"
-            for i, r in enumerate(results)
-        )
-        log.info("search_ok", session_id=session_id, result_count=len(results))
-        return formatted
-
-    except httpx.HTTPStatusError as exc:
-        log.error("search_api_error", status=exc.response.status_code, error=str(exc))
-        return f"ERROR: Search API returned status {exc.response.status_code}."
+        resp = await _http.get("", params={"q": query, "count": min(max_results, 10)})
+        resp.raise_for_status()
+        results = resp.json().get("results", [])
+        output = json.dumps(results, default=str)
     except Exception as exc:
-        log.error("search_error", error=str(exc))
-        return "ERROR: An unexpected error occurred while searching."
+        log.error("web_search_error", error=str(exc))
+        return json.dumps({"error": str(exc)})
 
+    if _cache and not output.startswith('{"error"'):
+        await _cache.set(key, output)
+    return output
 
 if __name__ == "__main__":
     mcp.run(transport=TRANSPORT)
 ```
 
-### Step 5 — Add an OPA allow rule
+### Step 3 — Add an OPA allow rule
 
-Open `tools/policies/opa/tool_auth.rego` and add a rule for your new tool:
+Add to `tools/policies/opa/tool_auth.rego`:
 
 ```rego
-# Allow agents to call web_search
-allow {
+allow if {
     input.tool == "web_search"
     allowed_roles[input.agent_role]
     input.session_id != ""
 }
 ```
 
-Then add a unit test in `tool_auth_test.rego`:
+Add a unit test to `tool_auth_test.rego`:
 
 ```rego
-test_web_search_allowed {
+test_web_search_allowed if {
     allow with input as {
-        "tool": "web_search",
-        "agent_role": "data_analyst_agent",
-        "session_id": "test-session-id",
-        "query": "enterprise AI trends"
-    }
-}
-
-test_web_search_empty_session_denied {
-    not allow with input as {
-        "tool": "web_search",
-        "agent_role": "data_analyst_agent",
-        "session_id": "",
-        "query": "test"
+        "tool": "web_search", "agent_role": "data_analyst_agent",
+        "session_id": "123e4567-e89b-12d3-a456-426614174000", "query": "AI trends"
     }
 }
 ```
 
-Run the tests: `make test-policies`
+Run: `make test-policies`
 
-### Step 6 — Register in `docker-compose.yml`
+### Step 4 — Register in `docker-compose.yml`
 
 ```yaml
   search-mcp:
@@ -733,17 +672,14 @@ Run the tests: `make test-policies`
     container_name: ai-search-mcp
     environment:
       MCP_TRANSPORT: sse
-      OPA_URL: http://opa:8181/v1/data/mcp/tools/allow
       SEARCH_API_KEY: ${SEARCH_API_KEY}
       SEARCH_API_URL: ${SEARCH_API_URL}
       SERVICE_NAME: search-mcp
       ENVIRONMENT: ${ENVIRONMENT:-local}
-      AGENT_ROLE: ${AGENT_ROLE:-data_analyst_agent}
       REDIS_HOST: redis
       REDIS_PORT: 6379
       REDIS_PASSWORD: ${REDIS_PASSWORD}
       ENABLE_TOOL_CACHE: "true"
-      TOOL_CACHE_TTL: "60"       # Search results stale faster than DB data
       <<: *otel-env
     depends_on:
       redis:
@@ -752,115 +688,114 @@ Run the tests: `make test-policies`
         condition: service_healthy
     healthcheck:
       test: ["CMD", "python3", "-c",
-             "import socket,sys; s=socket.socket(); r=s.connect_ex(('localhost',8082)); s.close(); sys.exit(0 if r==0 else 1)"]
+             "import socket,sys; s=socket.socket(); r=s.connect_ex(('localhost',8084)); s.close(); sys.exit(0 if r==0 else 1)"]
       interval: 15s
       timeout: 5s
       retries: 5
     networks:
       - ai-network
     ports:
-      - "127.0.0.1:8082:8082"
+      - "127.0.0.1:8084:8084"
 ```
 
-### Step 7 — Fix the `@cached_tool` decoration timing
-
-The `@cached_tool(_cache)` decorator is applied at import time, but `_cache` is assigned inside `_lifespan` (at startup). This means the decorator captures `None` and becomes a no-op. Fix this by applying the cache wrapper inside the lifespan, or by using the manual cache API directly inside the tool function body:
-
-```python
-# Preferred pattern — explicit cache lookup inside the tool
-@mcp.tool()
-async def web_search(query: str, session_id: str, max_results: int = 5) -> str:
-    ...
-    # Manual cache check (safe — _cache may still be None if Redis is not configured)
-    if _cache:
-        from platform_sdk.cache import make_cache_key
-        key = make_cache_key("web_search", {"query": query, "max_results": max_results})
-        cached = await _cache.get(key)
-        if cached:
-            return cached
-
-    result = await _do_search(query, max_results)
-
-    if _cache and not result.startswith("ERROR:"):
-        await _cache.set(key, result)
-
-    return result
-```
-
-### Step 8 — Test the tool in isolation
-
-```bash
-# Start just the tool and its dependencies
-docker compose up --build search-mcp opa redis -d
-
-# Connect to the MCP server manually with the MCP Inspector (optional)
-npx @modelcontextprotocol/inspector http://localhost:8082/sse
-
-# Or call it via an agent that has the tool
-curl -X POST http://localhost:8000/chat \
-  -H "Authorization: Bearer $INTERNAL_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"message": "Search for recent news about enterprise AI", "session_id": "test-001"}'
-```
-
-### What the SDK handles for you in both steps
+### What the SDK handles for you
 
 | Concern | Without SDK | With SDK |
 |---|---|---|
-| Configuration | 10+ `os.environ.get()` calls scattered through the file | `MCPConfig.from_env()` — one call, fully typed |
-| OPA enforcement | ~40 lines of httpx, retry, timeout, fail-closed logic | `OpaClient(_config).authorize(tool, input)` |
-| Caching | Redis connection, key generation, error handling, TTL | `ToolResultCache.from_env()` + `make_cache_key()` |
-| Structured logging | `import logging; logging.getLogger()` (no kwarg support) | `get_logger(__name__)` — JSON, keyword args |
-| Tracing | 15+ lines of OTel setup + `_initialized` guard | `setup_telemetry("service-name")` |
+| Configuration | 10+ `os.environ.get()` calls | `MCPConfig.from_env()` — one call, fully typed |
+| OPA enforcement | ~40 lines: httpx, retry, timeout, fail-closed | `OpaClient(_config).authorize(tool, input)` |
+| Caching | Redis connection, key gen, error handling, TTL | `ToolResultCache.from_env()` + `make_cache_key()` |
+| Auth context | Header parsing, base64 decode, ContextVar management | `AgentContextMiddleware` + `get_agent_context()` |
+| Structured logging | Standard `logging` with no keyword arg support | `get_logger(__name__)` — JSON, keyword args |
+| Tracing | 15+ lines of OTel setup + idempotency guard | `setup_telemetry("service-name")` |
 
 ---
 
-## 6. Environment Variables
+## 8. Environment Variables
 
-All configuration is injected via environment variables. Never hardcode values. See `.env.example` for the full list.
+All configuration is injected via environment variables. Never hardcode values. See `.env.example` for the full list with descriptions.
 
-| Variable | Used by | Purpose |
-|---|---|---|
-| `INTERNAL_API_KEY` | All services | Shared Bearer token — agent↔LiteLLM, client↔agent |
-| `AZURE_API_KEY` | LiteLLM | Azure OpenAI credential |
-| `AZURE_API_BASE` | LiteLLM | Azure OpenAI endpoint URL |
-| `AZURE_API_VERSION` | LiteLLM | API version |
-| `POSTGRES_PASSWORD` | pgvector, data-mcp | Database password |
-| `REDIS_PASSWORD` | Redis, LiteLLM, data-mcp | Redis auth password |
-| `REDIS_HOST` | data-mcp, any MCP server | Redis hostname for `ToolResultCache` |
-| `REDIS_PORT` | data-mcp, any MCP server | Redis port (default 6379) |
-| `AGENT_MODEL_ROUTE` | Agent services | LiteLLM route name for agent calls |
-| `ENABLE_COMPACTION` | Agent services | `true`/`false` — context trimming on/off |
-| `AGENT_CONTEXT_TOKEN_LIMIT` | Agent services | Token budget before compaction fires |
-| `AGENT_RECURSION_LIMIT` | Agent services | Max tool-call iterations (1–50) |
-| `MAX_MESSAGE_LENGTH` | Agent services | Max user message bytes |
-| `ENABLE_TOOL_CACHE` | MCP servers | `true`/`false` — Redis tool cache on/off |
-| `TOOL_CACHE_TTL` | MCP servers | Cache TTL in seconds |
-| `OPA_URL` | MCP servers | OPA decision endpoint |
-| `ENVIRONMENT` | MCP servers | `local`/`prod` — stamped into OPA input |
-| `AGENT_ROLE` | MCP servers | Role stamped into OPA input |
-| `LITELLM_BASE_URL` | Agent services | LiteLLM proxy URL |
-| `MCP_SSE_URL` | Agent services | MCP server SSE endpoint |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | All services | OTel collector OTLP HTTP endpoint |
-| `DYNATRACE_ENDPOINT` | OTel Collector | Dynatrace ingest URL (optional) |
-| `DYNATRACE_API_TOKEN` | OTel Collector | Dynatrace API token (optional) |
+### Shared / infra
+
+| Variable | Purpose |
+|---|---|
+| `INTERNAL_API_KEY` | Shared Bearer token — agent↔LiteLLM, client↔agent, UI↔agent |
+| `POSTGRES_PASSWORD` | PostgreSQL admin password |
+| `REDIS_PASSWORD` | Redis auth password |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | OTel collector OTLP HTTP endpoint |
+
+### RM Prep auth
+
+| Variable | Purpose |
+|---|---|
+| `JWT_SECRET` | HMAC-SHA256 secret for signing/verifying RM JWTs |
+| `AUTH_MODE` | `jwt` (enforce JWT) or `none` (dev bypass — uses anonymous context) |
+| `SHOW_TEST_LOGIN` | `true` → show persona selector in rm-prep-ui |
+
+### Agent services
+
+| Variable | Purpose |
+|---|---|
+| `LITELLM_BASE_URL` | LiteLLM proxy URL (default `http://litellm:4000/v1`) |
+| `AGENT_MODEL_ROUTE` | LiteLLM route for main agent calls |
+| `ENABLE_COMPACTION` | `true`/`false` — context window trimming |
+| `AGENT_CONTEXT_TOKEN_LIMIT` | Token budget before compaction fires |
+| `AGENT_RECURSION_LIMIT` | Max tool-call iterations (1–50) |
+| `SALESFORCE_MCP_URL` | Salesforce MCP SSE URL (RM Prep agent) |
+| `PAYMENTS_MCP_URL` | Payments MCP SSE URL (RM Prep agent) |
+| `NEWS_MCP_URL` | News MCP SSE URL (RM Prep agent) |
+
+### MCP servers
+
+| Variable | Purpose |
+|---|---|
+| `MCP_TRANSPORT` | `sse` (default) or `stdio` |
+| `PORT` | Server port (8080 data-mcp, 8081 SF, 8082 payments, 8083 news) |
+| `OPA_URL` | OPA decision endpoint |
+| `ENVIRONMENT` | `local`/`prod` — stamped into OPA input |
+| `DB_HOST` / `DB_PORT` / `DB_USER` / `DB_PASS` / `DB_NAME` | PostgreSQL connection |
+| `REDIS_HOST` / `REDIS_PORT` | Redis for tool result cache |
+| `ENABLE_TOOL_CACHE` | `true`/`false` |
+| `TOOL_CACHE_TTL` | Cache TTL in seconds |
+| `TAVILY_API_KEY` | News search API key — omit to use mock data in dev |
 
 ---
 
-## 7. Data Flow: A Single Chat Request
+## 9. Data Flow: Generic Chat Request
 
 1. Client sends `POST /chat` with `Authorization: Bearer <INTERNAL_API_KEY>`.
-2. `make_api_key_verifier()` (SDK) validates the token — 401 if invalid.
-3. LangGraph's ReAct loop starts. The LLM (via LiteLLM → Azure OpenAI) reasons about the request.
-4. If LiteLLM has seen an identical prompt recently, it returns the cached response immediately (Redis prompt cache — no Azure round-trip).
-5. `make_compaction_modifier` (SDK) trims the message list if the token count exceeds the budget.
-6. If the LLM decides to call a tool, the MCP bridge sends the call to `data-mcp` over the open SSE connection.
-7. `OpaClient.authorize()` (SDK) sends `POST http://opa:8181/v1/data/mcp/tools/allow` — fail closed if OPA is unreachable.
-8. `ToolResultCache.get()` (SDK) checks Redis — if the exact same query was run recently, the cached result is returned immediately (no DB round-trip).
-9. On a cache miss, data-mcp runs the SELECT query in the agent's workspace schema via asyncpg.
-10. `ToolResultCache.set()` (SDK) stores the result in Redis for future calls.
-11. The query result is returned to LangGraph as a tool observation.
-12. The LLM incorporates the result and either calls another tool (back to step 5) or produces a final answer.
-13. FastAPI returns `{"content": "...", "role": "assistant", "session_id": "..."}`.
+2. `make_api_key_verifier()` validates — 401 if invalid.
+3. LangGraph ReAct loop starts. LLM reasons via LiteLLM → Azure OpenAI.
+4. LiteLLM checks Redis prompt cache — returns cached response on hit (no Azure round-trip).
+5. `make_compaction_modifier` trims message list if token count exceeds budget.
+6. LLM calls a tool → MCP bridge sends call to `data-mcp` over open SSE connection.
+7. `OpaClient.authorize()` checks OPA — fail-closed if OPA is unreachable.
+8. `ToolResultCache.get()` checks Redis — returns cached result on hit.
+9. Cache miss: `data-mcp` runs SELECT via asyncpg in the workspace schema.
+10. `ToolResultCache.set()` stores result in Redis.
+11. Tool result returned to LangGraph; LLM incorporates it or calls another tool.
+12. Final answer returned as `{"content": "...", "session_id": "..."}`.
 
-Every step emits an OTel span — the full trace is visible in Dynatrace with agent→LiteLLM→MCP→OPA→DB latency broken down per hop.
+Every step emits an OTel span — full trace in Dynatrace with agent→LiteLLM→MCP→OPA→DB latency per hop.
+
+---
+
+## 10. Data Flow: RM Prep Brief Request
+
+1. RM logs into Streamlit UI (`rm-prep-ui`) — picks persona in test mode or logs in with credentials.
+2. UI signs a JWT and sends `POST /brief` with `Authorization: Bearer <JWT>`.
+3. RM Prep agent verifies JWT → creates `AgentContext(role, assigned_account_ids, compliance_clearance)`.
+4. **parse_intent** node (Haiku): extracts `client_name`, `intent_type`, `meeting_date`.
+5. **route** node: maps intent to which agents to invoke — `full_brief` → all three.
+6. **gather_crm**, **gather_payments**, **gather_news** execute in parallel (LangGraph fan-out):
+   - Each specialist node invokes its MCP server via a `MCPToolBridge` carrying the `AgentContext`.
+   - MCP server middleware reads `X-Agent-Context`, populates ContextVar.
+   - Tool handler calls `check_access()` and `build_row_filters_*()` / `build_col_mask()`.
+   - OPA returns `allow`, `row_filters`, `col_mask` for the caller's role.
+   - PostgreSQL query runs with account ID filter; AML/compliance columns nulled out if not cleared.
+   - Result JSON returned to specialist node.
+7. **synthesize** node (Sonnet): receives CRM + payments + news JSON, outputs structured `RMBrief`.
+8. **format_brief** node: Jinja2-renders `RMBrief` to Markdown.
+9. Response returned to Streamlit UI; brief displayed with collapsible source sections.
+
+Standard RM (`alice_rm`) sees only her 4 assigned accounts and no AML/compliance fields. Compliance officer (`dan_compliance`) sees all accounts and all fields — same code path, different OPA decision.

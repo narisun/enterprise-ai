@@ -1,59 +1,41 @@
 # ============================================================
 # platform/config/litellm-prod.yaml
 #
-# LiteLLM config for production (EKS).
-# Azure OpenAI is primary; AWS Bedrock is the fallback.
-# Credentials come from EKS IRSA (for Bedrock) and Kubernetes
-# Secrets (for Azure), never from environment variables in prod.
+# LiteLLM config for production — Azure OpenAI only.
+# Bedrock removed; Azure is the sole provider.
+# Credentials come from Kubernetes Secrets, injected as env vars.
 # ============================================================
 
 model_list:
 
-  # ---- Complex reasoning (GPT-4o via Azure, Claude 3.5 Sonnet fallback) ---
+  # ---- Complex reasoning / synthesis (GPT-4o) --------------------------------
   - model_name: complex-routing
     litellm_params:
-      model: azure/gpt-4o
+      model: azure/gpt-4o-deployment
       api_base: os.environ/AZURE_API_BASE
       api_key: os.environ/AZURE_API_KEY
       api_version: os.environ/AZURE_API_VERSION
 
-  - model_name: complex-routing
-    litellm_params:
-      model: bedrock/anthropic.claude-3-5-sonnet-20241022-v2:0
-      aws_region_name: os.environ/AWS_DEFAULT_REGION  # L5: use env var, not hardcoded
-      # Credentials provided by IRSA — no key needed
-
-  # ---- Fast / cheap routing (GPT-4o-mini Azure, Claude 3 Haiku fallback) --
+  # ---- Fast / cheap routing (GPT-4o-mini) ------------------------------------
   - model_name: fast-routing
     litellm_params:
-      model: azure/gpt-4o-mini
+      model: azure/gpt-4o-mini-deployment
       api_base: os.environ/AZURE_API_BASE
       api_key: os.environ/AZURE_API_KEY
       api_version: os.environ/AZURE_API_VERSION
-
-  - model_name: fast-routing
-    litellm_params:
-      model: bedrock/anthropic.claude-3-haiku-20240307-v1:0
-      aws_region_name: os.environ/AWS_DEFAULT_REGION  # L5: use env var, not hardcoded
 
 litellm_settings:
   cache: true
   cache_type: redis
   redis_host: redis-master.ai-platform.svc.cluster.local
   redis_port: 6379
-  redis_password: os.environ/REDIS_PASSWORD  # H5: authenticated Redis
-
+  redis_password: os.environ/REDIS_PASSWORD
   success_callback: ["otel"]
   failure_callback: ["otel"]
-
   drop_params: true
   request_timeout: 60
-
-  # M2: cross-tier fallback — complex falls back to fast (Haiku) if both
-  # Azure GPT-4o and Bedrock Claude Sonnet fail; and vice versa.
-  # Within-route Azure→Bedrock failover is handled automatically by LiteLLM
-  # because both models share the same model_name above.
-  fallbacks: [{"complex-routing": ["fast-routing"]}, {"fast-routing": ["complex-routing"]}]
+  # Cross-route fallback if complex model fails
+  fallbacks: [{"complex-routing": ["fast-routing"]}]
   allowed_fails: 1
 
 general_settings:
