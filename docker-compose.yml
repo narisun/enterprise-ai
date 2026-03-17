@@ -441,25 +441,29 @@ services:
       - "127.0.0.1:8003:8003"    # L4: loopback only in dev
 
   # ============================================================
-  # RM PREP AGENT — Streamlit UI
+  # AGENT UI — React frontend (supports multiple agents)
   # ============================================================
-  rm-prep-ui:
+  agent-ui:
     build:
-      context: .                           # Build from monorepo root
-      dockerfile: frontends/rm-prep-ui/Dockerfile
-    container_name: ai-rm-prep-ui
-    environment:
-      RM_PREP_AGENT_URL: http://rm-prep-agent:8003
-      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
-      APP_VERSION: ${APP_VERSION:-1.0.0}
-      APP_ENV: ${APP_ENV:-development}
+      context: frontends/agent-ui
+      dockerfile: Dockerfile
+      args:
+        VITE_API_KEY: ${INTERNAL_API_KEY}
+    container_name: ai-agent-ui
     depends_on:
       rm-prep-agent:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:80/"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     networks:
       - ai-network
     ports:
-      - "127.0.0.1:8502:8502"    # RM Prep UI — open http://localhost:8502 in your browser
+      - "127.0.0.1:3000:80"    # React UI — open http://localhost:3000 in your browser
+
 
 # ============================================================
 # SHARED NETWORK & VOLUMES

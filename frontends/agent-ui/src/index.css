@@ -1,0 +1,102 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  /* Scrollbar styling */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #94a3b8;
+  }
+}
+
+@layer components {
+  /* Streaming cursor — blinks at end of output while agent is running */
+  .streaming-cursor::after {
+    content: '▊';
+    animation: blink 0.9s step-end infinite;
+    color: #2563eb;
+    margin-left: 1px;
+  }
+
+  @keyframes blink {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0; }
+  }
+
+  /* Skeleton shimmer for loading state */
+  .skeleton {
+    @apply bg-slate-200 rounded animate-pulse;
+  }
+
+  /* Prose overrides for the brief output */
+  .brief-prose h1 {
+    @apply text-2xl font-bold text-slate-900 mb-4 mt-0 pb-3 border-b border-slate-200;
+  }
+  .brief-prose h2 {
+    @apply text-lg font-semibold text-slate-800 mb-3 mt-6;
+  }
+  .brief-prose h3 {
+    @apply text-base font-semibold text-slate-700 mb-2 mt-4;
+  }
+  .brief-prose p {
+    @apply text-slate-700 leading-relaxed mb-3;
+  }
+  .brief-prose ul {
+    @apply list-disc list-inside space-y-1 mb-3 text-slate-700;
+  }
+  .brief-prose ol {
+    @apply list-decimal list-inside space-y-1 mb-3 text-slate-700;
+  }
+  .brief-prose li {
+    @apply leading-relaxed;
+  }
+  .brief-prose strong {
+    @apply font-semibold text-slate-900;
+  }
+  .brief-prose table {
+    @apply w-full text-sm border-collapse mb-4;
+  }
+  .brief-prose th {
+    @apply text-left font-semibold text-slate-700 bg-slate-100 px-3 py-2 border border-slate-200;
+  }
+  .brief-prose td {
+    @apply px-3 py-2 border border-slate-200 text-slate-700;
+  }
+  .brief-prose tr:hover td {
+    @apply bg-slate-50;
+  }
+  .brief-prose hr {
+    @apply border-slate-200 my-4;
+  }
+  .brief-prose blockquote {
+    @apply border-l-4 border-blue-400 pl-4 text-slate-600 italic my-3;
+  }
+  .brief-prose code {
+    @apply bg-slate-100 text-blue-700 px-1.5 py-0.5 rounded text-sm font-mono;
+  }
+  .brief-prose pre {
+    @apply bg-slate-100 p-4 rounded-lg overflow-x-auto mb-3;
+  }
+  .brief-prose pre code {
+    @apply bg-transparent p-0 text-slate-800;
+  }
+}
