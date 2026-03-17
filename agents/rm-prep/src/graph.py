@@ -63,8 +63,6 @@ def _make_parse_intent_node(router_llm):
         system = SystemMessage(content="""Extract from the RM's message:
 - client_name: exact company name mentioned
 - intent_type: one of full_brief | quick_update | news_check | payment_check | follow_up
-  (full_brief = preparing for a meeting; quick_update = what's new;
-   news_check = only news; payment_check = only payments; follow_up = follow-up question)
 - meeting_date: date if explicitly mentioned, else null""")
         try:
             result = await structured.ainvoke([system] + list(state["messages"]))
@@ -77,15 +75,34 @@ def _make_parse_intent_node(router_llm):
             }
         except Exception as exc:
             log.error("parse_intent_error", error=str(exc))
-            # Fallback: treat as full_brief for the last message
-            last_msg = state["messages"][-1].content if state["messages"] else ""
+            # Safe Fallback: Do not hallucinate client name. 
+            # Require clarification by setting intent to follow_up or triggering an error.
             return {
-                "client_name": last_msg[:100],
-                "intent_type": "full_brief",
-                "error_states": {"parse_intent": str(exc)},
+                "client_name": "Clarification Required",
+                "intent_type": "error_clarification_needed", # Needs to be handled by the routing logic
+                "error_states": {"parse_intent": "Failed to extract intent and client name reliably. " + str(exc)},
             }
     return parse_intent
 
+def _make_clarify_intent_node():
+    """Node that short-circuits the graph to ask the user for missing parameters."""
+    async def clarify_intent(state: RMPrepState) -> dict:
+        log.info("clarification_requested", reason="Missing client name or intent")
+        
+        # We skip synthesis and write directly to the final markdown output field
+        clarification_msg = (
+            "I couldn't clearly identify the client or company name in your request. "
+            "Could you please specify which company you'd like me to look up?"
+        )
+        
+        return {"brief_markdown": clarification_msg}
+    return clarify_intent
+
+def _route_after_parse(state: RMPrepState) -> str:
+    """Conditional edge logic to determine if we can proceed or must ask for clarity."""
+    if state.get("intent_type") == "error_clarification_needed":
+        return "clarify_intent"
+    return "route"
 
 def _make_route_node():
     _ROUTING_MAP = {
@@ -242,7 +259,9 @@ def build_rm_orchestrator(
 
     builder = StateGraph(RMPrepState)
 
+    # 1. Register all nodes (including the new clarify_intent node)
     builder.add_node("parse_intent",     _make_parse_intent_node(router_llm))
+    builder.add_node("clarify_intent",   _make_clarify_intent_node())  # NEW
     builder.add_node("route",            _make_route_node())
     builder.add_node("gather_crm",       _make_gather_crm_node(crm_agent))
     builder.add_node("gather_payments",  _make_gather_payments_node(pay_agent))
@@ -250,23 +269,34 @@ def build_rm_orchestrator(
     builder.add_node("synthesize",       _make_synthesize_node(synthesis_llm, "rm_prep_synthesis.j2"))
     builder.add_node("format_brief",     _make_format_brief_node())
 
-    # Sequential edges
     builder.set_entry_point("parse_intent")
-    builder.add_edge("parse_intent", "route")
+
+    # 2. Replace the static edge with a conditional edge
+    builder.add_conditional_edges(
+        "parse_intent", 
+        _route_after_parse,
+        {
+            "clarify_intent": "clarify_intent",
+            "route": "route"
+        }
+    )
+
+    # 3. If clarification is needed, end the graph immediately after asking
+    builder.add_edge("clarify_intent", END)
+
+    # The rest of the graph remains exactly the same
     builder.add_edge("route", "gather_crm")
 
-    # Parallel fan-out after CRM (payments needs account_id from CRM)
     builder.add_edge("gather_crm", "gather_payments")
     builder.add_edge("gather_crm", "gather_news")
 
-    # Converge at synthesize (waits for both parallel branches)
     builder.add_edge("gather_payments", "synthesize")
     builder.add_edge("gather_news", "synthesize")
 
     builder.add_edge("synthesize", "format_brief")
     builder.add_edge("format_brief", END)
 
-    checkpointer = MemorySaver()  # swap for PostgresSaver in prod
+    checkpointer = MemorySaver()  
     return builder.compile(checkpointer=checkpointer)
 
 

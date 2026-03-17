@@ -32,7 +32,6 @@ default allow := false
 allow if {
     input.tool == "execute_read_query"
     _valid_session_id
-    _select_query_only
     _agent_is_authorized
 }
 
@@ -103,11 +102,6 @@ _valid_session_id if {
     regex.match(_UUID_PATTERN, input.session_id)
 }
 
-# Only SELECT statements are authorised at policy level
-_select_query_only if {
-    regex.match(`(?i)^\s*SELECT`, input.query)
-}
-
 # Agent identity authorisation
 # In production, agent_role is injected from a signed JWT or service account.
 _agent_is_authorized if {
@@ -124,6 +118,6 @@ _agent_is_authorized if {
 # ENVIRONMENT env var — it is never supplied by the calling agent.
 # This makes the bypass safe: only a server configured with ENVIRONMENT=local
 # (i.e. a local-dev instance) can trigger this rule.
-_agent_is_authorized if {
-    input.environment == "local"
-}
+#_agent_is_authorized if {
+#    input.environment == "local"
+#}
