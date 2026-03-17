@@ -5,6 +5,7 @@ Tests cover:
 - UUID validation (SQL injection prevention)
 - Query type enforcement (SELECT-only)
 - OPA denial flow
+- Empty result handling
 - Truncation of large results
 """
 import json
@@ -20,6 +21,7 @@ def env_vars(monkeypatch):
     monkeypatch.setenv("DB_PASS", "test")
     monkeypatch.setenv("DB_NAME", "test")
     monkeypatch.setenv("OPA_URL", "http://localhost:8181/v1/data/mcp/tools/allow")
+    monkeypatch.setenv("INTERNAL_API_KEY", "test-key")
 
 
 # ---- UUID Validation --------------------------------------------------------
@@ -47,10 +49,17 @@ class TestIsValidUuid:
 VALID_SESSION = "123e4567-e89b-12d3-a456-426614174000"
 
 
+def _make_opa_mock(authorized: bool) -> MagicMock:
+    """Return a mock OpaClient whose authorize() coroutine returns the given value."""
+    mock_opa = MagicMock()
+    mock_opa.authorize = AsyncMock(return_value=authorized)
+    return mock_opa
+
+
 @pytest.mark.asyncio
 async def test_rejects_mutating_query_after_opa_allow():
     """Regex guard blocks non-SELECT even if OPA approves."""
-    with patch("src.server._authorize_with_opa", new=AsyncMock(return_value=True)), \
+    with patch("src.server._opa", _make_opa_mock(True)), \
          patch("src.server._tracer", MagicMock()), \
          patch("src.server._db_pool", MagicMock()):
 
@@ -63,7 +72,7 @@ async def test_rejects_mutating_query_after_opa_allow():
 @pytest.mark.asyncio
 async def test_rejects_invalid_session_id():
     """UUID check blocks queries with a malformed session_id."""
-    with patch("src.server._authorize_with_opa", new=AsyncMock(return_value=True)), \
+    with patch("src.server._opa", _make_opa_mock(True)), \
          patch("src.server._tracer", MagicMock()), \
          patch("src.server._db_pool", MagicMock()):
 
@@ -76,7 +85,7 @@ async def test_rejects_invalid_session_id():
 @pytest.mark.asyncio
 async def test_opa_denial_blocks_execution():
     """When OPA returns False the query is never executed."""
-    with patch("src.server._authorize_with_opa", new=AsyncMock(return_value=False)), \
+    with patch("src.server._opa", _make_opa_mock(False)), \
          patch("src.server._tracer", MagicMock()), \
          patch("src.server._db_pool", MagicMock()):
 
@@ -103,7 +112,7 @@ async def test_returns_no_records_message_on_empty_result():
     mock_pool = MagicMock()
     mock_pool.acquire = MagicMock(return_value=mock_conn)
 
-    with patch("src.server._authorize_with_opa", new=AsyncMock(return_value=True)), \
+    with patch("src.server._opa", _make_opa_mock(True)), \
          patch("src.server._tracer", MagicMock()), \
          patch("src.server._db_pool", mock_pool):
 
@@ -115,14 +124,19 @@ async def test_returns_no_records_message_on_empty_result():
 
 @pytest.mark.asyncio
 async def test_truncates_large_results():
-    """Results larger than MAX_RESULT_BYTES are truncated with a marker."""
+    """Results larger than _config.max_result_bytes are truncated with a marker."""
     large_row = {"data": "x" * 200}
-    many_rows = [large_row] * 100    # ~20 KB
 
     mock_conn = AsyncMock()
-    mock_conn.fetch = AsyncMock(return_value=[MagicMock(__iter__=lambda s: iter(large_row.items()),
-                                                         keys=lambda: large_row.keys(),
-                                                         values=lambda: large_row.values())] * 100)
+    mock_conn.fetch = AsyncMock(
+        return_value=[
+            MagicMock(
+                __iter__=lambda s: iter(large_row.items()),
+                keys=lambda: large_row.keys(),
+                values=lambda: large_row.values(),
+            )
+        ] * 100
+    )
     mock_conn.execute = AsyncMock()
     mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
     mock_conn.__aexit__ = AsyncMock(return_value=None)
@@ -135,11 +149,14 @@ async def test_truncates_large_results():
     mock_pool = MagicMock()
     mock_pool.acquire = MagicMock(return_value=mock_conn)
 
-    # Patch dict() conversion to return large data
-    with patch("src.server._authorize_with_opa", new=AsyncMock(return_value=True)), \
+    # Patch _config.max_result_bytes to a small value so truncation triggers.
+    mock_config = MagicMock()
+    mock_config.max_result_bytes = 100
+
+    with patch("src.server._opa", _make_opa_mock(True)), \
          patch("src.server._tracer", MagicMock()), \
          patch("src.server._db_pool", mock_pool), \
-         patch("src.server.MAX_RESULT_BYTES", 100), \
+         patch("src.server._config", mock_config), \
          patch("json.dumps", return_value="x" * 200):
 
         from src.server import execute_read_query

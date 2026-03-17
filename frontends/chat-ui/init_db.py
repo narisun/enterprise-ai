@@ -115,6 +115,10 @@ ALTER TABLE steps
 """
 
 
+_MAX_RETRIES = 10
+_RETRY_DELAY = 3.0   # seconds between attempts
+
+
 async def main() -> None:
     db_url = os.environ.get("DATABASE_URL", "")
     if not db_url:
@@ -126,13 +130,21 @@ async def main() -> None:
 
     import asyncpg
 
-    print("[init_db] Connecting to PostgreSQL…")
-    try:
-        # M7: explicit timeout so a slow/absent DB fails fast at container startup
-        conn = await asyncpg.connect(dsn, timeout=30)
-    except Exception as exc:
-        print(f"[init_db] ERROR: Could not connect: {exc}", file=sys.stderr)
-        sys.exit(1)
+    # Retry loop — docker depends_on with service_healthy is not atomic:
+    # pg_isready can pass a moment before port 5432 accepts all clients.
+    conn = None
+    for attempt in range(1, _MAX_RETRIES + 1):
+        try:
+            print(f"[init_db] Connecting to PostgreSQL… (attempt {attempt}/{_MAX_RETRIES})")
+            conn = await asyncpg.connect(dsn, timeout=10)
+            break  # success
+        except Exception as exc:
+            if attempt == _MAX_RETRIES:
+                print(f"[init_db] ERROR: Could not connect after {_MAX_RETRIES} attempts: {exc}",
+                      file=sys.stderr)
+                sys.exit(1)
+            print(f"[init_db] Not ready yet ({exc}); retrying in {_RETRY_DELAY:.0f}s…")
+            await asyncio.sleep(_RETRY_DELAY)
 
     try:
         await conn.execute(_SCHEMA_SQL)

@@ -17,13 +17,17 @@ from typing import Optional
 import asyncpg
 from mcp.server.fastmcp import FastMCP
 
-from platform_sdk import MCPConfig, ToolResultCache, cached_tool, configure_logging, get_logger
+from platform_sdk import MCPConfig, OpaClient, ToolResultCache, cached_tool, configure_logging, get_logger
 
 configure_logging()
 log = get_logger(__name__)
 
 _config = MCPConfig.from_env()
-_cache: Optional[ToolResultCache] = None
+
+# Cache is initialised at module level — ToolResultCache.from_env() returns None
+# when REDIS_HOST is not set, making cached_tool a transparent pass-through.
+_cache: Optional[ToolResultCache] = ToolResultCache.from_env(ttl_seconds=1800)
+_opa: Optional[OpaClient] = None
 _pool: Optional[asyncpg.Pool] = None
 
 TRANSPORT = os.environ.get("MCP_TRANSPORT", "sse")
@@ -34,8 +38,8 @@ PORT = int(os.environ.get("PORT", 8081))
 # It is passed to the constructor, not assigned afterwards.
 @asynccontextmanager
 async def _lifespan(server: FastMCP):
-    global _cache, _pool
-    _cache = ToolResultCache.from_env(ttl_seconds=1800)
+    global _opa, _pool
+    _opa = OpaClient(_config)
     _pool = await asyncpg.create_pool(
         host=os.environ.get("DB_HOST", "pgvector"),
         port=int(os.environ.get("DB_PORT", 5432)),
@@ -48,6 +52,7 @@ async def _lifespan(server: FastMCP):
     log.info("salesforce_mcp_ready")
     yield
     await _pool.close()
+    await _opa.aclose()
 
 
 # Lifespan, host, and port go in the constructor — not in run() or after construction.
@@ -315,6 +320,13 @@ async def _get_salesforce_summary_impl(client_name: str) -> str:
     return json.dumps(result, default=str)
 
 
+@cached_tool(_cache)
+async def _get_salesforce_summary_cached(client_name: str) -> str:
+    """Cached inner implementation — called only after OPA approves."""
+    log.info("salesforce_tool_call", client=client_name)
+    return await _get_salesforce_summary_impl(client_name)
+
+
 @mcp.tool()
 async def get_salesforce_summary(client_name: str) -> str:
     """
@@ -331,23 +343,17 @@ async def get_salesforce_summary(client_name: str) -> str:
     Returns:
         JSON string with full CRM context, or error JSON if client not found.
     """
-    if _cache:
-        from platform_sdk.cache import make_cache_key
-        key = make_cache_key("get_salesforce_summary", {"client_name": client_name})
-        cached = await _cache.get(key)
-        if cached:
-            log.debug("salesforce_cache_hit", client=client_name)
-            return cached
+    if _opa is None:
+        return "ERROR: Service not initialised — OPA client not ready."
 
-    log.info("salesforce_tool_call", client=client_name)
-    result = await _get_salesforce_summary_impl(client_name)
+    is_authorized = await _opa.authorize(
+        "get_salesforce_summary", {"client_name": client_name}
+    )
+    if not is_authorized:
+        log.warning("opa_denied", tool="get_salesforce_summary", client=client_name)
+        return "ERROR: Unauthorized. Execution blocked by policy engine."
 
-    if _cache and not result.startswith('{"error"'):
-        from platform_sdk.cache import make_cache_key
-        key = make_cache_key("get_salesforce_summary", {"client_name": client_name})
-        await _cache.set(key, result)
-
-    return result
+    return await _get_salesforce_summary_cached(client_name=client_name)
 
 
 if __name__ == "__main__":

@@ -16,13 +16,16 @@ from typing import Optional
 import asyncpg
 from mcp.server.fastmcp import FastMCP
 
-from platform_sdk import MCPConfig, ToolResultCache, configure_logging, get_logger
+from platform_sdk import MCPConfig, OpaClient, ToolResultCache, cached_tool, configure_logging, get_logger
 
 configure_logging()
 log = get_logger(__name__)
 
 _config = MCPConfig.from_env()
-_cache: Optional[ToolResultCache] = None
+
+# Cache initialised at module level so @cached_tool can capture it at decoration time.
+_cache: Optional[ToolResultCache] = ToolResultCache.from_env(ttl_seconds=3600)
+_opa: Optional[OpaClient] = None
 _pool: Optional[asyncpg.Pool] = None
 
 TRANSPORT = os.environ.get("MCP_TRANSPORT", "sse")
@@ -31,8 +34,8 @@ PORT = int(os.environ.get("PORT", 8082))
 
 @asynccontextmanager
 async def _lifespan(server: FastMCP):
-    global _cache, _pool
-    _cache = ToolResultCache.from_env(ttl_seconds=3600)
+    global _opa, _pool
+    _opa = OpaClient(_config)
     _pool = await asyncpg.create_pool(
         host=os.environ.get("DB_HOST", "pgvector"),
         port=int(os.environ.get("DB_PORT", 5432)),
@@ -45,6 +48,7 @@ async def _lifespan(server: FastMCP):
     log.info("payments_mcp_ready")
     yield
     await _pool.close()
+    await _opa.aclose()
 
 
 mcp = FastMCP("payments-mcp", lifespan=_lifespan, host="0.0.0.0", port=PORT)
@@ -262,8 +266,15 @@ async def _get_payment_summary_impl(client_name: str, days: int) -> str:
     return json.dumps(result, default=str)
 
 
+@cached_tool(_cache)
+async def _get_payment_summary_cached(client_name: str, days: int = 360) -> str:
+    """Cached inner implementation — called only after OPA approves."""
+    log.info("payments_tool_call", client=client_name, days=days)
+    return await _get_payment_summary_impl(client_name, days)
+
+
 @mcp.tool()
-async def get_payment_summary(client_name: str, days: int = 90) -> str:
+async def get_payment_summary(client_name: str, days: int = 360) -> str:
     """
     Get bank payment transaction summary for a client.
 
@@ -285,23 +296,17 @@ async def get_payment_summary(client_name: str, days: int = 90) -> str:
     Returns:
         JSON string with payment analytics, or error JSON if no data found.
     """
-    if _cache:
-        from platform_sdk.cache import make_cache_key
-        key = make_cache_key("get_payment_summary", {"client_name": client_name, "days": days})
-        cached = await _cache.get(key)
-        if cached:
-            log.debug("payments_cache_hit", client=client_name)
-            return cached
+    if _opa is None:
+        return "ERROR: Service not initialised — OPA client not ready."
 
-    log.info("payments_tool_call", client=client_name, days=days)
-    result = await _get_payment_summary_impl(client_name, days)
+    is_authorized = await _opa.authorize(
+        "get_payment_summary", {"client_name": client_name, "days": days}
+    )
+    if not is_authorized:
+        log.warning("opa_denied", tool="get_payment_summary", client=client_name)
+        return "ERROR: Unauthorized. Execution blocked by policy engine."
 
-    if _cache and not result.startswith('{"error"'):
-        from platform_sdk.cache import make_cache_key
-        key = make_cache_key("get_payment_summary", {"client_name": client_name, "days": days})
-        await _cache.set(key, result)
-
-    return result
+    return await _get_payment_summary_cached(client_name=client_name, days=days)
 
 
 if __name__ == "__main__":

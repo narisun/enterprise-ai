@@ -478,12 +478,13 @@ def build_doc_agent(tools: list):
 
 ```python
 import os
+import uuid
 from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI, HTTPException, Request
 from langchain_core.messages import HumanMessage
 from pydantic import BaseModel, Field
 from platform_sdk import AgentConfig, configure_logging, get_logger, make_api_key_verifier, setup_telemetry
-from .mcp_bridge import MCPToolBridge
+from .mcp_bridge import MCPToolBridge, set_session_id, reset_session_id
 from .graph import build_doc_agent
 
 configure_logging()
@@ -495,6 +496,7 @@ verify_api_key = make_api_key_verifier()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Shared bridge — session_id is injected per-request via ContextVar (set_session_id)
     bridge = MCPToolBridge(os.environ["DOCS_MCP_SSE_URL"])
     await bridge.connect()
     tools = await bridge.get_langchain_tools()
@@ -507,7 +509,8 @@ app = FastAPI(lifespan=lifespan)
 
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=_config.max_message_length)
-    session_id: str = "default"
+    # Always a valid UUID — OPA _valid_session_id requires UUID format
+    session_id: str = Field(default_factory=lambda: str(uuid.uuid4()), max_length=128)
 
 @app.get("/health")
 async def health():
@@ -515,6 +518,9 @@ async def health():
 
 @app.post("/chat")
 async def chat(body: ChatRequest, req: Request, _: str = Depends(verify_api_key)):
+    # Bind trusted session_id to this async context so execute_read_query tool
+    # calls get the correct workspace UUID regardless of what the LLM passes.
+    sid_token = set_session_id(body.session_id)
     try:
         result = await req.app.state.agent.ainvoke(
             {"messages": [HumanMessage(content=body.message)]},
@@ -524,6 +530,8 @@ async def chat(body: ChatRequest, req: Request, _: str = Depends(verify_api_key)
     except Exception as exc:
         log.error("chat_error", error=str(exc))
         raise HTTPException(status_code=500, detail="Internal error")
+    finally:
+        reset_session_id(sid_token)
 ```
 
 ### Step 6 — Register in `docker-compose.yml`

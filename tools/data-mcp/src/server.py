@@ -136,18 +136,24 @@ def _is_valid_uuid(val: str) -> bool:
 @mcp.tool()
 async def execute_read_query(query: str, session_id: str) -> str:
     """
-    Execute a read-only SQL SELECT query in the agent's isolated workspace schema.
+    Execute a read-only SQL SELECT query against the enterprise database.
 
     Args:
-        query:      A SELECT statement. Mutating queries are rejected.
-        session_id: UUID identifying the agent's workspace schema.
+        query:      A SELECT statement. Only SELECT queries are permitted;
+                    mutating statements are rejected.
+        session_id: Workspace session UUID — injected automatically by the
+                    agent runtime.  Pass any non-empty string; the correct
+                    value is always supplied by the server.
 
     Returns:
         JSON-encoded rows, a "no records found" message, or an error string.
     """
-    assert _tracer is not None, "Telemetry not initialised"
-    assert _db_pool is not None, "DB pool not initialised"
-    assert _opa is not None, "OPA client not initialised"
+    if _tracer is None:
+        raise RuntimeError("execute_read_query called before lifespan: telemetry not initialised")
+    if _db_pool is None:
+        raise RuntimeError("execute_read_query called before lifespan: DB pool not initialised")
+    if _opa is None:
+        raise RuntimeError("execute_read_query called before lifespan: OPA client not initialised")
 
     with _tracer.start_as_current_span("execute_read_query") as span:
         span.set_attribute("session_id", session_id)
@@ -167,8 +173,12 @@ async def execute_read_query(query: str, session_id: str) -> str:
             return "ERROR: Invalid session_id — must be a valid UUID."
 
         # 3. Regex guard: only single SELECT statements allowed
-        # M8: \b prevents prefix bypass (e.g. "SELECTBAD"); semicolon check blocks
-        #     multi-statement injection (readonly=True transaction is the primary guard)
+        # Strip a trailing semicolon first — standard SQL practice, not an injection.
+        # The embedded-semicolon check below catches actual multi-statement attempts
+        # (e.g. "SELECT 1; DROP TABLE users").
+        # M8: \b prevents prefix bypass (e.g. "SELECTBAD"); readonly=True transaction
+        #     is the primary DB-level guard against mutation.
+        query = query.rstrip().rstrip(";").rstrip()
         if not re.match(r"^\s*SELECT\b", query, re.IGNORECASE) or ";" in query:
             return "ERROR: Security policy violation — only single SELECT queries are permitted."
 

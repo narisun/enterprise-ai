@@ -16,12 +16,13 @@ from typing import Optional
 
 from mcp.server.fastmcp import FastMCP
 
-from platform_sdk import ToolResultCache, configure_logging, get_logger
+from platform_sdk import ToolResultCache, cached_tool, configure_logging, get_logger
 
 configure_logging()
 log = get_logger(__name__)
 
-_cache: Optional[ToolResultCache] = None
+# Initialised at module level so @cached_tool captures it at decoration time.
+_cache: Optional[ToolResultCache] = ToolResultCache.from_env(ttl_seconds=1800)
 _tavily_client = None
 
 TRANSPORT = os.environ.get("MCP_TRANSPORT", "sse")
@@ -126,8 +127,7 @@ _GENERIC_MOCK = [
 
 @asynccontextmanager
 async def _lifespan(server: FastMCP):
-    global _cache, _tavily_client
-    _cache = ToolResultCache.from_env(ttl_seconds=1800)
+    global _tavily_client
     tavily_key = os.environ.get("TAVILY_API_KEY", "")
     if tavily_key:
         try:
@@ -176,6 +176,7 @@ def _get_mock_articles(company_name: str) -> list:
 
 
 @mcp.tool()
+@cached_tool(_cache)
 async def search_company_news(company_name: str) -> str:
     """
     Search for recent news about a company.
@@ -192,14 +193,6 @@ async def search_company_news(company_name: str) -> str:
     Returns:
         JSON string with articles list and aggregate signal summary.
     """
-    if _cache:
-        from platform_sdk.cache import make_cache_key
-        key = make_cache_key("search_company_news", {"company_name": company_name})
-        cached = await _cache.get(key)
-        if cached:
-            log.debug("news_cache_hit", company=company_name)
-            return cached
-
     log.info("news_tool_call", company=company_name, mode="tavily" if _tavily_client else "mock")
 
     try:
@@ -238,14 +231,7 @@ async def search_company_news(company_name: str) -> str:
         "aggregate_signal": aggregate_signal,
         "searched_at": datetime.utcnow().isoformat() + "Z",
     }
-    output = json.dumps(result, default=str)
-
-    if _cache:
-        from platform_sdk.cache import make_cache_key
-        key = make_cache_key("search_company_news", {"company_name": company_name})
-        await _cache.set(key, output)
-
-    return output
+    return json.dumps(result, default=str)
 
 
 if __name__ == "__main__":

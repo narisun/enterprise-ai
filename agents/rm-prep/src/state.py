@@ -26,7 +26,8 @@ class RMPrepState(TypedDict):
 
     # ---- Identity (set by parse_intent, read by all subsequent nodes) ----
     rm_id: str
-    client_name: str
+    client_name: str              # user-supplied name (may be partial, e.g. "Microsoft")
+    account_name: Optional[str]   # canonical name from CRM (e.g. "Microsoft Corp.") — exact match key for bankdw
     account_id: Optional[str]     # populated by gather_crm; required by gather_payments
     meeting_date: Optional[str]
     intent_type: str              # full_brief | quick_update | news_check | payment_check

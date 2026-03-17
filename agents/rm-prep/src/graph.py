@@ -25,12 +25,11 @@ from typing import Optional
 
 from jinja2 import Environment, FileSystemLoader
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph
 from pydantic import BaseModel
 
-from platform_sdk import AgentConfig, build_specialist_agent, configure_logging, get_logger
+from platform_sdk import AgentConfig, build_specialist_agent, configure_logging, get_logger, make_chat_llm
 from .brief import RMBrief, render_brief
 from .state import RMPrepState
 
@@ -38,21 +37,15 @@ configure_logging()
 log = get_logger(__name__)
 
 _PROMPT_DIR = Path(__file__).parent / "prompts"
+# autoescape=False is correct for LLM prompt templates (not HTML).
+# IMPORTANT: never pass raw user input as a Jinja2 template variable — doing so
+# would allow prompt injection via {{ }} / {% %} constructs.  Inject user-supplied
+# content as a data value inside a template body, never as a template variable itself.
 _jinja_env = Environment(loader=FileSystemLoader(str(_PROMPT_DIR)), autoescape=False)
 
 
 def _load_prompt(template: str, **ctx) -> str:
     return _jinja_env.get_template(template).render(**ctx)
-
-
-def _make_llm(model_route: str, base_url: str, api_key: str) -> ChatOpenAI:
-    return ChatOpenAI(
-        model=model_route,
-        api_key=api_key,
-        base_url=base_url,
-        temperature=0,
-        max_retries=2,
-    )
 
 
 # ─── Node factories (closures capture agent/llm dependencies) ─────────────────
@@ -63,7 +56,7 @@ class _IntentResult(BaseModel):
     meeting_date: Optional[str] = None
 
 
-def _make_parse_intent_node(router_llm: ChatOpenAI):
+def _make_parse_intent_node(router_llm):
     structured = router_llm.with_structured_output(_IntentResult)
 
     async def parse_intent(state: RMPrepState) -> dict:
@@ -120,15 +113,20 @@ def _make_gather_crm_node(crm_agent):
                 "messages": [HumanMessage(content=f"Client to look up: {client}")]
             })
             output = result["messages"][-1].content
-            # Extract account_id for the payments node
+            # Extract account_id and account_name for the payments node.
+            # account_name is the CANONICAL name from CRM (e.g. "Microsoft Corp.")
+            # and must be used for bankdw exact-match lookups — not the raw
+            # client_name the user typed, which may be partial or differently cased.
             account_id = None
+            account_name = None
             try:
                 data = json.loads(output)
                 account_id = data.get("account_id")
+                account_name = data.get("account_name")  # exact Salesforce Account.Name
             except (json.JSONDecodeError, AttributeError):
                 pass
-            log.info("crm_gathered", client=client, account_id=account_id)
-            return {"crm_output": output, "account_id": account_id}
+            log.info("crm_gathered", client=client, account_id=account_id, account_name=account_name)
+            return {"crm_output": output, "account_id": account_id, "account_name": account_name}
         except Exception as exc:
             log.error("crm_gather_error", client=client, error=str(exc))
             return {
@@ -142,20 +140,22 @@ def _make_gather_payments_node(pay_agent):
     async def gather_payments(state: RMPrepState) -> dict:
         if "payments" not in state.get("agents_to_invoke", []):
             return {"payments_output": None}
-        # Payments tool uses client_name (= Account.Name = dim_party.PartyName)
-        # as the join key across CRM and bankdw schemas.
-        client_name = state.get("client_name", "")
+        # Use account_name from CRM if available — it is the EXACT canonical name
+        # that matches bankdw."fact_payments"."PayorName" / "dim_party"."PartyName".
+        # Falling back to client_name (user-supplied) risks a name mismatch because
+        # the payments SQL uses exact matching, unlike the CRM ILIKE fuzzy search.
+        exact_name = state.get("account_name") or state.get("client_name", "")
         try:
             result = await pay_agent.ainvoke({
-                "messages": [HumanMessage(content=f"client_name={client_name}")]
+                "messages": [HumanMessage(content=f'Call get_payment_summary with client_name="{exact_name}" and days=360')]
             })
             output = result["messages"][-1].content
-            log.info("payments_gathered", client=client_name)
+            log.info("payments_gathered", client=exact_name)
             return {"payments_output": output}
         except Exception as exc:
-            log.error("payments_gather_error", client=client_name, error=str(exc))
+            log.error("payments_gather_error", client=exact_name, error=str(exc))
             return {
-                "payments_output": json.dumps({"error": "payments_unavailable", "client_name": client_name, "detail": str(exc)}),
+                "payments_output": json.dumps({"error": "payments_unavailable", "client_name": exact_name, "detail": str(exc)}),
                 "error_states": {"payments": str(exc)},
             }
     return gather_payments
@@ -182,7 +182,7 @@ def _make_gather_news_node(news_agent):
     return gather_news
 
 
-def _make_synthesize_node(synthesis_llm: ChatOpenAI, synthesis_template: str):
+def _make_synthesize_node(synthesis_llm, synthesis_template: str):
     structured = synthesis_llm.with_structured_output(RMBrief)
 
     async def synthesize(state: RMPrepState) -> dict:
@@ -234,13 +234,11 @@ def build_rm_orchestrator(
     crm_agent,
     pay_agent,
     news_agent,
-    synthesis_llm: ChatOpenAI,
+    synthesis_llm,
     config: AgentConfig,
 ):
     """Build the RM Prep StateGraph orchestrator."""
-    base_url = os.environ.get("LITELLM_BASE_URL", "http://litellm:4000/v1")
-    api_key = os.environ.get("INTERNAL_API_KEY", "")
-    router_llm = _make_llm(config.router_model_route, base_url, api_key)
+    router_llm = make_chat_llm(config.router_model_route)
 
     builder = StateGraph(RMPrepState)
 
@@ -280,8 +278,6 @@ async def orchestrator_lifespan(app):
     from .mcp_bridge import MCPToolBridge  # copied from agents/src/ in Dockerfile
 
     config = AgentConfig.from_env()
-    base_url = os.environ.get("LITELLM_BASE_URL", "http://litellm:4000/v1")
-    api_key = os.environ.get("INTERNAL_API_KEY", "")
 
     sf_url  = os.environ.get("SALESFORCE_MCP_URL",  "http://salesforce-mcp:8081/sse")
     pay_url = os.environ.get("PAYMENTS_MCP_URL",    "http://payments-mcp:8082/sse")
@@ -309,7 +305,7 @@ async def orchestrator_lifespan(app):
     pay_agent  = build_specialist_agent(pay_tools,  config, pay_prompt,  model_override=config.specialist_model_route)
     news_agent = build_specialist_agent(news_tools, config, news_prompt, model_override=config.specialist_model_route)
 
-    synthesis_llm = _make_llm(config.synthesis_model_route, base_url, api_key)
+    synthesis_llm = make_chat_llm(config.synthesis_model_route)
 
     app.state.orchestrator = build_rm_orchestrator(
         crm_agent, pay_agent, news_agent, synthesis_llm, config

@@ -123,7 +123,9 @@ async def _init_session(thread_id: str, username: str) -> bool:
     Extracted so both on_chat_start and on_chat_resume can call it.
     """
     try:
-        bridge = MCPToolBridge(MCP_SSE_URL)
+        # Pass thread_id as the trusted session_id so execute_read_query always
+        # uses the Chainlit session UUID — the LLM never chooses this value.
+        bridge = MCPToolBridge(MCP_SSE_URL, session_id=thread_id)
         await bridge.connect()
         tools = await bridge.get_langchain_tools()
         agent = build_enterprise_agent(tools)

@@ -9,6 +9,7 @@ Key design decisions:
 - Structured logging with correlation IDs via OpenTelemetry trace context
 """
 import os
+import uuid
 from contextlib import asynccontextmanager
 from typing import Optional
 
@@ -17,7 +18,7 @@ from langchain_core.messages import HumanMessage
 from pydantic import BaseModel, Field
 
 from .graph import build_enterprise_agent
-from .mcp_bridge import MCPToolBridge
+from .mcp_bridge import MCPToolBridge, reset_session_id, set_session_id
 
 # Import shared SDK — installed via `make sdk-install` or the Dockerfile
 from platform_sdk import AgentConfig, configure_logging, get_logger, make_api_key_verifier, setup_telemetry
@@ -74,7 +75,9 @@ app = FastAPI(
 class ChatRequest(BaseModel):
     # H4: length limits prevent context-overflow and runaway token spend
     message: str = Field(..., min_length=1, max_length=_agent_config.max_message_length)
-    session_id: Optional[str] = Field("default-session", max_length=128)
+    # Default to a fresh UUID so OPA _valid_session_id always passes even when
+    # the caller omits session_id (e.g. quick curl tests).
+    session_id: str = Field(default_factory=lambda: str(uuid.uuid4()), max_length=128)
 
 
 class ChatResponse(BaseModel):
@@ -106,6 +109,10 @@ async def chat(
     agent_executor = http_request.app.state.agent_executor
     log.info("chat_request", session_id=body.session_id, message_length=len(body.message))
 
+    # Bind the trusted session_id to the current async context so the shared
+    # MCPToolBridge can inject it into execute_read_query calls without the
+    # LLM ever needing to choose or know the value.
+    sid_token = set_session_id(body.session_id)
     try:
         result = await agent_executor.ainvoke(
             {"messages": [HumanMessage(content=body.message)]},
@@ -122,3 +129,6 @@ async def chat(
         # Log the full traceback internally; return a safe message to the caller
         log.error("chat_error", session_id=body.session_id, error=str(exc), exc_info=True)
         raise HTTPException(status_code=500, detail="An internal error occurred. Please try again.")
+
+    finally:
+        reset_session_id(sid_token)

@@ -11,6 +11,7 @@ Usage:
   Open http://localhost:8502 in your browser.
   Type: "Prepare me for my meeting with Acme Manufacturing"
 """
+import asyncio
 import json
 import os
 import uuid
@@ -92,21 +93,26 @@ if prompt := st.chat_input("Ask about a client (e.g. 'Prepare me for Acme Manufa
             "session_id": st.session_state.session_id,
         }
 
-        try:
-            with httpx.Client(timeout=120.0) as client:
-                with client.stream(
+        # Use async httpx so the SSE stream does not block the Streamlit
+        # main thread for the full duration of brief generation.
+        # _stream_brief manages its own local content variable and returns it;
+        # this avoids the nonlocal constraint (brief_content is script-level,
+        # not an enclosing function scope).
+        async def _stream_brief() -> str:
+            content = ""
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                async with client.stream(
                     "POST",
                     f"{RM_PREP_AGENT_URL}/brief",
                     json=payload,
                     headers=headers,
                 ) as response:
                     response.raise_for_status()
-                    for line in response.iter_lines():
+                    async for line in response.aiter_lines():
                         line = line.strip()
                         if not line:
                             continue
                         if line.startswith("event:"):
-                            current_event = line[6:].strip()
                             continue
                         if line.startswith("data:"):
                             data_str = line[5:].strip()
@@ -115,17 +121,18 @@ if prompt := st.chat_input("Ask about a client (e.g. 'Prepare me for Acme Manufa
                             except json.JSONDecodeError:
                                 continue
 
-                            # Infer event type from data keys when event: line not present
                             if "message" in data and "markdown" not in data:
                                 status_area.info(data["message"])
                             elif "markdown" in data:
-                                brief_content = data["markdown"]
+                                content = data["markdown"]
                                 status_area.empty()
-                                brief_area.markdown(brief_content)
-                            elif "message" in data and brief_content == "":
-                                # error event
+                                brief_area.markdown(content)
+                            elif "message" in data and content == "":
                                 status_area.error(f"Error: {data['message']}")
+            return content
 
+        try:
+            brief_content = asyncio.run(_stream_brief())
         except httpx.ConnectError:
             status_area.error(
                 "Cannot connect to RM Prep Agent. "
