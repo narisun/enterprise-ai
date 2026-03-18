@@ -1,0 +1,173 @@
+# ============================================================
+# CI — Integration Tests
+#
+# Starts the full Docker Compose test stack (DB + OPA + MCP servers
+# + rm-prep agent), waits for health checks, then runs the
+# integration test suite.
+#
+# Trigger:
+#   - Push to main, develop, release/*
+#   - Pull requests targeting main or develop
+#
+# Gate: blocks merge to main/develop if any integration test fails.
+# ============================================================
+name: CI Integration Tests
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+      - "release/**"
+  pull_request:
+    branches:
+      - main
+      - develop
+
+env:
+  # These are test-only secrets — never use production values here
+  JWT_SECRET:              "ci-integration-jwt-secret-change-in-prod"
+  CONTEXT_HMAC_SECRET:    "ci-integration-hmac-secret-change-in-prod"
+  INTERNAL_API_KEY:       "ci-integration-api-key"
+  POSTGRES_PASSWORD:      "ci-integration-pg-password"
+  REDIS_PASSWORD:         "ci-integration-redis-password"
+  ENVIRONMENT:            "local"
+  AGENT_ROLE:             "rm_prep_agent"
+
+  # Service URLs (docker-compose publishes to localhost on the runner)
+  DB_HOST:                "localhost"
+  DB_PORT:                "5432"
+  DB_USER:                "admin"
+  DB_PASS:                "ci-integration-pg-password"
+  DB_NAME:                "ai_memory"
+  OPA_URL:                "http://localhost:8181"
+  RM_PREP_URL:            "http://localhost:8003"
+  PAYMENTS_MCP_URL:       "http://localhost:8082"
+
+jobs:
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # ── Build and start the test stack ──────────────────────────────────────
+      - name: Write .env for docker-compose
+        run: |
+          cat > .env << 'EOF'
+          POSTGRES_PASSWORD=ci-integration-pg-password
+          REDIS_PASSWORD=ci-integration-redis-password
+          JWT_SECRET=ci-integration-jwt-secret-change-in-prod
+          CONTEXT_HMAC_SECRET=ci-integration-hmac-secret-change-in-prod
+          INTERNAL_API_KEY=ci-integration-api-key
+          ENVIRONMENT=local
+          LITELLM_BASE_URL=http://litellm:4000
+          AGENT_ROLE=rm_prep_agent
+          EOF
+
+      - name: Start infrastructure (DB + OPA + Redis)
+        run: |
+          docker compose -f docker-compose.yml -f docker-compose.test.yml \
+            up --build -d \
+            pgvector redis opa
+
+      - name: Wait for PostgreSQL
+        run: |
+          for i in $(seq 1 30); do
+            docker compose exec -T pgvector pg_isready -U admin -d ai_memory && break
+            echo "Waiting for PostgreSQL... ($i/30)"
+            sleep 2
+          done
+
+      - name: Wait for OPA
+        run: |
+          for i in $(seq 1 20); do
+            curl -sf http://localhost:8181/health && break
+            echo "Waiting for OPA... ($i/20)"
+            sleep 2
+          done
+
+      - name: Start MCP servers
+        run: |
+          docker compose -f docker-compose.yml -f docker-compose.test.yml \
+            up --build -d \
+            payments-mcp salesforce-mcp news-search-mcp
+
+      - name: Start rm-prep agent
+        run: |
+          docker compose -f docker-compose.yml -f docker-compose.test.yml \
+            up --build -d \
+            rm-prep-agent
+
+      - name: Wait for MCP servers to be healthy
+        run: |
+          for service_url in \
+            "http://localhost:8082/health" \
+            "http://localhost:8081/health" \
+            "http://localhost:8083/health"; do
+            for i in $(seq 1 30); do
+              curl -sf "$service_url" && break || true
+              echo "Waiting for $service_url... ($i/30)"
+              sleep 2
+            done
+          done
+
+      - name: Wait for rm-prep-agent to be healthy
+        run: |
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:8003/health && break
+            echo "Waiting for rm-prep-agent... ($i/30)"
+            sleep 3
+          done
+
+      # ── Run tests ─────────────────────────────────────────────────────────
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install platform SDK and test dependencies
+        run: |
+          pip install -e platform-sdk/ --quiet
+          pip install -r tests/requirements.txt --quiet
+
+      - name: Run integration tests — SQL layer
+        run: |
+          python -m pytest tests/integration/test_payments_sql.py \
+            -m integration \
+            -v --tb=short --timeout=30 --color=yes
+
+      - name: Run integration tests — OPA policies
+        run: |
+          python -m pytest tests/integration/test_opa_policies.py \
+            -m integration \
+            -v --tb=short --timeout=20 --color=yes
+
+      - name: Run integration tests — rm-prep server
+        run: |
+          python -m pytest tests/integration/test_rm_prep_server.py \
+            -m integration \
+            -v --tb=short --timeout=30 --color=yes
+
+      # ── Collect logs on failure ────────────────────────────────────────────
+      - name: Collect service logs on failure
+        if: failure()
+        run: |
+          echo "=== pgvector logs ==="
+          docker compose logs pgvector --tail=50
+          echo "=== payments-mcp logs ==="
+          docker compose logs payments-mcp --tail=100
+          echo "=== salesforce-mcp logs ==="
+          docker compose logs salesforce-mcp --tail=50
+          echo "=== rm-prep-agent logs ==="
+          docker compose logs rm-prep-agent --tail=100
+          echo "=== opa logs ==="
+          docker compose logs opa --tail=50
+
+      - name: Tear down
+        if: always()
+        run: docker compose -f docker-compose.yml -f docker-compose.test.yml down -v

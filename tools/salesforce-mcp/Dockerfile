@@ -16,6 +16,8 @@ COPY tools/salesforce-mcp/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY tools/salesforce-mcp/src/ /app/src/
+# Shared MCP utilities (AgentContextMiddleware, get_agent_context)
+COPY tools/shared/ /app/tools_shared/
 
 RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
 USER appuser

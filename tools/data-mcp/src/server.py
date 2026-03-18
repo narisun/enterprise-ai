@@ -200,7 +200,10 @@ async def execute_read_query(query: str, session_id: str) -> str:
                     # H2: SET LOCAL scopes this to the current transaction only,
                     # preventing schema leakage to the next request on the same
                     # connection when it is returned to the pool.
+                    # statement_timeout prevents long-running or sleep() queries from
+                    # holding a connection indefinitely (e.g. SELECT pg_sleep(300)).
                     await conn.execute(f"SET LOCAL search_path TO {schema_name}, public")
+                    await conn.execute("SET LOCAL statement_timeout = '30s'")
                     records = await conn.fetch(query)
 
                     span.set_attribute("db.row_count", len(records))

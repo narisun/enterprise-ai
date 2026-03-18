@@ -55,14 +55,32 @@ services:
   # via DATABASE_URL.  No changes needed — the test schemas are now present
   # in the same PostgreSQL instance they already talk to.
 
+  # ── MCP servers — add CONTEXT_HMAC_SECRET for signed header verification ──
+  salesforce-mcp:
+    environment:
+      JWT_SECRET: ${JWT_SECRET:-test-secret-change-in-prod}
+      CONTEXT_HMAC_SECRET: ${CONTEXT_HMAC_SECRET:-test-context-secret-change-in-prod}
+
+  payments-mcp:
+    environment:
+      JWT_SECRET: ${JWT_SECRET:-test-secret-change-in-prod}
+      CONTEXT_HMAC_SECRET: ${CONTEXT_HMAC_SECRET:-test-context-secret-change-in-prod}
+
+  news-search-mcp:
+    environment:
+      JWT_SECRET: ${JWT_SECRET:-test-secret-change-in-prod}
+      CONTEXT_HMAC_SECRET: ${CONTEXT_HMAC_SECRET:-test-context-secret-change-in-prod}
+
   # ── Orchestrator with JWT enforcement ─────────────────────────────────────
   rm-prep-agent:
     environment:
+      ENVIRONMENT: local     # enables manager-level shared context + test persona endpoints
       AUTH_MODE: jwt
       JWT_SECRET: ${JWT_SECRET:-test-secret-change-in-prod}
+      CONTEXT_HMAC_SECRET: ${CONTEXT_HMAC_SECRET:-test-context-secret-change-in-prod}
 
   # ── UI — test persona login panel ─────────────────────────────────────────
-  rm-prep-ui:
+  agent-ui:
     environment:
       AUTH_MODE: jwt
       JWT_SECRET: ${JWT_SECRET:-test-secret-change-in-prod}

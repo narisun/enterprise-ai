@@ -96,9 +96,11 @@ dev-status: ## Show container health status
 
 # ---- Testing -----------------------------------------------
 
-test: test-agents test-mcp test-policies ## Run all tests
+test: test-unit test-policies ## Run fast tests (unit + OPA) — no Docker required
 
-test-agents: sdk-install ## Run agent service unit tests
+test-all: test-unit test-policies test-integration ## Run all non-eval tests (requires Docker stack)
+
+test-agents: sdk-install ## Run legacy agent service unit tests
 	@echo "→ Installing agent dependencies..."
 	$(PIP) install -r agents/requirements.txt --quiet
 	@echo "→ Running agent tests..."
@@ -109,6 +111,43 @@ test-mcp: sdk-install ## Run data-mcp unit tests
 	$(PIP) install -r tools/data-mcp/requirements.txt --quiet
 	@echo "→ Running data-mcp tests..."
 	cd tools/data-mcp && $(REPO_ROOT)/$(PYTEST) tests/ -v --tb=short
+
+test-unit: sdk-install ## Run Layer 1 unit tests (auth, cache, brief rendering — no Docker)
+	@echo "→ Installing test + agent dependencies..."
+	$(PIP) install -r tests/requirements.txt --quiet
+	$(PIP) install -r agents/rm-prep/requirements.txt --quiet
+	@echo "→ Running unit tests..."
+	$(PYTEST) tests/unit/ -m unit -v --tb=short --color=yes
+
+test-integration: sdk-install ## Run Layer 2 integration tests (requires dev-test-up stack)
+	@echo "→ Installing test dependencies..."
+	$(PIP) install -r tests/requirements.txt --quiet
+	@echo "→ Running integration tests..."
+	@echo "   (requires 'make dev-test-up' first)"
+	$(PYTEST) tests/integration/ -m integration -v --tb=short --color=yes \
+	  --timeout=60
+
+test-evals: sdk-install ## Run Layer 3 LLM-in-the-loop evals (requires full stack + LLM creds)
+	@echo "→ Installing test dependencies..."
+	$(PIP) install -r tests/requirements.txt --quiet
+	$(PIP) install -r agents/rm-prep/requirements.txt --quiet
+	@echo "→ Running eval tests..."
+	@echo "   (requires 'make dev-test-up' + LLM credentials)"
+	$(PYTEST) tests/evals/ -m "eval and slow" -v --tb=short --color=yes \
+	  --timeout=300
+
+test-evals-fidelity: sdk-install ## Run specialist fidelity evals only (faster)
+	$(PIP) install -r tests/requirements.txt --quiet
+	$(PIP) install -r agents/rm-prep/requirements.txt --quiet
+	$(PYTEST) tests/evals/test_specialist_fidelity.py -m eval -v --tb=short --timeout=120
+
+test-evals-synthesis: sdk-install ## Run synthesis quality evals only
+	$(PIP) install -r tests/requirements.txt --quiet
+	$(PYTEST) tests/evals/test_synthesis_quality.py -m eval -v --tb=short --timeout=300
+
+test-evals-faithfulness: sdk-install ## Run RAGAS faithfulness evals only (hallucination detection)
+	$(PIP) install -r tests/requirements.txt --quiet
+	$(PYTEST) tests/evals/test_faithfulness.py -m "eval and slow" -v --tb=short --timeout=300
 
 test-policies: ## Run OPA policy unit tests
 	@echo "→ Running OPA policy tests..."

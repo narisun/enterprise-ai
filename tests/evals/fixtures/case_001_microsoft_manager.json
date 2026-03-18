@@ -1,0 +1,140 @@
+{
+  "_description": "Full-access manager viewing Microsoft Corp. — all data visible, no column masking.",
+  "persona": "manager",
+  "client_name": "Microsoft Corp.",
+  "prompt": "Prepare me for my meeting with Microsoft Corp. tomorrow.",
+
+  "crm_output": {
+    "account_id": "001000000000001AAA",
+    "account_name": "Microsoft Corp.",
+    "account_owner": "Alice Manager (test)",
+    "industry": "Technology",
+    "annual_revenue": 211915000000,
+    "number_of_employees": 221000,
+    "billing_country": "United States",
+    "phone": "+1-425-882-8080",
+    "website": "https://www.microsoft.com",
+    "last_activity_date": "2026-02-25",
+    "last_activity_subject": "Discovery call re Q1 liquidity programme",
+    "open_opportunities": [
+      {
+        "opportunity_id": "006000000000001AAA",
+        "name": "FX Hedging Programme — Q2 2026",
+        "stage": "Proposal/Price Quote",
+        "amount": 1200000,
+        "close_date": "2026-04-30",
+        "probability": 65
+      },
+      {
+        "opportunity_id": "006000000000002AAA",
+        "name": "Trade Finance Facility",
+        "stage": "Needs Analysis",
+        "amount": 850000,
+        "close_date": "2026-06-15",
+        "probability": 40
+      }
+    ],
+    "recent_tasks": [
+      {
+        "subject": "Send Q1 proposal",
+        "status": "Not Started",
+        "due_date": "2026-03-31",
+        "owner": "Alice Manager (test)"
+      }
+    ],
+    "recent_events": [
+      {
+        "subject": "Quarterly review — Microsoft treasury",
+        "start_datetime": "2026-02-25T10:00:00Z",
+        "end_datetime": "2026-02-25T11:00:00Z",
+        "attendees": ["Jane Smith", "Alice Manager (test)"]
+      }
+    ],
+    "key_contacts": [
+      {
+        "name": "Jane Smith",
+        "title": "Chief Financial Officer",
+        "email": "j.smith@microsoft.com",
+        "phone": "+1-425-000-0001"
+      }
+    ],
+    "retrieved_at": "2026-03-18T20:00:00Z"
+  },
+
+  "payments_output": {
+    "client_name": "Microsoft Corp.",
+    "period_days": 360,
+    "total_outbound_usd": 45200000.0,
+    "total_inbound_usd": 12800000.0,
+    "by_payment_type": {
+      "Wire": { "outbound_usd": 36160000.0, "inbound_usd": 9600000.0, "tx_count": 142 },
+      "ACH":  { "outbound_usd": 9040000.0,  "inbound_usd": 3200000.0, "tx_count": 389 }
+    },
+    "volume_trend_pct": 12.3,
+    "trend_label": "INCREASING",
+    "sending_banks": [
+      { "bank": "JPMorgan Chase",   "tx_count": 120, "total_usd": 28500000.0 },
+      { "bank": "Bank of America",  "tx_count": 87,  "total_usd": 12400000.0 }
+    ],
+    "transaction_status_mix": [
+      { "status": "Completed", "count": 498, "total_usd": 57950000.0 },
+      { "status": "Pending",   "count": 33,  "total_usd": 0.0 }
+    ],
+    "top_counterparties": [
+      {
+        "name": "Alphabet Inc.", "bank": "Citibank", "payment_type": "Wire",
+        "currency": "USD", "total_usd": 18200000.0, "tx_count": 62
+      },
+      {
+        "name": "Amazon Web Services", "bank": "Wells Fargo", "payment_type": "ACH",
+        "currency": "USD", "total_usd": 7500000.0, "tx_count": 180
+      }
+    ],
+    "party_profile": {
+      "segment": "Corporate",
+      "kyc_status": "Verified",
+      "aml_risk_category": "Low",
+      "risk_rating": "A",
+      "sanctions_status": "Clear",
+      "pep_flag": false,
+      "fraud_segment": "Standard",
+      "relationship_since": "2018-01-15",
+      "customer_status": "Active"
+    },
+    "retrieved_at": "2026-03-18T20:00:00Z"
+  },
+
+  "news_output": {
+    "company": "Microsoft Corp.",
+    "articles": [
+      {
+        "title": "Microsoft Announces Azure Expansion in Southeast Asia",
+        "source": "Reuters",
+        "published_at": "2026-03-10T09:00:00Z",
+        "url": "https://reuters.com/example/msft-azure-apac",
+        "summary": "Microsoft plans $2B data centre investment in Singapore and Thailand, expanding cloud infrastructure for APAC clients."
+      },
+      {
+        "title": "Microsoft Q2 Revenue Beats Estimates on Cloud Growth",
+        "source": "Bloomberg",
+        "published_at": "2026-03-05T14:30:00Z",
+        "url": "https://bloomberg.com/example/msft-q2",
+        "summary": "Microsoft reported Q2 revenue of $62B, beating analyst estimates by 3%, driven by Azure revenue growth of 28% YoY."
+      }
+    ],
+    "retrieved_at": "2026-03-18T20:00:00Z"
+  },
+
+  "expected_rubric": {
+    "cites_payment_volume": true,
+    "cites_trend_increasing": true,
+    "mentions_top_counterparty": true,
+    "mentions_crm_contact": true,
+    "mentions_open_opportunity": true,
+    "mentions_news": true,
+    "compliance_fields_visible": true,
+    "no_access_denied_message": true,
+    "all_sections_present": true,
+    "no_fabricated_figures": true
+  }
+}

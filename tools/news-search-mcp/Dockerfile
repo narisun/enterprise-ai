@@ -12,6 +12,8 @@ COPY tools/news-search-mcp/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY tools/news-search-mcp/src/ /app/src/
+# Shared MCP utilities (AgentContextMiddleware, get_agent_context)
+COPY tools/shared/ /app/tools_shared/
 
 RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
 USER appuser

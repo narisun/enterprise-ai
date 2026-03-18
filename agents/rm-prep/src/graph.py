@@ -29,7 +29,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph
 from pydantic import BaseModel
 
-from platform_sdk import AgentConfig, build_specialist_agent, configure_logging, get_logger, make_chat_llm
+from platform_sdk import AgentConfig, AgentContext, build_specialist_agent, configure_logging, get_logger, make_chat_llm
 from .brief import RMBrief, render_brief
 from .state import RMPrepState
 
@@ -164,7 +164,7 @@ def _make_gather_payments_node(pay_agent):
         exact_name = state.get("account_name") or state.get("client_name", "")
         try:
             result = await pay_agent.ainvoke({
-                "messages": [HumanMessage(content=f'Call get_payment_summary with client_name="{exact_name}" and days=360')]
+                "messages": [HumanMessage(content=f'Call get_payment_summary with client_name="{exact_name}"')]
             })
             output = result["messages"][-1].content
             log.info("payments_gathered", client=exact_name)
@@ -300,28 +300,44 @@ def build_rm_orchestrator(
     return builder.compile(checkpointer=checkpointer)
 
 
-# ─── Lifespan context manager ─────────────────────────────────────────────────
+# ─── Bridge + agent factory (reused by lifespan and per-request test path) ────
 
-@asynccontextmanager
-async def orchestrator_lifespan(app):
-    """Connect to all 3 MCP servers, build specialist agents and orchestrator."""
-    from .mcp_bridge import MCPToolBridge  # copied from agents/src/ in Dockerfile
+async def build_rm_orchestrator_with_bridges(
+    sf_url: str,
+    pay_url: str,
+    news_url: str,
+    agent_context: "AgentContext",
+    config: "AgentConfig",
+) -> tuple:
+    """Connect bridges with *agent_context*, build agents, and return the
+    compiled orchestrator plus a mapping of the live bridges.
 
-    config = AgentConfig.from_env()
+    Usage::
 
-    sf_url  = os.environ.get("SALESFORCE_MCP_URL",  "http://salesforce-mcp:8081/sse")
-    pay_url = os.environ.get("PAYMENTS_MCP_URL",    "http://payments-mcp:8082/sse")
-    news_url = os.environ.get("NEWS_MCP_URL",       "http://news-search-mcp:8083/sse")
+        orchestrator, bridges = await build_rm_orchestrator_with_bridges(
+            sf_url, pay_url, news_url, ctx, config
+        )
+        try:
+            result = await orchestrator.ainvoke(...)
+        finally:
+            for bridge in bridges.values():
+                await bridge.disconnect()
+
+    This is used by ``orchestrator_lifespan`` for the long-lived shared
+    context and by the ``/brief/persona`` endpoint for per-request persona
+    testing where the X-Agent-Context header must carry a specific role.
+    """
+    from .mcp_bridge import MCPToolBridge
 
     bridges = {
-        "salesforce": MCPToolBridge(sf_url),
-        "payments":   MCPToolBridge(pay_url),
-        "news":       MCPToolBridge(news_url),
+        "salesforce": MCPToolBridge(sf_url,  agent_context=agent_context),
+        "payments":   MCPToolBridge(pay_url, agent_context=agent_context),
+        "news":       MCPToolBridge(news_url, agent_context=agent_context),
     }
 
     for name, bridge in bridges.items():
         await bridge.connect()
-        log.info("mcp_connected", server=name)
+        log.info("mcp_connected", server=name, role=agent_context.role)
 
     sf_tools   = await bridges["salesforce"].get_langchain_tools()
     pay_tools  = await bridges["payments"].get_langchain_tools()
@@ -337,10 +353,62 @@ async def orchestrator_lifespan(app):
 
     synthesis_llm = make_chat_llm(config.synthesis_model_route)
 
-    app.state.orchestrator = build_rm_orchestrator(
-        crm_agent, pay_agent, news_agent, synthesis_llm, config
+    orchestrator = build_rm_orchestrator(crm_agent, pay_agent, news_agent, synthesis_llm, config)
+    return orchestrator, bridges
+
+
+# ─── Lifespan context manager ─────────────────────────────────────────────────
+
+@asynccontextmanager
+async def orchestrator_lifespan(app):
+    """Connect to all 3 MCP servers, build specialist agents and orchestrator.
+
+    AgentContext and MCPToolBridge
+    ──────────────────────────────
+    Each bridge sends the AgentContext as a signed X-Agent-Context header on
+    the SSE connection.  MCP servers verify the HMAC and use the context for
+    row/column filtering.
+
+    Shared context: In dev (ENVIRONMENT=local/dev) the orchestrator uses a
+    manager-level context so all data is accessible.  Individual row/col
+    restrictions are tested via the /brief/persona endpoint which builds
+    fresh per-request bridges carrying the target persona's AgentContext.
+
+    In production ENVIRONMENT this builds an rm-level context (no accounts)
+    which will correctly deny access, signalling that production deployments
+    must provide per-request JWT-derived contexts rather than the shared one.
+    """
+    config = AgentConfig.from_env()
+
+    sf_url   = os.environ.get("SALESFORCE_MCP_URL",  "http://salesforce-mcp:8081/sse")
+    pay_url  = os.environ.get("PAYMENTS_MCP_URL",    "http://payments-mcp:8082/sse")
+    news_url = os.environ.get("NEWS_MCP_URL",        "http://news-search-mcp:8083/sse")
+
+    # Build a signed orchestrator context.  In dev (ENVIRONMENT=local/dev) this
+    # grants manager-level access so all data is accessible during development.
+    _env = os.environ.get("ENVIRONMENT", "prod")
+    orchestrator_ctx = AgentContext(
+        rm_id="rm-prep-orchestrator",
+        rm_name="RM Prep Orchestrator",
+        role="manager" if _env in ("local", "dev") else "rm",
+        team_id="system",
+        assigned_account_ids=(),
+        compliance_clearance=("standard", "aml_view", "compliance_full") if _env in ("local", "dev") else ("standard",),
     )
+    log.info(
+        "orchestrator_context_built",
+        role=orchestrator_ctx.role,
+        env=_env,
+        clearance=list(orchestrator_ctx.compliance_clearance),
+    )
+
+    orchestrator, bridges = await build_rm_orchestrator_with_bridges(
+        sf_url, pay_url, news_url, orchestrator_ctx, config
+    )
+
+    app.state.orchestrator = orchestrator
     app.state.config = config
+    app.state.mcp_urls = {"sf": sf_url, "pay": pay_url, "news": news_url}
     log.info("rm_prep_orchestrator_ready")
 
     yield

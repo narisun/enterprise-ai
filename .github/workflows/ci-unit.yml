@@ -1,0 +1,114 @@
+# ============================================================
+# CI — Unit Tests
+#
+# Runs on every push and pull request.
+# No Docker, no network, no LLM — must pass in under 2 minutes.
+#
+# Gate: blocks merge if any unit test fails.
+# ============================================================
+name: CI Unit Tests
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  unit-tests:
+    name: Unit Tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install platform SDK
+        run: pip install -e platform-sdk/ --quiet
+
+      - name: Install test dependencies
+        run: pip install -r tests/requirements.txt --quiet
+
+      - name: Install rm-prep agent dependencies (for brief.py import)
+        run: pip install -r agents/rm-prep/requirements.txt --quiet
+
+      - name: Run unit tests
+        env:
+          JWT_SECRET: "ci-unit-test-jwt-secret"
+          CONTEXT_HMAC_SECRET: "ci-unit-test-hmac-secret"
+        run: |
+          python -m pytest tests/unit/ \
+            -m unit \
+            -v \
+            --tb=short \
+            --timeout=30 \
+            --color=yes
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-results-py${{ matrix.python-version }}
+          path: .pytest_cache/
+
+  # OPA policy tests run here alongside unit tests — no Docker needed
+  # because the OPA CLI is available on GitHub-hosted runners.
+  opa-policy-tests:
+    name: OPA Policy Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install OPA CLI
+        run: |
+          curl -L -o opa https://openpolicyagent.org/downloads/v0.65.0/opa_linux_amd64_static
+          chmod +x opa
+          sudo mv opa /usr/local/bin/opa
+
+      - name: Run OPA unit tests
+        run: opa test tools/policies/opa/ -v
+
+      - name: Check policy format
+        run: opa fmt --diff tools/policies/opa/
+
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install ruff
+        run: pip install ruff --quiet
+
+      - name: Run ruff
+        run: |
+          ruff check \
+            agents/rm-prep/src/ \
+            tools/payments-mcp/src/ \
+            tools/salesforce-mcp/src/ \
+            platform-sdk/platform_sdk/ \
+            tests/ \
+            --select=E,F,W \
+            --ignore=E501 \
+            --quiet

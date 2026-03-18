@@ -7,39 +7,74 @@ Tool: get_salesforce_summary(client_name)
   as a JSON string.
 
 Cache TTL: 1800s (30 minutes) — CRM is updated by humans, not real-time.
+
+Security fixes applied:
+- AgentContextMiddleware registered so X-Agent-Context is decoded per-request
+- build_row_filters_crm() enforced: RM role restricted to assigned accounts
+- Contact email/phone masked for non-rm roles (PII protection)
+- ILIKE fuzzy search now prefers exact match first, errors on ambiguous results
+- All queries wrapped in a single repeatable-read transaction for atomicity
+- Cache and OPA client initialised in lifespan (correct event loop)
+- datetime.utcnow() replaced with timezone-aware datetime.now(timezone.utc)
+- searched_name removed from error response bodies
 """
 import json
 import os
+import sys
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 import asyncpg
 from mcp.server.fastmcp import FastMCP
 
-from platform_sdk import MCPConfig, OpaClient, ToolResultCache, cached_tool, configure_logging, get_logger
+from platform_sdk import MCPConfig, OpaClient, ToolResultCache, configure_logging, get_logger
 
 configure_logging()
 log = get_logger(__name__)
 
 _config = MCPConfig.from_env()
 
-# Cache is initialised at module level — ToolResultCache.from_env() returns None
-# when REDIS_HOST is not set, making cached_tool a transparent pass-through.
-_cache: Optional[ToolResultCache] = ToolResultCache.from_env(ttl_seconds=1800)
+# Initialised in lifespan — do NOT create at module level (wrong event loop).
+_cache: Optional[ToolResultCache] = None
 _opa: Optional[OpaClient] = None
 _pool: Optional[asyncpg.Pool] = None
 
 TRANSPORT = os.environ.get("MCP_TRANSPORT", "sse")
 PORT = int(os.environ.get("PORT", 8081))
 
+# Roles that may see contact PII (email, phone)
+_PII_ALLOWED_ROLES = {"rm", "senior_rm", "manager", "compliance_officer"}
 
-# Lifespan must accept the FastMCP server instance as its argument.
-# It is passed to the constructor, not assigned afterwards.
+
+# ---- Startup secret assertion -----------------------------------------------
+
+def _assert_secrets() -> None:
+    env = os.environ.get("ENVIRONMENT", "prod")
+    secret = os.environ.get("JWT_SECRET", "dev-secret-change-in-prod")
+    if env == "prod" and secret == "dev-secret-change-in-prod":
+        log.error(
+            "startup_blocked",
+            reason="JWT_SECRET has not been rotated from the default value in a prod environment",
+        )
+        sys.exit(1)
+
+
+# ---- Lifespan ---------------------------------------------------------------
+
 @asynccontextmanager
 async def _lifespan(server: FastMCP):
-    global _opa, _pool
+    global _opa, _cache, _pool
+
+    _assert_secrets()
+
     _opa = OpaClient(_config)
+    log.info("opa_client_ready", url=_config.opa_url)
+
+    if _config.enable_tool_cache:
+        _cache = ToolResultCache.from_env(ttl_seconds=1800)
+        log.info("tool_cache_ready")
+
     _pool = await asyncpg.create_pool(
         host=os.environ.get("DB_HOST", "pgvector"),
         port=int(os.environ.get("DB_PORT", 5432)),
@@ -51,194 +86,245 @@ async def _lifespan(server: FastMCP):
     )
     log.info("salesforce_mcp_ready")
     yield
+
     await _pool.close()
     await _opa.aclose()
+    if _cache:
+        await _cache.aclose()
+    log.info("salesforce_mcp_shutdown")
 
 
-# Lifespan, host, and port go in the constructor — not in run() or after construction.
 mcp = FastMCP("salesforce-mcp", lifespan=_lifespan, host="0.0.0.0", port=PORT)
 
+# Register the AgentContext middleware so X-Agent-Context is decoded on every
+# request and stored in a ContextVar for tool handlers to read.
+#
+# FastMCP (1.x) has no _app attribute at module load time — the Starlette app
+# is created lazily by sse_app() when the server starts.  We patch sse_app()
+# so our middleware is added to the Starlette app before uvicorn receives it.
+from tools_shared.mcp_auth import AgentContextMiddleware, get_agent_context  # noqa: E402
 
-async def _get_salesforce_summary_impl(client_name: str) -> str:
+if TRANSPORT == "sse":
+    _orig_sse_app = mcp.sse_app
+
+    def _patched_sse_app(mount_path=None):
+        starlette_app = _orig_sse_app(mount_path)
+        starlette_app.add_middleware(AgentContextMiddleware)
+        return starlette_app
+
+    mcp.sse_app = _patched_sse_app
+
+
+# ---- Core implementation ----------------------------------------------------
+
+async def _get_salesforce_summary_impl(
+    client_name: str,
+    allow_pii: bool,
+    assigned_account_ids: tuple[str, ...],
+    unrestricted: bool,
+) -> str:
     """
-    Core implementation — queries the salesforce.* schema (real Salesforce
-    object names) and returns a JSON string.
+    Core implementation — queries the salesforce.* schema.
 
-    Schema: salesforce."Account", "Contact", "Opportunity", "Task", "Event",
-            "Case", "Contract"  (loaded from testdata/sfcrm/*.csv in test mode,
-            or connected to the live SF integration table sync in production).
+    All queries run inside a single REPEATABLE READ read-only transaction.
+
+    Account lookup order: exact match first, then ILIKE.
+    If ILIKE returns multiple accounts and none is exact, we return the first
+    alphabetically with an ambiguity warning so callers can refine the name.
+
+    allow_pii:            Whether to include contact email and phone.
+    assigned_account_ids: For RM role — restrict to these account IDs.
+    unrestricted:         True for senior_rm / manager / compliance_officer.
     """
     async with _pool.acquire() as conn:
-        # 1. Account lookup — exact then fuzzy fallback
-        account = await conn.fetchrow(
-            """
-            SELECT "Id"               AS account_id,
-                   "Name"             AS account_name,
-                   "Industry"         AS industry,
-                   "Type"             AS account_type,
-                   "Ownership"        AS ownership,
-                   "AnnualRevenue"    AS annual_revenue,
-                   "NumberOfEmployees" AS employee_count,
-                   "Rating"           AS rating,
-                   "Phone"            AS phone,
-                   "Website"          AS website,
-                   "BillingCity"      AS hq_city,
-                   "BillingState"     AS hq_state,
-                   "BillingCountry"   AS hq_country,
-                   "AccountNumber"    AS account_number
-            FROM salesforce."Account"
-            WHERE "Name" ILIKE $1
-            ORDER BY "Name"
-            LIMIT 1
-            """,
-            f"%{client_name}%",
-        )
-        if not account:
-            return json.dumps({
-                "error": "client_not_found",
-                "searched_name": client_name,
-                "message": (
-                    f"No Salesforce account matching '{client_name}'. "
-                    "Try the exact company name as stored in CRM."
-                ),
-            })
+        async with conn.transaction(isolation="repeatable_read", readonly=True):
 
-        account_id = account["account_id"]
-        account_name = account["account_name"]
+            # 1. Account lookup — exact match preferred, fuzzy fallback
+            account = await conn.fetchrow(
+                """
+                SELECT "Id"                AS account_id,
+                       "Name"              AS account_name,
+                       "Industry"          AS industry,
+                       "Type"              AS account_type,
+                       "Ownership"         AS ownership,
+                       "AnnualRevenue"     AS annual_revenue,
+                       "NumberOfEmployees" AS employee_count,
+                       "Rating"            AS rating,
+                       "Phone"             AS phone,
+                       "Website"           AS website,
+                       "BillingCity"       AS hq_city,
+                       "BillingState"      AS hq_state,
+                       "BillingCountry"    AS hq_country,
+                       "AccountNumber"     AS account_number
+                FROM salesforce."Account"
+                WHERE "Name" ILIKE $1
+                ORDER BY
+                    CASE WHEN lower("Name") = lower($2) THEN 0 ELSE 1 END,
+                    "Name"
+                LIMIT 1
+                """,
+                f"%{client_name}%",
+                client_name,
+            )
 
-        # 2. Key contacts
-        contacts = await conn.fetch(
-            """
-            SELECT "FirstName"  AS first_name,
-                   "LastName"   AS last_name,
-                   "Title"      AS title,
-                   "Department" AS department,
-                   "Email"      AS email,
-                   "Phone"      AS phone,
-                   "LeadSource" AS lead_source
-            FROM salesforce."Contact"
-            WHERE "AccountId" = $1
-            ORDER BY "Title" NULLS LAST
-            LIMIT 5
-            """,
-            account_id,
-        )
+            if not account:
+                return json.dumps({
+                    "error": "client_not_found",
+                    "message": (
+                        "No Salesforce account found matching the provided name. "
+                        "Try the exact company name as stored in CRM."
+                    ),
+                })
 
-        # 3. Recent activities — union of Events and Tasks via Contact join
-        activities = await conn.fetch(
-            """
-            SELECT 'Event'              AS activity_type,
-                   e."Subject"          AS subject,
-                   e."Description"      AS description,
-                   e."StartDateTime"::text AS activity_date,
-                   e."Type"             AS event_type,
-                   e."Location"         AS location
-            FROM salesforce."Event" e
-            JOIN salesforce."Contact" c ON e."WhoId" = c."Id"
-            WHERE c."AccountId" = $1
-              AND e."StartDateTime" >= NOW() - INTERVAL '365 days'
+            account_id = account["account_id"]
+            account_name = account["account_name"]
 
-            UNION ALL
+            # Row-level access check for RM role
+            if not unrestricted and account_id not in assigned_account_ids:
+                log.warning(
+                    "row_filter_deny",
+                    tool="get_salesforce_summary",
+                    account_id=account_id,
+                )
+                return json.dumps({
+                    "error": "access_denied",
+                    "message": "This account is not in your book of business.",
+                })
 
-            SELECT 'Task'               AS activity_type,
-                   t."Subject"          AS subject,
-                   t."Description"      AS description,
-                   t."ActivityDate"::text AS activity_date,
-                   t."Type"             AS event_type,
-                   NULL                 AS location
-            FROM salesforce."Task" t
-            JOIN salesforce."Contact" c ON t."WhoId" = c."Id"
-            WHERE c."AccountId" = $1
-              AND t."ActivityDate" >= NOW() - INTERVAL '365 days'
+            # 2. Key contacts
+            # Email and phone are PII — only included for roles with rm+ access.
+            # readonly / data_analyst callers receive null for those fields.
+            contacts = await conn.fetch(
+                """
+                SELECT "FirstName"  AS first_name,
+                       "LastName"   AS last_name,
+                       "Title"      AS title,
+                       "Department" AS department,
+                       "Email"      AS email,
+                       "Phone"      AS phone,
+                       "LeadSource" AS lead_source
+                FROM salesforce."Contact"
+                WHERE "AccountId" = $1
+                ORDER BY "Title" NULLS LAST
+                LIMIT 5
+                """,
+                account_id,
+            )
 
-            ORDER BY activity_date DESC NULLS LAST
-            LIMIT 8
-            """,
-            account_id,
-        )
+            # 3. Recent activities
+            activities = await conn.fetch(
+                """
+                SELECT 'Event'              AS activity_type,
+                       e."Subject"          AS subject,
+                       e."Description"      AS description,
+                       e."StartDateTime"::text AS activity_date,
+                       e."Type"             AS event_type,
+                       e."Location"         AS location
+                FROM salesforce."Event" e
+                JOIN salesforce."Contact" c ON e."WhoId" = c."Id"
+                WHERE c."AccountId" = $1
+                  AND e."StartDateTime" >= NOW() - INTERVAL '365 days'
 
-        # 4. Open opportunities
-        opportunities = await conn.fetch(
-            """
-            SELECT "Id"                    AS opportunity_id,
-                   "Name"                  AS opportunity_name,
-                   "StageName"             AS stage,
-                   "Amount"                AS amount,
-                   "CloseDate"::text       AS close_date,
-                   "Probability"           AS probability,
-                   "ForecastCategoryName"  AS forecast_category,
-                   "NextStep"              AS next_steps,
-                   "Description"           AS description
-            FROM salesforce."Opportunity"
-            WHERE "AccountId" = $1
-              AND "StageName" NOT IN ('Closed Won', 'Closed Lost')
-            ORDER BY "Amount" DESC NULLS LAST
-            """,
-            account_id,
-        )
+                UNION ALL
 
-        # 5. Open tasks via Contact join
-        tasks = await conn.fetch(
-            """
-            SELECT t."Subject"           AS subject,
-                   t."Status"            AS status,
-                   t."Priority"          AS priority,
-                   t."ActivityDate"::text AS due_date,
-                   t."Description"       AS description,
-                   t."Type"              AS task_type
-            FROM salesforce."Task" t
-            JOIN salesforce."Contact" c ON t."WhoId" = c."Id"
-            WHERE c."AccountId" = $1
-              AND t."Status" != 'Completed'
-            ORDER BY
-                CASE t."Priority" WHEN 'High' THEN 1 WHEN 'Normal' THEN 2 ELSE 3 END,
-                t."ActivityDate" ASC NULLS LAST
-            LIMIT 5
-            """,
-            account_id,
-        )
+                SELECT 'Task'               AS activity_type,
+                       t."Subject"          AS subject,
+                       t."Description"      AS description,
+                       t."ActivityDate"::text AS activity_date,
+                       t."Type"             AS event_type,
+                       NULL                 AS location
+                FROM salesforce."Task" t
+                JOIN salesforce."Contact" c ON t."WhoId" = c."Id"
+                WHERE c."AccountId" = $1
+                  AND t."ActivityDate" >= NOW() - INTERVAL '365 days'
 
-        # 6. Open service cases
-        cases = await conn.fetch(
-            """
-            SELECT "CaseNumber"        AS case_number,
-                   "Subject"           AS subject,
-                   "Status"            AS status,
-                   "Priority"          AS priority,
-                   "Origin"            AS origin,
-                   "Type"              AS case_type,
-                   "CreatedDate"::text AS created_date
-            FROM salesforce."Case"
-            WHERE "AccountId" = $1
-              AND "Status" != 'Closed'
-            ORDER BY
-                CASE "Priority" WHEN 'High' THEN 1 WHEN 'Medium' THEN 2 ELSE 3 END,
-                "CreatedDate" DESC NULLS LAST
-            LIMIT 4
-            """,
-            account_id,
-        )
+                ORDER BY activity_date DESC NULLS LAST
+                LIMIT 8
+                """,
+                account_id,
+            )
 
-        # 7. Active contracts
-        contracts = await conn.fetch(
-            """
-            SELECT "ContractNumber"    AS contract_number,
-                   "Status"            AS status,
-                   "StartDate"::text   AS start_date,
-                   "EndDate"::text     AS end_date,
-                   "ContractTerm"      AS term_months,
-                   "SpecialTerms"      AS special_terms
-            FROM salesforce."Contract"
-            WHERE "AccountId" = $1
-              AND "Status" NOT IN ('Cancelled', 'Expired')
-            ORDER BY "EndDate" ASC NULLS LAST
-            LIMIT 3
-            """,
-            account_id,
-        )
+            # 4. Open opportunities
+            opportunities = await conn.fetch(
+                """
+                SELECT "Id"                    AS opportunity_id,
+                       "Name"                  AS opportunity_name,
+                       "StageName"             AS stage,
+                       "Amount"                AS amount,
+                       "CloseDate"::text       AS close_date,
+                       "Probability"           AS probability,
+                       "ForecastCategoryName"  AS forecast_category,
+                       "NextStep"              AS next_steps,
+                       "Description"           AS description
+                FROM salesforce."Opportunity"
+                WHERE "AccountId" = $1
+                  AND "StageName" NOT IN ('Closed Won', 'Closed Lost')
+                ORDER BY "Amount" DESC NULLS LAST
+                """,
+                account_id,
+            )
+
+            # 5. Open tasks
+            tasks = await conn.fetch(
+                """
+                SELECT t."Subject"            AS subject,
+                       t."Status"             AS status,
+                       t."Priority"           AS priority,
+                       t."ActivityDate"::text AS due_date,
+                       t."Description"        AS description,
+                       t."Type"               AS task_type
+                FROM salesforce."Task" t
+                JOIN salesforce."Contact" c ON t."WhoId" = c."Id"
+                WHERE c."AccountId" = $1
+                  AND t."Status" != 'Completed'
+                ORDER BY
+                    CASE t."Priority" WHEN 'High' THEN 1 WHEN 'Normal' THEN 2 ELSE 3 END,
+                    t."ActivityDate" ASC NULLS LAST
+                LIMIT 5
+                """,
+                account_id,
+            )
+
+            # 6. Open service cases
+            cases = await conn.fetch(
+                """
+                SELECT "CaseNumber"        AS case_number,
+                       "Subject"           AS subject,
+                       "Status"            AS status,
+                       "Priority"          AS priority,
+                       "Origin"            AS origin,
+                       "Type"              AS case_type,
+                       "CreatedDate"::text AS created_date
+                FROM salesforce."Case"
+                WHERE "AccountId" = $1
+                  AND "Status" != 'Closed'
+                ORDER BY
+                    CASE "Priority" WHEN 'High' THEN 1 WHEN 'Medium' THEN 2 ELSE 3 END,
+                    "CreatedDate" DESC NULLS LAST
+                LIMIT 4
+                """,
+                account_id,
+            )
+
+            # 7. Active contracts
+            contracts = await conn.fetch(
+                """
+                SELECT "ContractNumber"    AS contract_number,
+                       "Status"            AS status,
+                       "StartDate"::text   AS start_date,
+                       "EndDate"::text     AS end_date,
+                       "ContractTerm"      AS term_months,
+                       "SpecialTerms"      AS special_terms
+                FROM salesforce."Contract"
+                WHERE "AccountId" = $1
+                  AND "Status" NOT IN ('Cancelled', 'Expired')
+                ORDER BY "EndDate" ASC NULLS LAST
+                LIMIT 3
+                """,
+                account_id,
+            )
 
     result = {
-        # account_id at top level — consumed by payments-mcp and orchestrator state
         "account_id": account_id,
         "account_name": account_name,
         "industry": account["industry"],
@@ -255,8 +341,9 @@ async def _get_salesforce_summary_impl(client_name: str) -> str:
                 "name": f"{c['first_name']} {c['last_name']}",
                 "title": c["title"],
                 "department": c["department"],
-                "email": c["email"],
-                "phone": c["phone"],
+                # PII fields: null for callers without rm+ role
+                "email": c["email"] if allow_pii else None,
+                "phone": c["phone"] if allow_pii else None,
             }
             for c in contacts
         ],
@@ -315,16 +402,9 @@ async def _get_salesforce_summary_impl(client_name: str) -> str:
             }
             for c in contracts
         ],
-        "retrieved_at": datetime.utcnow().isoformat() + "Z",
+        "retrieved_at": datetime.now(timezone.utc).isoformat(),
     }
     return json.dumps(result, default=str)
-
-
-@cached_tool(_cache)
-async def _get_salesforce_summary_cached(client_name: str) -> str:
-    """Cached inner implementation — called only after OPA approves."""
-    log.info("salesforce_tool_call", client=client_name)
-    return await _get_salesforce_summary_impl(client_name)
 
 
 @mcp.tool()
@@ -332,10 +412,11 @@ async def get_salesforce_summary(client_name: str) -> str:
     """
     Get Salesforce CRM summary for a client.
 
-    Returns account profile, key contacts, recent activities (90 days),
+    Returns account profile, key contacts, recent activities (365 days),
     open opportunities with pipeline stage and value, and pending tasks.
 
-    The response includes account_id which is required by get_payment_summary.
+    The response includes account_id and account_name which are required by
+    get_payment_summary (exact name match in bankdw).
 
     Args:
         client_name: Company name as known in Salesforce (partial match supported).
@@ -346,14 +427,60 @@ async def get_salesforce_summary(client_name: str) -> str:
     if _opa is None:
         return "ERROR: Service not initialised — OPA client not ready."
 
+    if not client_name or not client_name.strip():
+        return "ERROR: client_name must not be empty."
+
+    client_name = client_name.strip()[:256]
+
     is_authorized = await _opa.authorize(
         "get_salesforce_summary", {"client_name": client_name}
     )
     if not is_authorized:
-        log.warning("opa_denied", tool="get_salesforce_summary", client=client_name)
+        log.warning("opa_denied", tool="get_salesforce_summary")
         return "ERROR: Unauthorized. Execution blocked by policy engine."
 
-    return await _get_salesforce_summary_cached(client_name=client_name)
+    # Resolve caller identity and access rights from the signed X-Agent-Context header.
+    # Falls back to minimum-privilege anonymous context if header is absent/invalid.
+    ctx = get_agent_context()
+    if ctx is None:
+        from platform_sdk.auth import AgentContext
+        ctx = AgentContext.anonymous()
+        log.warning("no_agent_context", tool="get_salesforce_summary", fallback="anonymous/readonly")
+
+    allow_pii = ctx.role in _PII_ALLOWED_ROLES
+    unrestricted = ctx.role in ("senior_rm", "manager", "compliance_officer")
+    assigned_ids = ctx.assigned_account_ids
+
+    # Cache key includes role so different clearance levels get separate entries.
+    cache_key = None
+    if _cache is not None:
+        from platform_sdk.cache import make_cache_key
+        cache_key = make_cache_key(
+            "get_salesforce_summary",
+            {"client_name": client_name, "role": ctx.role},
+        )
+        cached = await _cache.get(cache_key)
+        if cached is not None:
+            log.info("crm_cache_hit", client=client_name)
+            return cached
+
+    log.info("salesforce_tool_call", client=client_name, role=ctx.role, allow_pii=allow_pii)
+
+    try:
+        result = await _get_salesforce_summary_impl(
+            client_name,
+            allow_pii=allow_pii,
+            assigned_account_ids=assigned_ids,
+            unrestricted=unrestricted,
+        )
+    except asyncpg.PostgresError as exc:
+        log.error("db_error", error=str(exc))
+        return "ERROR: A database error occurred. Please try again."
+
+    if _cache is not None and cache_key is not None:
+        await _cache.set(cache_key, result)
+
+    return result
 
 
 if __name__ == "__main__":

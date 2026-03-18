@@ -6,7 +6,11 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "node --test src/lib/sseStream.test.js src/api/agentClients.test.js",
+    "test:watch": "node --test --watch src/lib/sseStream.test.js src/api/agentClients.test.js",
+    "test:vitest": "vitest run",
+    "test:vitest:ui": "vitest --ui"
   },
   "dependencies": {
     "lucide-react": "^0.383.0",

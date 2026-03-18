@@ -1,0 +1,285 @@
+# ============================================================
+# CI — Eval Tests (LLM-in-the-loop)
+#
+# Runs the full LLM pipeline and evaluates output quality via
+# an LLM judge.  This is a separate gate from integration tests
+# because:
+#   1. It requires production LLM credentials (LiteLLM)
+#   2. It is slower (2-5 min per brief × 4 cases)
+#   3. It is probabilistic — allow_failures budget is set per case
+#
+# Trigger:
+#   - Manual workflow dispatch (always available)
+#   - Pull requests to main that carry the "run-evals" label
+#   - Push to main (post-merge validation)
+#
+# Gate: advisory on PRs (failure posts a comment but doesn't block);
+#       hard block on direct push to main.
+# ============================================================
+name: CI Eval Tests
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_specialist_fidelity:
+        description: "Run specialist fidelity tests"
+        type: boolean
+        default: true
+      run_synthesis_quality:
+        description: "Run synthesis quality tests"
+        type: boolean
+        default: true
+      run_faithfulness:
+        description: "Run RAGAS faithfulness evals"
+        type: boolean
+        default: true
+
+  push:
+    branches:
+      - main
+
+  pull_request:
+    branches:
+      - main
+    types:
+      - labeled
+
+env:
+  JWT_SECRET:           ${{ secrets.JWT_SECRET }}
+  CONTEXT_HMAC_SECRET:  ${{ secrets.CONTEXT_HMAC_SECRET }}
+  INTERNAL_API_KEY:     ${{ secrets.INTERNAL_API_KEY }}
+  POSTGRES_PASSWORD:    ${{ secrets.POSTGRES_PASSWORD }}
+  REDIS_PASSWORD:       ${{ secrets.REDIS_PASSWORD }}
+  ENVIRONMENT:          "local"
+  AGENT_ROLE:           "rm_prep_agent"
+
+  DB_HOST:              "localhost"
+  DB_PORT:              "5432"
+  DB_USER:              "admin"
+  DB_PASS:              ${{ secrets.POSTGRES_PASSWORD }}
+  DB_NAME:              "ai_memory"
+  OPA_URL:              "http://localhost:8181"
+  RM_PREP_URL:          "http://localhost:8003"
+
+  # LLM configuration — uses LiteLLM proxy (Azure/OpenAI behind it)
+  LITELLM_BASE_URL:     "http://localhost:4000"
+  EVAL_JUDGE_MODEL:     "gpt-4o-mini"
+
+  # Azure OpenAI credentials for LiteLLM proxy
+  AZURE_API_KEY:        ${{ secrets.AZURE_API_KEY }}
+  AZURE_API_BASE:       ${{ secrets.AZURE_API_BASE }}
+  AZURE_API_VERSION:    "2024-02-01"
+
+jobs:
+  # Only run evals if triggered by push-to-main, manual dispatch,
+  # or a PR with the "run-evals" label.
+  check-trigger:
+    name: Check trigger conditions
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.check.outputs.should_run }}
+    steps:
+      - id: check
+        run: |
+          if [[ "${{ github.event_name }}" == "push" ]] || \
+             [[ "${{ github.event_name }}" == "workflow_dispatch" ]] || \
+             [[ "${{ github.event.label.name }}" == "run-evals" ]]; then
+            echo "should_run=true" >> $GITHUB_OUTPUT
+          else
+            echo "should_run=false" >> $GITHUB_OUTPUT
+          fi
+
+  eval-tests:
+    name: Eval Tests (LLM-in-the-loop)
+    runs-on: ubuntu-latest
+    needs: check-trigger
+    if: needs.check-trigger.outputs.should_run == 'true'
+    timeout-minutes: 45
+
+    # Evals are advisory on PRs — they post a comment but don't block merge.
+    # On direct push to main they are a hard gate.
+    continue-on-error: ${{ github.event_name == 'pull_request' }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # ── Start full stack (including LiteLLM) ─────────────────────────────
+      - name: Write .env for docker-compose
+        run: |
+          cat > .env << EOF
+          POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
+          REDIS_PASSWORD=${{ secrets.REDIS_PASSWORD }}
+          JWT_SECRET=${{ secrets.JWT_SECRET }}
+          CONTEXT_HMAC_SECRET=${{ secrets.CONTEXT_HMAC_SECRET }}
+          INTERNAL_API_KEY=${{ secrets.INTERNAL_API_KEY }}
+          ENVIRONMENT=local
+          LITELLM_BASE_URL=http://litellm:4000
+          AGENT_ROLE=rm_prep_agent
+          AZURE_API_KEY=${{ secrets.AZURE_API_KEY }}
+          AZURE_API_BASE=${{ secrets.AZURE_API_BASE }}
+          AZURE_API_VERSION=2024-02-01
+          EOF
+
+      - name: Start full stack
+        run: |
+          docker compose -f docker-compose.yml -f docker-compose.test.yml \
+            up --build -d \
+            pgvector redis opa litellm \
+            payments-mcp salesforce-mcp news-search-mcp \
+            rm-prep-agent
+
+      - name: Wait for all services
+        run: |
+          # PostgreSQL
+          for i in $(seq 1 30); do
+            docker compose exec -T pgvector pg_isready -U admin -d ai_memory && break
+            sleep 2
+          done
+          # LiteLLM
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:4000/health && break || true
+            sleep 3
+          done
+          # rm-prep
+          for i in $(seq 1 40); do
+            curl -sf http://localhost:8003/health && break
+            echo "Waiting for rm-prep-agent... ($i/40)"
+            sleep 4
+          done
+
+      # ── Python setup ──────────────────────────────────────────────────────
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install -e platform-sdk/ --quiet
+          pip install -r agents/rm-prep/requirements.txt --quiet
+          pip install -r tests/requirements.txt --quiet
+
+      # ── Run specialist fidelity evals ─────────────────────────────────────
+      - name: Run specialist fidelity evals
+        if: ${{ github.event.inputs.run_specialist_fidelity != 'false' }}
+        run: |
+          python -m pytest tests/evals/test_specialist_fidelity.py \
+            -m "eval and slow" \
+            -v --tb=short --timeout=120 --color=yes \
+            --junit-xml=eval-specialist-results.xml
+        continue-on-error: ${{ github.event_name == 'pull_request' }}
+
+      # ── Run synthesis quality evals ───────────────────────────────────────
+      - name: Run synthesis quality evals — Case 001 (Microsoft Manager)
+        if: ${{ github.event.inputs.run_synthesis_quality != 'false' }}
+        run: |
+          python -m pytest tests/evals/test_synthesis_quality.py::TestMicrosoftManagerBrief \
+            -m "eval and slow" \
+            -v --tb=short --timeout=180 --color=yes \
+            --junit-xml=eval-synthesis-001.xml
+        continue-on-error: ${{ github.event_name == 'pull_request' }}
+
+      - name: Run synthesis quality evals — Case 002 (Ford RM restricted)
+        if: ${{ github.event.inputs.run_synthesis_quality != 'false' }}
+        run: |
+          python -m pytest tests/evals/test_synthesis_quality.py::TestFordRMBrief \
+            -m "eval and slow" \
+            -v --tb=short --timeout=180 --color=yes \
+            --junit-xml=eval-synthesis-002.xml
+        continue-on-error: ${{ github.event_name == 'pull_request' }}
+
+      - name: Run synthesis quality evals — Case 003 (Unknown client)
+        if: ${{ github.event.inputs.run_synthesis_quality != 'false' }}
+        run: |
+          python -m pytest tests/evals/test_synthesis_quality.py::TestUnknownClientBrief \
+            -m "eval and slow" \
+            -v --tb=short --timeout=180 --color=yes \
+            --junit-xml=eval-synthesis-003.xml
+        continue-on-error: ${{ github.event_name == 'pull_request' }}
+
+      - name: Run synthesis quality evals — Case 004 (Readonly denied)
+        if: ${{ github.event.inputs.run_synthesis_quality != 'false' }}
+        run: |
+          python -m pytest tests/evals/test_synthesis_quality.py::TestReadonlyDeniedBrief \
+            -m "eval and slow" \
+            -v --tb=short --timeout=180 --color=yes \
+            --junit-xml=eval-synthesis-004.xml
+        continue-on-error: ${{ github.event_name == 'pull_request' }}
+
+      # ── Run RAGAS faithfulness evals ───────────────────────────────────────
+      # Faithfulness measures hallucination risk: fraction of claims in each
+      # brief that are grounded in the retrieved specialist outputs.
+      # These run after synthesis quality so they can reuse cached briefs.
+      - name: Run RAGAS faithfulness evals — Case 001 (Microsoft Manager)
+        if: ${{ github.event.inputs.run_faithfulness != 'false' }}
+        run: |
+          python -m pytest tests/evals/test_faithfulness.py::TestFaithfulnessMicrosoftManager \
+            -m "eval and slow" \
+            -v --tb=short --timeout=180 --color=yes \
+            --junit-xml=eval-faithfulness-001.xml
+        continue-on-error: ${{ github.event_name == 'pull_request' }}
+
+      - name: Run RAGAS faithfulness evals — Case 002 (Ford RM restricted)
+        if: ${{ github.event.inputs.run_faithfulness != 'false' }}
+        run: |
+          python -m pytest tests/evals/test_faithfulness.py::TestFaithfulnessFordRM \
+            -m "eval and slow" \
+            -v --tb=short --timeout=180 --color=yes \
+            --junit-xml=eval-faithfulness-002.xml
+        continue-on-error: ${{ github.event_name == 'pull_request' }}
+
+      - name: Run RAGAS faithfulness evals — Case 003 (Unknown client)
+        if: ${{ github.event.inputs.run_faithfulness != 'false' }}
+        run: |
+          python -m pytest tests/evals/test_faithfulness.py::TestFaithfulnessUnknownClient \
+            -m "eval and slow" \
+            -v --tb=short --timeout=180 --color=yes \
+            --junit-xml=eval-faithfulness-003.xml
+        continue-on-error: ${{ github.event_name == 'pull_request' }}
+
+      - name: Run RAGAS faithfulness evals — Case 004 (Readonly denied)
+        if: ${{ github.event.inputs.run_faithfulness != 'false' }}
+        run: |
+          python -m pytest tests/evals/test_faithfulness.py::TestFaithfulnessReadonlyDenied \
+            -m "eval and slow" \
+            -v --tb=short --timeout=180 --color=yes \
+            --junit-xml=eval-faithfulness-004.xml
+        continue-on-error: ${{ github.event_name == 'pull_request' }}
+
+      # ── Upload results ────────────────────────────────────────────────────
+      - name: Upload eval results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-results-${{ github.run_id }}
+          path: eval-*.xml
+          retention-days: 30
+
+      # ── Post summary to PR ────────────────────────────────────────────────
+      - name: Generate eval summary
+        if: always()
+        run: |
+          echo "## Eval Results Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          for xml in eval-*.xml; do
+            [ -f "$xml" ] || continue
+            passed=$(grep -o 'tests="[0-9]*"' "$xml" | grep -o '[0-9]*' | head -1)
+            failed=$(grep -o 'failures="[0-9]*"' "$xml" | grep -o '[0-9]*' | head -1)
+            echo "| $xml | $passed passed | $failed failed |" >> $GITHUB_STEP_SUMMARY
+          done
+
+      - name: Collect service logs on failure
+        if: failure()
+        run: |
+          echo "=== rm-prep-agent logs ==="
+          docker compose logs rm-prep-agent --tail=100
+          echo "=== payments-mcp logs ==="
+          docker compose logs payments-mcp --tail=50
+          echo "=== litellm logs ==="
+          docker compose logs litellm --tail=50
+
+      - name: Tear down
+        if: always()
+        run: docker compose -f docker-compose.yml -f docker-compose.test.yml down -v

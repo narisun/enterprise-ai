@@ -1,22 +1,45 @@
 /**
- * OutputCanvas — Phase 3, right panel (main canvas).
+ * OutputCanvas — full-width response canvas, Phase 3.
  *
- * States:
- *   streaming, no output  → LiveExecutionDisplay  — live step + thought timeline
- *   streaming, has output → report appeared mid-stream (rare); show it immediately
- *   complete              → ExecutionTrace (collapsed) + final report
- *   error                 → error card
- *   idle                  → empty state
+ * ── Visual states ─────────────────────────────────────────────────────────
+ *
+ *  idle          Empty state with agent icon
+ *
+ *  streaming     ThinkingBlock (auto-expanded, shows current step label)
+ *  + no tokens   The agent is doing background work (data fetching, routing…)
+ *
+ *  streaming     ThinkingBlock (auto-collapsed to a single "Alex thought…" line)
+ *  + tokens      Markdown building up word-by-word with a blinking cursor
+ *
+ *  complete      ThinkingBlock (collapsed, user can expand) + full output
+ *
+ *  error         Error card
+ *
+ * ── ThinkingBlock behaviour ───────────────────────────────────────────────
+ * Mirrors what users recognise from Claude, ChatGPT, and Gemini:
+ *   • Expands automatically when the agent starts doing background work
+ *   • Collapses automatically the moment output tokens start arriving
+ *   • After completion, stays collapsed — user can re-open to inspect steps
+ *
+ * ── Token streaming ───────────────────────────────────────────────────────
+ * RM Prep emits `token` events from its `synthesize` LLM node.  The hook
+ * accumulates them into `streamingText`.  Once the authoritative `brief`
+ * event arrives, `output` is set and `streamingText` is superseded — the
+ * transition is invisible to the user because the text is the same.
+ *
+ * Portfolio Watch does not emit `token` events (revision loop would produce
+ * confusing partial drafts), so `streamingText` is always empty for Morgan.
  *
  * Props:
- *   output       — string | null     — final markdown report
- *   clientName   — string | null     — extracted client name (RM Prep)
+ *   output       — string | null    — final authoritative markdown
+ *   streamingText — string          — live token buffer (empty when not streaming)
+ *   clientName   — string | null    — extracted client name (RM Prep)
  *   status       — 'streaming' | 'complete' | 'error' | 'idle'
  *   error        — string | null
  *   onRefine     — (prompt: string) => void
- *   agent        — agent config
- *   steps        — [{id, message, ts}]   — completed pipeline steps
- *   activeStep   — string | null          — step currently executing
+ *   agent        — agent display config
+ *   steps        — [{id, message, ts}]
+ *   activeStep   — string | null
  *   thoughts     — [{id, message, verdict, score, issues, missed_signals, ts}]
  */
 
@@ -26,7 +49,7 @@ import remarkGfm from 'remark-gfm'
 import rehypeRaw from 'rehype-raw'
 import {
   Copy, Download, RefreshCw, Check, SendHorizonal, Zap,
-  CheckCircle2, Loader2, ChevronDown, ChevronUp, Lightbulb, Activity,
+  CheckCircle2, Loader2, ChevronDown, ChevronUp, Lightbulb,
 } from 'lucide-react'
 
 // ── Custom ReactMarkdown renderers ────────────────────────────────────────────
@@ -75,7 +98,7 @@ const MD_COMPONENTS = {
   ),
 }
 
-// ── Shared: builds a merged, time-ordered timeline from steps + thoughts ──────
+// ── Merge steps + thoughts into a single time-ordered timeline ────────────────
 function buildTimeline(steps, thoughts) {
   return [
     ...steps.map((s)  => ({ ...s,  _type: 'step'    })),
@@ -83,40 +106,35 @@ function buildTimeline(steps, thoughts) {
   ].sort((a, b) => (a.ts ?? 0) - (b.ts ?? 0))
 }
 
-// ── ThoughtBubble — evaluator insight card ────────────────────────────────────
+// ── ThoughtBubble — evaluator fact-check card (Portfolio Watch) ───────────────
 function ThoughtBubble({ thought }) {
   const [expanded, setExpanded] = useState(false)
-  const isPass    = thought.verdict === 'pass'
+  const isPass     = thought.verdict === 'pass'
   const issueCount = (thought.issues?.length ?? 0) + (thought.missed_signals?.length ?? 0)
 
   return (
-    <div className={`rounded-xl border px-4 py-3 ${
+    <div className={`rounded-lg border px-3 py-2.5 ${
       isPass ? 'bg-emerald-50 border-emerald-200' : 'bg-violet-50 border-violet-200'
     }`}>
-      <div className="flex items-start gap-3">
-        <Lightbulb className={`w-4 h-4 shrink-0 mt-0.5 ${isPass ? 'text-emerald-500' : 'text-violet-500'}`} />
+      <div className="flex items-start gap-2.5">
+        <Lightbulb className={`w-3.5 h-3.5 shrink-0 mt-0.5 ${isPass ? 'text-emerald-500' : 'text-violet-500'}`} />
         <div className="flex-1 min-w-0">
-
-          {/* Score badge + headline */}
           <div className="flex items-center gap-2 flex-wrap">
-            <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+            <span className={`text-xs font-bold px-1.5 py-px rounded-full ${
               isPass ? 'bg-emerald-100 text-emerald-700' : 'bg-violet-100 text-violet-700'
             }`}>
               {thought.score != null ? `${(thought.score * 100).toFixed(0)}%` : '—'}
             </span>
-            <span className={`text-sm font-semibold ${isPass ? 'text-emerald-700' : 'text-violet-700'}`}>
+            <span className={`text-xs font-medium ${isPass ? 'text-emerald-700' : 'text-violet-700'}`}>
               {thought.message}
             </span>
           </div>
 
-          {/* Expand toggle — only when there's detail to show */}
           {issueCount > 0 && (
             <button
               onClick={() => setExpanded((v) => !v)}
-              className={`flex items-center gap-1 text-xs mt-2 font-medium transition-colors ${
-                isPass
-                  ? 'text-emerald-600 hover:text-emerald-800'
-                  : 'text-violet-500 hover:text-violet-700'
+              className={`flex items-center gap-1 text-xs mt-1.5 font-medium transition-colors ${
+                isPass ? 'text-emerald-600 hover:text-emerald-800' : 'text-violet-500 hover:text-violet-700'
               }`}
             >
               {expanded
@@ -125,171 +143,126 @@ function ThoughtBubble({ thought }) {
             </button>
           )}
 
-          {/* Expanded issue list */}
           {expanded && issueCount > 0 && (
-            <div className="mt-3 space-y-3 border-t border-violet-100 pt-3">
+            <div className="mt-2 space-y-2 border-t border-violet-100 pt-2">
               {thought.issues?.map((iss, i) => (
-                <div key={i} className="text-sm">
-                  <div className="flex items-center gap-2 flex-wrap mb-1">
+                <div key={i} className="text-xs">
+                  <div className="flex items-center gap-1.5 flex-wrap mb-0.5">
                     <span className="font-semibold text-slate-700">{iss.client}:</span>
-                    <span className={`text-xs px-1.5 py-px rounded font-medium ${
+                    <span className={`px-1.5 py-px rounded font-medium ${
                       iss.problem === 'unsupported'    ? 'bg-red-100 text-red-600' :
                       iss.problem === 'wrong_severity' ? 'bg-amber-100 text-amber-600' :
                                                          'bg-orange-100 text-orange-600'
                     }`}>{iss.problem?.replace('_', ' ')}</span>
                   </div>
-                  {iss.claim && (
-                    <p className="text-slate-500 italic text-xs mb-1">"{iss.claim}"</p>
-                  )}
-                  {iss.correction && (
-                    <p className="text-violet-600 text-xs">→ {iss.correction}</p>
-                  )}
+                  {iss.claim      && <p className="text-slate-500 italic mb-0.5">"{iss.claim}"</p>}
+                  {iss.correction && <p className="text-violet-600">→ {iss.correction}</p>}
                 </div>
               ))}
               {thought.missed_signals?.map((m, i) => (
-                <div key={`missed-${i}`} className="text-sm">
-                  <span className="font-semibold text-amber-600 text-xs">Missed signal: </span>
-                  <span className="text-slate-600 text-xs">{m}</span>
+                <div key={`missed-${i}`} className="text-xs">
+                  <span className="font-semibold text-amber-600">Missed signal: </span>
+                  <span className="text-slate-600">{m}</span>
                 </div>
               ))}
             </div>
           )}
-
         </div>
       </div>
     </div>
   )
 }
 
-// ── LiveExecutionDisplay — shown while streaming and no output yet ─────────────
-// This replaces the plain skeleton. The RM sees exactly what the agent is doing
-// — steps completing, thought bubbles from the Evaluator — in real time.
-function LiveExecutionDisplay({ steps, activeStep, thoughts, agent }) {
-  const timeline = buildTimeline(steps, thoughts)
-
-  return (
-    <div className="max-w-2xl">
-      {/* Header */}
-      <div className="flex items-center gap-3 mb-6">
-        <span className="text-2xl">{agent?.icon}</span>
-        <div>
-          <p className="text-base font-semibold text-slate-800">
-            {agent?.workerName ?? 'Agent'} is working…
-          </p>
-          <p className="text-sm text-slate-500">{agent?.workerRole}</p>
-        </div>
-        <span className="ml-auto flex items-center gap-1.5 text-xs font-semibold text-blue-600 bg-blue-50 px-3 py-1.5 rounded-full">
-          <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
-          Running
-        </span>
-      </div>
-
-      {/* Live timeline */}
-      <div className="space-y-3">
-        {timeline.map((item) =>
-          item._type === 'step' ? (
-            <div key={item.id} className="flex items-center gap-3">
-              <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
-              <span className="text-sm text-slate-600">{item.message}</span>
-            </div>
-          ) : (
-            <ThoughtBubble key={item.id} thought={item} />
-          )
-        )}
-
-        {/* Active step */}
-        {activeStep && (
-          <div className="flex items-center gap-3 py-1">
-            <Loader2 className="w-4 h-4 text-blue-500 shrink-0 animate-spin" />
-            <span className="text-sm font-medium text-blue-700">{activeStep}</span>
-          </div>
-        )}
-
-        {/* Ghost steps still to come */}
-        {!activeStep && steps.length === 0 && (
-          <div className="flex items-center gap-3 opacity-40">
-            <Loader2 className="w-4 h-4 text-slate-300 shrink-0 animate-spin" />
-            <span className="text-sm text-slate-400">Starting up…</span>
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
-
-// ── ExecutionTrace — collapsible "how the agent worked" summary ───────────────
-// Shown above the final report once complete. Starts collapsed.
-function ExecutionTrace({ steps, thoughts, agent }) {
+// ── ThinkingBlock ─────────────────────────────────────────────────────────────
+//
+// The single collapsible "thinking" indicator that replaces the separate
+// ExecutionRail panel.  Behaviour mirrors Claude / ChatGPT / Gemini:
+//
+//   • Auto-expands while the agent is doing background work (no tokens yet)
+//   • Auto-collapses the moment output tokens start arriving
+//   • Stays collapsed after completion — user can expand to inspect steps
+//
+function ThinkingBlock({ steps, activeStep, thoughts, agent, status, hasTokens }) {
+  const isStreaming = status === 'streaming'
+  const isDone      = status === 'complete' || status === 'error'
   const [open, setOpen] = useState(false)
-  const timeline  = buildTimeline(steps, thoughts)
 
-  // Find the final pass verdict for the summary line
-  const lastPass   = [...thoughts].reverse().find((t) => t.verdict === 'pass')
-  const totalPasses = thoughts.length
+  // Auto-expand while thinking (no tokens), auto-collapse when output starts
+  useEffect(() => {
+    if (isStreaming && !hasTokens && (steps.length > 0 || !!activeStep)) {
+      setOpen(true)
+    }
+    if (hasTokens || isDone) {
+      setOpen(false)
+    }
+  }, [isStreaming, hasTokens, isDone, steps.length, activeStep])
 
-  const summaryParts = []
-  if (steps.length)    summaryParts.push(`${steps.length} steps`)
-  if (totalPasses > 0) summaryParts.push(`${totalPasses} evaluator pass${totalPasses !== 1 ? 'es' : ''}`)
-  if (lastPass)        summaryParts.push(`verified ${(lastPass.score * 100).toFixed(0)}%`)
+  const timeline    = buildTimeline(steps, thoughts)
+  const hasContent  = timeline.length > 0 || !!activeStep
+  if (!hasContent) return null
+
+  // Collapsed header text
+  const headerText = (isStreaming && !hasTokens)
+    ? (activeStep ?? `${agent?.workerName ?? 'Agent'} is thinking…`)
+    : `${agent?.workerName ?? 'Agent'} thought for ${steps.length} step${steps.length !== 1 ? 's' : ''}`
+
+  // Verification badge (Portfolio Watch evaluator)
+  const lastPass = [...thoughts].reverse().find((t) => t.verdict === 'pass')
 
   return (
-    <div className="border border-slate-200 rounded-xl mb-8 overflow-hidden">
-      {/* Toggle header */}
+    <div className="mb-5 rounded-xl border border-slate-200 bg-slate-50 overflow-hidden">
       <button
         onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center justify-between px-4 py-3 bg-slate-50 hover:bg-slate-100 transition-colors text-left"
+        className="w-full flex items-center gap-2.5 px-4 py-2.5 hover:bg-slate-100 transition-colors text-left"
       >
-        <div className="flex items-center gap-2.5 flex-wrap">
-          <Activity className="w-4 h-4 text-slate-400 shrink-0" />
-          <span className="text-sm font-medium text-slate-600">
-            How {agent?.workerName ?? 'the agent'} worked
+        {/* Spinner while thinking, check when done */}
+        {isStreaming && !hasTokens
+          ? <Loader2 className="w-3.5 h-3.5 text-blue-500 animate-spin shrink-0" />
+          : <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+        }
+
+        <span className="flex-1 text-sm font-medium text-slate-700 truncate">{headerText}</span>
+
+        {/* Step count chip */}
+        {steps.length > 0 && (
+          <span className="text-xs text-slate-400 shrink-0">
+            {steps.length} step{steps.length !== 1 ? 's' : ''}
           </span>
-          {lastPass && (
-            <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-600 font-medium">
-              Verified {(lastPass.score * 100).toFixed(0)}%
-            </span>
-          )}
-          <span className="text-xs text-slate-400">{summaryParts.join(' · ')}</span>
-        </div>
+        )}
+
+        {/* Evaluator verification badge */}
+        {lastPass && (
+          <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-600 font-medium shrink-0">
+            {(lastPass.score * 100).toFixed(0)}% verified
+          </span>
+        )}
+
         {open
-          ? <ChevronUp   className="w-4 h-4 text-slate-400 shrink-0" />
-          : <ChevronDown className="w-4 h-4 text-slate-400 shrink-0" />}
+          ? <ChevronUp   className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+          : <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+        }
       </button>
 
-      {/* Expanded timeline */}
       {open && (
-        <div className="px-4 py-4 space-y-3 border-t border-slate-100">
+        <div className="border-t border-slate-200 px-4 py-3 space-y-2.5">
           {timeline.map((item) =>
             item._type === 'step' ? (
-              <div key={item.id} className="flex items-center gap-3">
-                <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+              <div key={item.id} className="flex items-center gap-2.5">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
                 <span className="text-sm text-slate-600">{item.message}</span>
               </div>
             ) : (
               <ThoughtBubble key={item.id} thought={item} />
             )
           )}
+          {activeStep && (
+            <div className="flex items-center gap-2.5">
+              <Loader2 className="w-3.5 h-3.5 text-blue-500 animate-spin shrink-0" />
+              <span className="text-sm font-medium text-blue-700">{activeStep}</span>
+            </div>
+          )}
         </div>
       )}
-    </div>
-  )
-}
-
-// ── Skeleton shimmer ──────────────────────────────────────────────────────────
-function BriefSkeleton() {
-  return (
-    <div className="space-y-4 animate-pulse">
-      <div className="h-7 bg-slate-200 rounded-lg w-2/3" />
-      <div className="h-3 bg-slate-200 rounded w-full" />
-      <div className="h-3 bg-slate-200 rounded w-5/6" />
-      <div className="h-3 bg-slate-200 rounded w-4/5" />
-      <div className="h-5 bg-slate-200 rounded-lg w-1/3 mt-6" />
-      <div className="h-3 bg-slate-200 rounded w-full" />
-      <div className="h-3 bg-slate-200 rounded w-3/4" />
-      <div className="h-3 bg-slate-200 rounded w-5/6" />
-      <div className="h-5 bg-slate-200 rounded-lg w-1/4 mt-6" />
-      <div className="h-3 bg-slate-200 rounded w-full" />
-      <div className="h-3 bg-slate-200 rounded w-2/3" />
     </div>
   )
 }
@@ -341,30 +314,30 @@ function RefinementBar({ onSubmit, isRefining, suggestions }) {
   }
 
   return (
-    <div className="border-t border-slate-200 bg-white px-6 py-4">
+    <div className="border-t border-slate-200 bg-slate-50 px-6 pt-4 pb-6">
       {suggestions?.length > 0 && (
-        <div className="flex flex-wrap gap-2 mb-3">
+        <div className="flex flex-wrap gap-2 mb-4">
           {suggestions.map((s) => (
             <button key={s}
               onClick={() => { setValue(s); inputRef.current?.focus() }}
-              className="text-xs px-3 py-1.5 rounded-full border border-blue-200 text-blue-600 bg-blue-50 hover:bg-blue-100 transition-colors">
-              <Zap className="w-3 h-3 inline mr-1 -mt-0.5" />{s}
+              className="text-sm px-4 py-2 rounded-full border border-blue-200 text-blue-600 bg-blue-50 hover:bg-blue-100 transition-colors">
+              <Zap className="w-3.5 h-3.5 inline mr-1.5 -mt-0.5" />{s}
             </button>
           ))}
         </div>
       )}
-      <div className="flex gap-2">
+      <div className="flex gap-3">
         <input ref={inputRef} type="text" value={value}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && submit()}
           placeholder="Ask a follow-up question or request a change…"
           disabled={isRefining}
-          className="flex-1 rounded-xl border border-slate-300 px-4 py-2.5 text-sm text-slate-800 outline-none
+          className="flex-1 rounded-xl border border-slate-300 px-4 py-3.5 text-sm text-slate-800 outline-none
             focus:ring-2 focus:ring-blue-100 focus:border-blue-400 placeholder-slate-400
             disabled:bg-slate-50 disabled:text-slate-400 transition-all"
         />
         <button onClick={submit} disabled={!value.trim() || isRefining}
-          className="px-4 py-2.5 bg-blue-600 text-white rounded-xl hover:bg-blue-700 disabled:opacity-40
+          className="px-5 py-3.5 bg-blue-600 text-white rounded-xl hover:bg-blue-700 disabled:opacity-40
             disabled:cursor-not-allowed transition-colors flex items-center gap-2 text-sm font-medium shrink-0">
           {isRefining
             ? <RefreshCw className="w-4 h-4 animate-spin" />
@@ -378,31 +351,42 @@ function RefinementBar({ onSubmit, isRefining, suggestions }) {
 
 // ── Main component ─────────────────────────────────────────────────────────────
 export default function OutputCanvas({
-  output, clientName, status, error, onRefine, agent,
+  output, streamingText = '', clientName, status, error, onRefine, agent,
   steps = [], activeStep = null, thoughts = [],
 }) {
-  const briefRef  = useRef(null)
-  const isRefining = status === 'streaming' && !!output
+  const canvasRef  = useRef(null)
+  const hasOutput  = !!output
+  const hasTokens  = !!streamingText
+  const isRefining = status === 'streaming' && hasOutput
+  const isDone     = status === 'complete'
 
-  // Scroll to top when a new report arrives
+  // Scroll to top when a completed response arrives
   useEffect(() => {
-    if (status === 'complete' && briefRef.current) {
-      briefRef.current.scrollTo({ top: 0, behavior: 'smooth' })
+    if (isDone && canvasRef.current) {
+      canvasRef.current.scrollTo({ top: 0, behavior: 'smooth' })
     }
-  }, [output, status])
+  }, [isDone, output])
+
+  // Auto-scroll to the bottom while tokens are streaming in
+  const streamingBottomRef = useRef(null)
+  useEffect(() => {
+    if (hasTokens && !hasOutput) {
+      streamingBottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
+    }
+  }, [streamingText, hasTokens, hasOutput])
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden bg-white">
 
-      {/* ── Toolbar (only when content exists) ─────────────────────────── */}
-      {output && (
+      {/* ── Toolbar ─────────────────────────────────────────────────────── */}
+      {hasOutput && (
         <div className="shrink-0 px-6 py-3 border-b border-slate-100 flex items-center justify-between bg-slate-50">
           <div className="flex items-center gap-2">
             <span className="text-lg">{agent?.icon}</span>
             <span className="text-sm font-semibold text-slate-700">
               {clientName ? `Brief — ${clientName}` : `${agent?.workerName ?? 'Worker'} · Output`}
             </span>
-            {status === 'complete' && (
+            {isDone && (
               <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-medium">Ready</span>
             )}
             {isRefining && (
@@ -421,44 +405,72 @@ export default function OutputCanvas({
         </div>
       )}
 
-      {/* ── Scrollable content area ─────────────────────────────────────── */}
-      <div ref={briefRef} className="flex-1 overflow-y-auto px-8 py-6">
+      {/* ── Scrollable canvas ────────────────────────────────────────────── */}
+      <div ref={canvasRef} className="flex-1 overflow-y-auto px-8 py-6">
 
-        {/* Live execution display — streaming with no output yet */}
-        {status === 'streaming' && !output && (
-          <LiveExecutionDisplay
-            steps={steps}
-            activeStep={activeStep}
-            thoughts={thoughts}
-            agent={agent}
-          />
-        )}
-
-        {/* Streaming skeleton overlay — output appeared mid-stream (rare) */}
-        {status === 'streaming' && output && (
-          <div className="flex items-center gap-2 mb-6 text-sm text-blue-600 font-medium">
-            <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
-            {agent?.workerName ?? 'Agent'} is updating…
+        {/* ── Idle state ────────────────────────────────────────────────── */}
+        {status === 'idle' && !hasOutput && (
+          <div className="flex flex-col items-center justify-center h-64 text-slate-400">
+            <span className="text-4xl mb-3">{agent?.icon ?? '📋'}</span>
+            <p className="text-sm font-medium text-slate-500">{agent?.workerName ?? 'The agent'} is ready</p>
+            <p className="text-xs mt-1">Output will appear here once you submit a request.</p>
           </div>
         )}
 
-        {/* Error state */}
+        {/* ── First-frame spinner (before first progress event arrives) ─── */}
+        {status === 'streaming' && !hasTokens && !steps.length && !activeStep && (
+          <div className="flex items-center gap-3 text-slate-500 mb-5">
+            <Loader2 className="w-4 h-4 animate-spin text-blue-500 shrink-0" />
+            <span className="text-sm font-medium">{agent?.workerName ?? 'Agent'} is starting up…</span>
+          </div>
+        )}
+
+        {/* ── Thinking block (replaces ExecutionRail) ───────────────────── */}
+        {/*    Shown whenever there are steps, thoughts, or an activeStep.    */}
+        {/*    Auto-expands while thinking, auto-collapses when tokens start. */}
+        <ThinkingBlock
+          steps={steps}
+          activeStep={activeStep}
+          thoughts={thoughts}
+          agent={agent}
+          status={status}
+          hasTokens={hasTokens || hasOutput}
+        />
+
+        {/* ── Live token stream ─────────────────────────────────────────── */}
+        {/*    Visible only while RM Prep is synthesising and no final        */}
+        {/*    output has arrived yet.  Portfolio Watch skips this state      */}
+        {/*    entirely (it has no `token` events).                           */}
+        {hasTokens && !hasOutput && (
+          <div className="max-w-3xl">
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm]}
+              rehypePlugins={[rehypeRaw]}
+              components={MD_COMPONENTS}
+            >
+              {streamingText}
+            </ReactMarkdown>
+            {/* Blinking cursor — disappears when final output replaces this */}
+            <span className="inline-block w-0.5 h-[1.1em] bg-blue-500 animate-pulse ml-0.5 align-text-bottom rounded-sm" />
+            <div ref={streamingBottomRef} />
+          </div>
+        )}
+
+        {/* ── Error state ───────────────────────────────────────────────── */}
         {status === 'error' && (
-          <div className="rounded-xl bg-red-50 border border-red-200 p-5 max-w-lg">
+          <div className="rounded-xl bg-red-50 border border-red-200 p-5 max-w-lg mt-2">
             <p className="font-semibold text-red-700 text-sm mb-1">Agent returned an error</p>
             <p className="text-sm text-red-600">{error ?? 'An unexpected error occurred.'}</p>
             <p className="text-xs text-red-500 mt-3">Try rephrasing your request using the follow-up bar below.</p>
           </div>
         )}
 
-        {/* Report + execution trace */}
-        {output && (
+        {/* ── Final output ─────────────────────────────────────────────── */}
+        {/*    Replaces the token stream when the authoritative brief/report   */}
+        {/*    event arrives.  Also shown directly (no token phase) for        */}
+        {/*    Portfolio Watch and on follow-up refinement runs.               */}
+        {hasOutput && (
           <div className="max-w-3xl animate-fade-in">
-            {/* Collapsible execution trace — only when agent has actually run steps */}
-            {steps.length > 0 && status === 'complete' && (
-              <ExecutionTrace steps={steps} thoughts={thoughts} agent={agent} />
-            )}
-
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}
               rehypePlugins={[rehypeRaw]}
@@ -469,23 +481,14 @@ export default function OutputCanvas({
           </div>
         )}
 
-        {/* Idle / empty state */}
-        {status === 'idle' && !output && (
-          <div className="flex flex-col items-center justify-center h-64 text-slate-400">
-            <span className="text-4xl mb-3">{agent?.icon ?? '📋'}</span>
-            <p className="text-sm font-medium text-slate-500">{agent?.workerName ?? 'The agent'} is ready</p>
-            <p className="text-xs mt-1">Output will appear here once you submit a request.</p>
-          </div>
-        )}
-
       </div>
 
       {/* ── Refinement bar ───────────────────────────────────────────────── */}
-      {(status === 'complete' || status === 'error' || isRefining) && (
+      {(isDone || status === 'error' || isRefining) && (
         <RefinementBar
           onSubmit={onRefine}
           isRefining={isRefining}
-          suggestions={status === 'complete' ? agent?.followUps?.slice(0, 3) : []}
+          suggestions={isDone ? agent?.followUps?.slice(0, 3) : []}
         />
       )}
     </div>

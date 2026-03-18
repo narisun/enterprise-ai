@@ -1,0 +1,32 @@
+{
+  "_description": "Manager role querying a client not in the database — all tools return no_data. Brief must handle gracefully without fabricating data.",
+  "persona": "manager",
+  "client_name": "Acme Manufacturing Ltd.",
+  "prompt": "Prepare me for my meeting with Acme Manufacturing Ltd.",
+
+  "crm_output": {
+    "error": "no_data",
+    "message": "No Salesforce accounts found matching 'Acme Manufacturing Ltd.'. Verify the account name matches exactly in Salesforce."
+  },
+
+  "payments_output": {
+    "error": "no_data",
+    "message": "No completed payment transactions found for the requested client in the last 360 days. Verify the client name matches the bank party name exactly."
+  },
+
+  "news_output": {
+    "company": "Acme Manufacturing Ltd.",
+    "articles": [],
+    "retrieved_at": "2026-03-18T20:00:00Z"
+  },
+
+  "expected_rubric": {
+    "acknowledges_no_crm_data": true,
+    "acknowledges_no_payment_data": true,
+    "acknowledges_no_news": true,
+    "no_fabricated_financial_figures": true,
+    "suggests_verification_steps": true,
+    "no_access_denied_message": true,
+    "brief_is_useful_despite_no_data": true
+  }
+}

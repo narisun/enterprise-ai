@@ -6,10 +6,17 @@ provides only the ASGI middleware and ContextVar binding that MCP servers need
 to extract the AgentContext from the X-Agent-Context request header.
 
 Usage in an MCP server tool handler:
-    from mcp_auth import AgentContextMiddleware, get_agent_context
+    from tools_shared.mcp_auth import AgentContextMiddleware, get_agent_context
 
-    # Register middleware on the FastMCP Starlette app:
-    mcp._app.add_middleware(AgentContextMiddleware)
+    # FastMCP (1.x) creates the Starlette app lazily via sse_app().
+    # Patch sse_app() at module level to inject the middleware:
+    if TRANSPORT == "sse":
+        _orig_sse_app = mcp.sse_app
+        def _patched_sse_app(mount_path=None):
+            starlette_app = _orig_sse_app(mount_path)
+            starlette_app.add_middleware(AgentContextMiddleware)
+            return starlette_app
+        mcp.sse_app = _patched_sse_app
 
     @mcp.tool()
     async def get_salesforce_summary(client_name: str) -> str:
@@ -54,8 +61,7 @@ class AgentContextMiddleware:
     Decoding is delegated entirely to AgentContext.from_header() (platform SDK),
     which owns all base64-JSON parsing and field validation logic.
 
-    Register on a FastMCP / Starlette app:
-        mcp._app.add_middleware(AgentContextMiddleware)
+    Register by patching mcp.sse_app() — see module docstring for pattern.
     """
 
     def __init__(self, app: Any) -> None:

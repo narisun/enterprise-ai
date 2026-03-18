@@ -1,0 +1,34 @@
+# Test-layer dependencies
+# Install alongside each service's own requirements:
+#   pip install -e platform-sdk/
+#   pip install -r tests/requirements.txt
+#
+# The platform-sdk is the only non-test dep needed for unit tests —
+# it provides AgentContext, make_cache_key, RMBrief, etc.
+
+# Core test framework
+pytest>=8.0.0
+pytest-asyncio>=0.23.0
+pytest-timeout>=2.3.0
+
+# HTTP client for integration + eval tests
+httpx>=0.27.0
+
+# DB driver for integration tests (direct SQL)
+asyncpg>=0.29.0
+
+# JWT for test token generation
+pyjwt>=2.8.0
+
+# OpenAI SDK used by the LLM judge in eval tests
+openai>=1.30.0
+
+# Structured output parsing in eval tests
+pydantic>=2.7.0
+
+# ── RAGAS faithfulness metric ────────────────────────────────────────────────
+# ragas 0.2.x API — uses LangchainLLMWrapper + EvaluationDataset
+# ragas[langchain] pulls in langchain-core + langchain-openai automatically
+ragas[langchain]>=0.2.0
+# HuggingFace datasets still needed for result inspection helpers
+datasets>=2.20.0

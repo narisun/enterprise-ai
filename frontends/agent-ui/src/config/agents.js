@@ -1,15 +1,22 @@
 /**
- * Digital Worker Registry
+ * Meridian Worker Registry — display configuration only.
  *
- * Each entry represents one AI digital worker. Workers that are live have a
- * full implementation config (endpoint, template, progressSteps, followUps).
- * Workers under development are marked comingSoon: true and omit those fields —
- * they will be filled in as each agent is built.
+ * Each entry describes how an AI digital worker appears in the UI:
+ * its name, role, icon, colour, template variables, data sources, and
+ * suggested follow-up questions.
  *
- * To activate a new worker:
+ * ── What this file is NOT responsible for ─────────────────────────────────
+ * API endpoints and request shapes live in src/api/agentClients.js.
+ * Keeping them separate means:
+ *   • UI changes (labels, icons, follow-ups) never touch the API contract
+ *   • Backend changes (field renames, new params) never touch the UI registry
+ *   • agentClients.js is unit-testable without any UI imports
+ *
+ * ── Activating a new worker ───────────────────────────────────────────────
  *   1. Set comingSoon: false
- *   2. Add endpoint, requestShape, template, progressSteps, followUps
- *   3. Wire up the FastAPI backend service
+ *   2. Fill in template, dataSources, followUps
+ *   3. Add a matching entry to src/api/agentClients.js
+ *   4. Wire up the FastAPI backend service
  */
 
 export const AGENTS = [
@@ -18,8 +25,8 @@ export const AGENTS = [
 
   {
     id: 'rm-prep',
-    workerName: 'Alex',
-    workerRole: 'Relationship Intelligence Associate',
+    workerName: 'Vero',
+    workerRole: 'Client Intelligence',
     department: 'Relationship Banking',
     tagline: 'Pre-meeting briefs & client intelligence',
     description:
@@ -28,12 +35,6 @@ export const AGENTS = [
     color: 'blue',
     comingSoon: false,
 
-    endpoint: '/api/brief',
-    requestShape: (prompt, rmId, sessionId) => ({
-      prompt,
-      rm_id: rmId,
-      session_id: sessionId,
-    }),
     template: {
       text: 'Prepare a full meeting brief for customer {{customer_name}}',
       variables: [
@@ -53,14 +54,6 @@ export const AGENTS = [
       { label: 'Payments System', icon: '💰' },
       { label: 'Internet News',   icon: '📰' },
     ],
-    progressSteps: [
-      'Identifying client…',
-      'Planning data retrieval…',
-      'Fetching CRM relationship data…',
-      'Analysing payment trends…',
-      'Searching latest news…',
-      'Generating your brief…',
-    ],
     followUps: [
       'Summarise the key risks in two bullet points',
       'Add a recommended talking-points section',
@@ -71,8 +64,8 @@ export const AGENTS = [
 
   {
     id: 'portfolio-watch',
-    workerName: 'Morgan',
-    workerRole: 'Portfolio Watch Officer',
+    workerName: 'Vigil',
+    workerRole: 'Portfolio Monitor',
     department: 'Relationship Banking',
     tagline: 'On-demand book monitoring & risk verification',
     description:
@@ -81,12 +74,6 @@ export const AGENTS = [
     color: 'emerald',
     comingSoon: false,
 
-    endpoint: '/api/portfolio-watch',
-    requestShape: (prompt, rmId, sessionId) => ({
-      prompt,
-      rm_id: rmId,
-      session_id: sessionId,
-    }),
     template: {
       text: 'Run a portfolio watch scan for my book',
       variables: [],
@@ -100,13 +87,6 @@ export const AGENTS = [
       { label: 'Credit Intelligence', icon: '📈' },
       { label: 'News & Events',       icon: '📰' },
     ],
-    progressSteps: [
-      'Loading your portfolio…',
-      'Gathering payment, credit & news signals…',
-      'Morgan is drafting the portfolio narrative…',
-      'Fact-checking every claim against source data…',
-      'Finalising the verified report…',
-    ],
     followUps: [
       'Which client needs the most urgent attention this week?',
       'Summarise the credit risk exposure across the book',
@@ -119,8 +99,8 @@ export const AGENTS = [
 
   {
     id: 'credit-review',
-    workerName: 'Casey',
-    workerRole: 'Credit Desk Analyst',
+    workerName: 'Ratio',
+    workerRole: 'Credit Analyst',
     department: 'Credit & Risk',
     tagline: 'Credit memos, covenants & ratio analysis',
     description:
@@ -137,8 +117,8 @@ export const AGENTS = [
 
   {
     id: 'aml-triage',
-    workerName: 'Jordan',
-    workerRole: 'AML Triage Specialist',
+    workerName: 'Sentri',
+    workerRole: 'AML Specialist',
     department: 'Credit & Risk',
     tagline: 'Alert review & escalation recommendations',
     description:
@@ -158,8 +138,8 @@ export const AGENTS = [
 
   {
     id: 'trade-finance',
-    workerName: 'Taylor',
-    workerRole: 'Trade Finance Checker',
+    workerName: 'Vela',
+    workerRole: 'Trade Finance',
     department: 'Trade & Operations',
     tagline: 'LC document discrepancy review',
     description:
@@ -176,8 +156,8 @@ export const AGENTS = [
 
   {
     id: 'kyc-onboarding',
-    workerName: 'Avery',
-    workerRole: 'KYC & Onboarding Coordinator',
+    workerName: 'Provi',
+    workerRole: 'KYC & Onboarding',
     department: 'Trade & Operations',
     tagline: 'UBO checks, sanctions screening & risk narrative',
     description:
@@ -197,8 +177,8 @@ export const AGENTS = [
 
   {
     id: 'treasury-advisory',
-    workerName: 'Riley',
-    workerRole: 'Treasury Advisory Associate',
+    workerName: 'Kairo',
+    workerRole: 'Treasury Advisor',
     department: 'Treasury & Markets',
     tagline: 'FX hedge book, rates context & client guides',
     description:
@@ -217,8 +197,8 @@ export const AGENTS = [
 
   {
     id: 'regulatory-reporting',
-    workerName: 'Quinn',
-    workerRole: 'Regulatory Reporting Analyst',
+    workerName: 'Coda',
+    workerRole: 'Regulatory Reporting',
     department: 'Finance & Compliance',
     tagline: 'COREP / FINREP / LCR data pulls & variance commentary',
     description:

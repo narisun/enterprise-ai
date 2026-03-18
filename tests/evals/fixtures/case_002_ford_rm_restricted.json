@@ -1,0 +1,112 @@
+{
+  "_description": "RM role (Carol) viewing Ford Motor Company — row access allowed (Ford is assigned), AML + compliance columns masked.",
+  "persona": "rm",
+  "client_name": "Ford Motor Company",
+  "prompt": "Prepare me for my meeting with Ford Motor Company next week.",
+
+  "crm_output": {
+    "account_id": "001000000000002AAA",
+    "account_name": "Ford Motor Company",
+    "account_owner": "Carol RM (test)",
+    "industry": "Automotive",
+    "annual_revenue": 176000000000,
+    "number_of_employees": 186000,
+    "billing_country": "United States",
+    "last_activity_date": "2026-03-01",
+    "last_activity_subject": "Annual relationship review",
+    "open_opportunities": [
+      {
+        "opportunity_id": "006000000000003AAA",
+        "name": "Supply Chain Finance Programme",
+        "stage": "Value Proposition",
+        "amount": 2000000,
+        "close_date": "2026-05-31",
+        "probability": 50
+      }
+    ],
+    "recent_tasks": [],
+    "recent_events": [
+      {
+        "subject": "Annual relationship review — Ford",
+        "start_datetime": "2026-03-01T14:00:00Z",
+        "end_datetime": "2026-03-01T15:30:00Z",
+        "attendees": ["Tom Brown (Ford CFO)", "Carol RM (test)"]
+      }
+    ],
+    "key_contacts": [
+      {
+        "name": "Tom Brown",
+        "title": "Chief Financial Officer",
+        "email": "t.brown@ford.com",
+        "phone": "+1-313-000-0001"
+      }
+    ],
+    "retrieved_at": "2026-03-18T20:00:00Z"
+  },
+
+  "payments_output": {
+    "client_name": "Ford Motor Company",
+    "period_days": 360,
+    "total_outbound_usd": 31500000.0,
+    "total_inbound_usd": 8200000.0,
+    "by_payment_type": {
+      "Wire": { "outbound_usd": 25200000.0, "inbound_usd": 6000000.0, "tx_count": 98 },
+      "ACH":  { "outbound_usd": 6300000.0,  "inbound_usd": 2200000.0, "tx_count": 212 }
+    },
+    "volume_trend_pct": -4.2,
+    "trend_label": "STABLE",
+    "sending_banks": [
+      { "bank": "JPMorgan Chase",  "tx_count": 88,  "total_usd": 22000000.0 },
+      { "bank": "Citibank",        "tx_count": 45,  "total_usd": 8400000.0  }
+    ],
+    "transaction_status_mix": [
+      { "status": "Completed", "count": 310, "total_usd": 39700000.0 },
+      { "status": "Pending",   "count": 12,  "total_usd": 0.0 }
+    ],
+    "top_counterparties": [
+      {
+        "name": "Stellantis N.V.", "bank": "BNP Paribas", "payment_type": "Wire",
+        "currency": "EUR", "total_usd": 12800000.0, "tx_count": 34
+      }
+    ],
+    "party_profile": {
+      "segment": "Corporate",
+      "kyc_status": "Verified",
+      "aml_risk_category": null,
+      "risk_rating": null,
+      "sanctions_status": null,
+      "pep_flag": null,
+      "fraud_segment": null,
+      "relationship_since": "2015-06-01",
+      "customer_status": "Active"
+    },
+    "_note": "aml_risk_category, risk_rating, sanctions_status, pep_flag, fraud_segment are null because rm role only has standard clearance — AML + compliance columns are masked.",
+    "retrieved_at": "2026-03-18T20:00:00Z"
+  },
+
+  "news_output": {
+    "company": "Ford Motor Company",
+    "articles": [
+      {
+        "title": "Ford Pauses EV Investment, Refocuses on Hybrid Vehicles",
+        "source": "Wall Street Journal",
+        "published_at": "2026-03-12T11:00:00Z",
+        "url": "https://wsj.com/example/ford-ev",
+        "summary": "Ford announced it is pausing planned EV battery plant construction and redirecting $1.5B toward hybrid vehicle platforms."
+      }
+    ],
+    "retrieved_at": "2026-03-18T20:00:00Z"
+  },
+
+  "expected_rubric": {
+    "cites_payment_volume": true,
+    "cites_trend_stable_or_declining": true,
+    "mentions_crm_contact": true,
+    "mentions_open_opportunity": true,
+    "mentions_news": true,
+    "compliance_fields_not_mentioned": true,
+    "no_access_denied_message": true,
+    "all_sections_present": true,
+    "no_fabricated_figures": true
+  }
+}

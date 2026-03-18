@@ -32,5 +32,14 @@ export default defineConfig(({ mode }) => {
       outDir: 'dist',
       sourcemap: false,
     },
+    test: {
+      // Use happy-dom for a lightweight browser-like environment.
+      // All globals (describe, it, expect, vi, beforeEach, afterEach) are
+      // injected automatically so test files need no explicit imports.
+      environment: 'happy-dom',
+      globals: true,
+      // Only discover test files inside src/ — keeps test co-located with code
+      include: ['src/**/*.test.{js,jsx}'],
+    },
   }
 })
