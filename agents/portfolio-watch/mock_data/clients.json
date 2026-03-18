@@ -1,0 +1,83 @@
+{
+  "rm001": [
+    {
+      "client_id": "C001",
+      "name": "Acme Manufacturing Ltd",
+      "segment": "Mid-Market",
+      "industry": "Manufacturing",
+      "relationship_status": "Active",
+      "relationship_since": "2019-04-01",
+      "last_contact": "2026-03-10",
+      "facility_limit": 5000000,
+      "relationship_manager": "rm001"
+    },
+    {
+      "client_id": "C002",
+      "name": "TechVentures Digital",
+      "segment": "SME",
+      "industry": "Technology",
+      "relationship_status": "Active",
+      "relationship_since": "2021-09-15",
+      "last_contact": "2026-02-20",
+      "facility_limit": 2000000,
+      "relationship_manager": "rm001"
+    },
+    {
+      "client_id": "C003",
+      "name": "GreenLeaf Retail Group",
+      "segment": "Mid-Market",
+      "industry": "Retail",
+      "relationship_status": "Active",
+      "relationship_since": "2018-07-22",
+      "last_contact": "2026-03-05",
+      "facility_limit": 8000000,
+      "relationship_manager": "rm001"
+    },
+    {
+      "client_id": "C004",
+      "name": "BlueSky Logistics",
+      "segment": "SME",
+      "industry": "Logistics",
+      "relationship_status": "Active",
+      "relationship_since": "2022-01-10",
+      "last_contact": "2026-03-12",
+      "facility_limit": 3000000,
+      "relationship_manager": "rm001"
+    },
+    {
+      "client_id": "C005",
+      "name": "Meridian Capital Partners",
+      "segment": "Corporate",
+      "industry": "Financial Services",
+      "relationship_status": "Active",
+      "relationship_since": "2017-11-03",
+      "last_contact": "2026-03-15",
+      "facility_limit": 15000000,
+      "relationship_manager": "rm001"
+    }
+  ],
+  "rm002": [
+    {
+      "client_id": "C006",
+      "name": "Clearwater Energy",
+      "segment": "Corporate",
+      "industry": "Energy",
+      "relationship_status": "Active",
+      "relationship_since": "2020-03-01",
+      "last_contact": "2026-03-08",
+      "facility_limit": 12000000,
+      "relationship_manager": "rm002"
+    },
+    {
+      "client_id": "C007",
+      "name": "Horizon Healthcare",
+      "segment": "Mid-Market",
+      "industry": "Healthcare",
+      "relationship_status": "Active",
+      "relationship_since": "2019-06-15",
+      "last_contact": "2026-02-28",
+      "facility_limit": 4500000,
+      "relationship_manager": "rm002"
+    }
+  ]
+}

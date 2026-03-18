@@ -1,0 +1,41 @@
+"""
+Portfolio Watch Agent — shared LangGraph state schema.
+
+PortfolioWatchState flows through every node in the Generator-Evaluator graph.
+
+Generator-Evaluator loop:
+  generate_narrative writes draft_narrative and bumps iteration.
+  evaluate_narrative writes evaluation_* fields.
+  route_after_evaluation conditional edge decides: loop back or proceed.
+"""
+from typing import Annotated, Optional
+from typing_extensions import TypedDict
+from langgraph.graph.message import add_messages
+
+
+class PortfolioWatchState(TypedDict):
+    # ── Conversation history ────────────────────────────────────────────────────
+    messages: Annotated[list, add_messages]
+
+    # ── Input ───────────────────────────────────────────────────────────────────
+    rm_id: str
+    prompt: str          # Optional focus area from the RM
+    session_id: str
+
+    # ── Gathered data ───────────────────────────────────────────────────────────
+    clients: list        # [{client_id, name, segment, industry, ...}]
+    signals: dict        # keyed by client_id → {payments, news, credit}
+
+    # ── Generator-Evaluator loop ────────────────────────────────────────────────
+    draft_narrative: Optional[str]       # Raw markdown from Generator
+    iteration: int                       # Starts at 0; incremented each generate pass
+
+    # Evaluator output (overwritten each evaluation pass)
+    evaluation_verdict: Optional[str]    # "pass" | "revise"
+    evaluation_score: Optional[float]    # 0.0–1.0
+    evaluation_issues: Optional[list]    # [{claim, problem, correction}]
+    evaluation_missed: Optional[list]    # signals that should have been flagged
+
+    # ── Final output ─────────────────────────────────────────────────────────────
+    final_report: Optional[str]          # Verified markdown report
+    report_meta: Optional[dict]          # {clients, flags, score, iterations}

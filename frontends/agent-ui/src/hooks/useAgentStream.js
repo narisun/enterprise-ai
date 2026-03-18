@@ -12,6 +12,10 @@
  *   data: {"markdown": "# RM Brief\n…", "client_name": "Acme"}\r\n
  *   \r\n
  *
+ *   event: report\r\n                          ← Portfolio Watch / Morgan
+ *   data: {"markdown": "## Portfolio Watch…", "meta": {…}}\r\n
+ *   \r\n
+ *
  *   event: error\r\n
  *   data: {"message": "Something went wrong"}\r\n
  *   \r\n
@@ -37,6 +41,7 @@ const API_KEY = import.meta.env.VITE_API_KEY ?? ''
 export function useAgentStream() {
   const [steps,      setSteps]      = useState([])   // completed pipeline steps
   const [activeStep, setActiveStep] = useState(null) // currently-running step label
+  const [thoughts,   setThoughts]   = useState([])   // evaluator thinking events
   const [output,     setOutput]     = useState(null) // final markdown string
   const [clientName, setClientName] = useState(null)
   const [status,     setStatus]     = useState('idle') // idle|streaming|complete|error
@@ -81,6 +86,7 @@ export function useAgentStream() {
     // ── Reset ──────────────────────────────────────────────────────────────
     setSteps([])
     setActiveStep(null)
+    setThoughts([])
     setOutput(null)
     setClientName(null)
     setError(null)
@@ -162,7 +168,7 @@ export function useAgentStream() {
             if (eventType === 'progress') {
               _advanceStep(data.message)
 
-            } else if (eventType === 'brief') {
+            } else if (eventType === 'brief' || eventType === 'report') {
               _flushActiveStep()
               // Safety: if data.markdown is missing (double-encoded edge case),
               // try to re-parse `data` as a JSON string.
@@ -170,10 +176,25 @@ export function useAgentStream() {
               if (markdown === undefined && typeof data === 'string') {
                 try { markdown = JSON.parse(data).markdown } catch { /* ignore */ }
               }
-              console.log('[SSE brief] markdown length:', markdown?.length, 'preview:', markdown?.slice(0, 120))
+              console.log(`[SSE ${eventType}] markdown length:`, markdown?.length, 'preview:', markdown?.slice(0, 120))
               setOutput(markdown ?? '')
+              // 'brief' events carry client_name; 'report' events carry meta — both optional
               setClientName(data.client_name ?? null)
               setStatus('complete')
+
+            } else if (eventType === 'thinking') {
+              // Evaluator transparency event — add to thoughts timeline
+              const thought = {
+                id:             `thought-${Date.now()}-${Math.random()}`,
+                ts:             Date.now(),
+                message:        data.message,
+                verdict:        data.verdict,
+                score:          data.score,
+                issues:         data.issues         ?? [],
+                missed_signals: data.missed_signals ?? [],
+                phase:          data.phase,
+              }
+              setThoughts((prev) => [...prev, thought])
 
             } else if (eventType === 'error') {
               _flushActiveStep()
@@ -209,13 +230,14 @@ export function useAgentStream() {
     activeStepRef.current = null
     setSteps([])
     setActiveStep(null)
+    setThoughts([])
     setOutput(null)
     setClientName(null)
     setError(null)
     setStatus('idle')
   }, [])
 
-  return { steps, activeStep, output, clientName, status, error, run, abort, reset }
+  return { steps, activeStep, thoughts, output, clientName, status, error, run, abort, reset }
 }
 
 // ── Content-based event type inference (fallback) ─────────────────────────────
@@ -223,7 +245,9 @@ export function useAgentStream() {
 //   'markdown' key present → brief
 //   'message' key present  → progress (or error, but UI handles both the same)
 function _inferEventType(data) {
-  if ('markdown' in data)              return 'brief'
-  if ('message' in data)               return 'progress'
+  if ('markdown' in data && 'meta' in data)   return 'report'    // Portfolio Watch
+  if ('markdown' in data)                     return 'brief'     // RM Prep
+  if ('verdict'  in data && 'score' in data)  return 'thinking'  // Evaluator insight
+  if ('message'  in data)                     return 'progress'
   return null
 }

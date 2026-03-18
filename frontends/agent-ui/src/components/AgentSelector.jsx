@@ -1,93 +1,183 @@
 /**
- * AgentSelector — Phase 1 of the app.
+ * AgentSelector — Staff Directory view.
  *
- * Displays a card grid of available agents. Clicking a card calls onSelect(agent).
- * Agents that are not yet live are shown as "coming soon" and are non-interactive.
+ * Renders digital workers grouped by department, styled as an employee
+ * directory rather than a software catalogue.
+ *
+ * Live workers show a "Work with [Name]" CTA.
+ * Coming-soon workers show an "In Development" badge and are non-interactive.
  */
 
-import { ArrowRight, Database, Newspaper, Building2 } from 'lucide-react'
+import { ArrowRight } from 'lucide-react'
+import { byDepartment, DEPARTMENTS } from '../config/agents.js'
 
+// ── Colour tokens ─────────────────────────────────────────────────────────────
 const COLOR_MAP = {
-  blue:   { bg: 'bg-blue-50',   border: 'border-blue-200',  badge: 'bg-blue-100 text-blue-700',   icon: 'text-blue-600', btn: 'bg-blue-600 hover:bg-blue-700' },
-  violet: { bg: 'bg-violet-50', border: 'border-violet-200', badge: 'bg-violet-100 text-violet-700', icon: 'text-violet-600', btn: 'bg-violet-600 hover:bg-violet-700' },
-  emerald:{ bg: 'bg-emerald-50',border: 'border-emerald-200',badge: 'bg-emerald-100 text-emerald-700',icon: 'text-emerald-600',btn: 'bg-emerald-600 hover:bg-emerald-700'},
-  amber:  { bg: 'bg-amber-50',  border: 'border-amber-200', badge: 'bg-amber-100 text-amber-700',  icon: 'text-amber-600',  btn: 'bg-amber-600 hover:bg-amber-700' },
+  blue:   { border: 'border-blue-200',   bg: 'bg-blue-50',    avatar: 'bg-blue-600',    role: 'text-blue-600',   badge: 'bg-blue-100 text-blue-700',   btn: 'bg-blue-600 hover:bg-blue-700',   src: 'bg-blue-100 text-blue-700'   },
+  violet: { border: 'border-violet-200', bg: 'bg-violet-50',  avatar: 'bg-violet-600',  role: 'text-violet-600', badge: 'bg-violet-100 text-violet-700', btn: 'bg-violet-600 hover:bg-violet-700', src: 'bg-violet-100 text-violet-700' },
+  emerald:{ border: 'border-emerald-200',bg: 'bg-emerald-50', avatar: 'bg-emerald-600', role: 'text-emerald-600',badge: 'bg-emerald-100 text-emerald-700',btn: 'bg-emerald-600 hover:bg-emerald-700',src: 'bg-emerald-100 text-emerald-700'},
+  amber:  { border: 'border-amber-200',  bg: 'bg-amber-50',   avatar: 'bg-amber-600',   role: 'text-amber-600',  badge: 'bg-amber-100 text-amber-700',  btn: 'bg-amber-600 hover:bg-amber-700',  src: 'bg-amber-100 text-amber-700'  },
+  rose:   { border: 'border-rose-200',   bg: 'bg-rose-50',    avatar: 'bg-rose-600',    role: 'text-rose-600',   badge: 'bg-rose-100 text-rose-700',   btn: 'bg-rose-600 hover:bg-rose-700',   src: 'bg-rose-100 text-rose-700'   },
+  teal:   { border: 'border-teal-200',   bg: 'bg-teal-50',    avatar: 'bg-teal-600',    role: 'text-teal-600',   badge: 'bg-teal-100 text-teal-700',   btn: 'bg-teal-600 hover:bg-teal-700',   src: 'bg-teal-100 text-teal-700'   },
+  indigo: { border: 'border-indigo-200', bg: 'bg-indigo-50',  avatar: 'bg-indigo-600',  role: 'text-indigo-600', badge: 'bg-indigo-100 text-indigo-700', btn: 'bg-indigo-600 hover:bg-indigo-700', src: 'bg-indigo-100 text-indigo-700' },
+  orange: { border: 'border-orange-200', bg: 'bg-orange-50',  avatar: 'bg-orange-600',  role: 'text-orange-600', badge: 'bg-orange-100 text-orange-700', btn: 'bg-orange-600 hover:bg-orange-700', src: 'bg-orange-100 text-orange-700' },
 }
 
-const DATA_SOURCE_ICONS = {
-  'Salesforce CRM':  <Building2 className="w-3.5 h-3.5" />,
-  'Payments System': <Database   className="w-3.5 h-3.5" />,
-  'Internet News':   <Newspaper  className="w-3.5 h-3.5" />,
-}
+// ── Worker card ───────────────────────────────────────────────────────────────
+function WorkerCard({ agent, onSelect }) {
+  const c      = COLOR_MAP[agent.color] ?? COLOR_MAP.blue
+  const isLive = !agent.comingSoon
+  const initials = agent.workerName.slice(0, 2).toUpperCase()
 
-export default function AgentSelector({ agents, onSelect }) {
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 max-w-5xl">
-      {agents.map((agent) => {
-        const c = COLOR_MAP[agent.color] ?? COLOR_MAP.blue
-        const isLive = !agent.comingSoon
+    <div
+      className={`
+        relative flex flex-col rounded-2xl border-2 p-5 gap-4 transition-all duration-200
+        ${isLive
+          ? `${c.bg} ${c.border} cursor-pointer hover:shadow-md hover:-translate-y-0.5 active:translate-y-0`
+          : 'bg-slate-50 border-slate-200 cursor-not-allowed'}
+      `}
+      onClick={() => isLive && onSelect(agent)}
+      role={isLive ? 'button' : undefined}
+      tabIndex={isLive ? 0 : undefined}
+      onKeyDown={(e) => { if (isLive && (e.key === 'Enter' || e.key === ' ')) onSelect(agent) }}
+    >
+      {/* Status pill — top right */}
+      <div className="absolute top-4 right-4">
+        {isLive ? (
+          <span className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+            Active
+          </span>
+        ) : (
+          <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-slate-200 text-slate-500">
+            In Development
+          </span>
+        )}
+      </div>
 
-        return (
-          <div
-            key={agent.id}
-            className={`
-              relative rounded-2xl border-2 p-6 flex flex-col gap-4 transition-all duration-200
-              ${isLive
-                ? `${c.bg} ${c.border} cursor-pointer hover:shadow-lg hover:-translate-y-0.5 active:translate-y-0`
-                : 'bg-slate-50 border-slate-200 opacity-60 cursor-not-allowed'}
-            `}
-            onClick={() => isLive && onSelect(agent)}
-            role={isLive ? 'button' : undefined}
-            tabIndex={isLive ? 0 : undefined}
-            onKeyDown={(e) => { if (isLive && (e.key === 'Enter' || e.key === ' ')) onSelect(agent) }}
-          >
-            {/* Coming soon badge */}
-            {agent.comingSoon && (
-              <span className="absolute top-3 right-3 text-xs font-medium px-2 py-0.5 rounded-full bg-slate-200 text-slate-500">
-                Coming soon
-              </span>
-            )}
+      {/* Avatar + name block */}
+      <div className="flex items-center gap-3 pr-24">
+        <div className={`
+          w-12 h-12 rounded-xl flex items-center justify-center shrink-0 text-white font-bold text-base
+          ${isLive ? c.avatar : 'bg-slate-300'}
+        `}>
+          {agent.icon}
+        </div>
+        <div className="min-w-0">
+          <h3 className="font-bold text-slate-900 text-lg leading-tight">{agent.workerName}</h3>
+          <p className={`text-xs font-semibold leading-snug mt-0.5 ${isLive ? c.role : 'text-slate-400'}`}>
+            {agent.workerRole}
+          </p>
+        </div>
+      </div>
 
-            {/* Icon + Name */}
-            <div className="flex items-start gap-3">
-              <div className={`text-3xl leading-none mt-0.5`}>{agent.icon}</div>
-              <div>
-                <h3 className="font-semibold text-slate-900 text-base leading-tight">{agent.name}</h3>
-                <p className={`text-xs font-medium mt-0.5 ${c.icon}`}>{agent.tagline}</p>
-              </div>
-            </div>
+      {/* Description */}
+      <p className="text-sm text-slate-600 leading-relaxed flex-1">
+        {agent.description}
+      </p>
 
-            {/* Description */}
-            <p className="text-sm text-slate-600 leading-relaxed flex-1">{agent.description}</p>
+      {/* Data source chips */}
+      {agent.dataSources?.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {agent.dataSources.map((src) => (
+            <span
+              key={src.label}
+              className={`inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full font-medium
+                ${isLive ? c.src : 'bg-slate-100 text-slate-400'}`}
+            >
+              <span>{src.icon}</span>
+              {src.label}
+            </span>
+          ))}
+        </div>
+      )}
 
-            {/* Data sources */}
-            {agent.dataSources?.length > 0 && (
-              <div className="flex flex-wrap gap-1.5">
-                {agent.dataSources.map((src) => (
-                  <span
-                    key={src.label}
-                    className={`inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full font-medium ${c.badge}`}
-                  >
-                    {DATA_SOURCE_ICONS[src.label] ?? src.icon}
-                    {src.label}
-                  </span>
-                ))}
-              </div>
-            )}
+      {/* CTA */}
+      {isLive && (
+        <button
+          className={`w-full py-2.5 px-4 rounded-xl text-sm font-semibold text-white
+            flex items-center justify-center gap-2 transition-colors ${c.btn}`}
+          onClick={(e) => { e.stopPropagation(); onSelect(agent) }}
+        >
+          Work with {agent.workerName}
+          <ArrowRight className="w-4 h-4" />
+        </button>
+      )}
+    </div>
+  )
+}
 
-            {/* CTA */}
-            {isLive && (
-              <button
-                className={`mt-1 w-full py-2.5 px-4 rounded-xl text-sm font-semibold text-white flex items-center justify-center gap-2 transition-colors ${c.btn}`}
-                onClick={(e) => { e.stopPropagation(); onSelect(agent) }}
-              >
-                Launch Agent
-                <ArrowRight className="w-4 h-4" />
-              </button>
-            )}
-          </div>
-        )
-      })}
+// ── Department section ────────────────────────────────────────────────────────
+function DepartmentSection({ name, workers, onSelect }) {
+  const liveCount   = workers.filter((w) => !w.comingSoon).length
+  const totalCount  = workers.length
+
+  return (
+    <section>
+      {/* Department header */}
+      <div className="flex items-center gap-3 mb-4">
+        <h2 className="text-sm font-bold text-slate-700 uppercase tracking-wider">{name}</h2>
+        <div className="flex-1 h-px bg-slate-200" />
+        <span className="text-xs text-slate-400 font-medium">
+          {liveCount > 0
+            ? `${liveCount} of ${totalCount} active`
+            : `${totalCount} in development`}
+        </span>
+      </div>
+
+      {/* Worker cards grid */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+        {workers.map((agent) => (
+          <WorkerCard key={agent.id} agent={agent} onSelect={onSelect} />
+        ))}
+      </div>
+    </section>
+  )
+}
+
+// ── Main export ───────────────────────────────────────────────────────────────
+export default function AgentSelector({ onSelect }) {
+  const grouped   = byDepartment()
+  const allAgents = Object.values(grouped).flat()
+  const liveCount = allAgents.filter((a) => !a.comingSoon).length
+  const totalCount = allAgents.length
+
+  return (
+    <div className="space-y-10 max-w-6xl">
+
+      {/* Directory summary bar */}
+      <div className="flex items-center gap-6 pb-4 border-b border-slate-200">
+        <div className="text-center">
+          <p className="text-2xl font-bold text-slate-900">{totalCount}</p>
+          <p className="text-xs text-slate-500 mt-0.5">Total Workers</p>
+        </div>
+        <div className="w-px h-10 bg-slate-200" />
+        <div className="text-center">
+          <p className="text-2xl font-bold text-emerald-600">{liveCount}</p>
+          <p className="text-xs text-slate-500 mt-0.5">Active Now</p>
+        </div>
+        <div className="w-px h-10 bg-slate-200" />
+        <div className="text-center">
+          <p className="text-2xl font-bold text-slate-400">{totalCount - liveCount}</p>
+          <p className="text-xs text-slate-500 mt-0.5">In Development</p>
+        </div>
+        <div className="flex-1" />
+        <p className="text-xs text-slate-400 italic">
+          Click any active worker to start a session
+        </p>
+      </div>
+
+      {/* Department sections */}
+      {DEPARTMENTS.filter((d) => grouped[d]).map((dept) => (
+        <DepartmentSection
+          key={dept}
+          name={dept}
+          workers={grouped[dept]}
+          onSelect={onSelect}
+        />
+      ))}
+
     </div>
   )
 }

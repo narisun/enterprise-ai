@@ -441,6 +441,41 @@ services:
       - "127.0.0.1:8003:8003"    # L4: loopback only in dev
 
   # ============================================================
+  # PORTFOLIO WATCH AGENT — Morgan (Generator-Evaluator pattern)
+  # ============================================================
+  portfolio-watch-agent:
+    build:
+      context: .                           # Build from monorepo root
+      dockerfile: agents/portfolio-watch/Dockerfile
+    container_name: ai-portfolio-watch-agent
+    environment:
+      LITELLM_BASE_URL: http://litellm:4000/v1
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+      SERVICE_NAME: portfolio-watch-agent
+      # Both Generator and Evaluator use the complex (Sonnet) model route
+      SYNTHESIS_MODEL_ROUTE: ${SYNTHESIS_MODEL_ROUTE:-complex-routing}
+      ROUTER_MODEL_ROUTE: ${ROUTER_MODEL_ROUTE:-fast-routing}
+      SPECIALIST_MODEL_ROUTE: ${SPECIALIST_MODEL_ROUTE:-fast-routing}
+      ENABLE_COMPACTION: ${ENABLE_COMPACTION:-true}
+      AGENT_CONTEXT_TOKEN_LIMIT: ${AGENT_CONTEXT_TOKEN_LIMIT:-6000}
+      AGENT_RECURSION_LIMIT: ${AGENT_RECURSION_LIMIT:-15}
+      <<: *otel-env
+    depends_on:
+      litellm:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python3", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8004/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - ai-network
+    ports:
+      - "127.0.0.1:8004:8004"    # L4: loopback only in dev
+
+  # ============================================================
   # AGENT UI — React frontend (supports multiple agents)
   # ============================================================
   agent-ui:
@@ -452,6 +487,8 @@ services:
     container_name: ai-agent-ui
     depends_on:
       rm-prep-agent:
+        condition: service_healthy
+      portfolio-watch-agent:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:80/"]

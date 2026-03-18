@@ -32,7 +32,7 @@ function Breadcrumb({ phase, agent, onSelectClick, onAgentClick }) {
         className="hover:text-slate-800 transition-colors flex items-center gap-1"
       >
         <LayoutGrid className="w-3.5 h-3.5" />
-        Agents
+        Digital Workers
       </button>
       {phase !== PHASES.SELECT && (
         <>
@@ -41,7 +41,7 @@ function Breadcrumb({ phase, agent, onSelectClick, onAgentClick }) {
             onClick={onAgentClick}
             className={`transition-colors ${phase === PHASES.CONFIGURE ? 'text-slate-800 font-medium' : 'hover:text-slate-800'}`}
           >
-            {agent?.name ?? '…'}
+            {agent?.workerName ?? '…'}
           </button>
         </>
       )}
@@ -66,22 +66,26 @@ function Sidebar({ agent, rmId, onRmIdChange, sessionId, onNewSession, phase }) 
             <Zap className="w-4 h-4 text-white" />
           </div>
           <div>
-            <p className="font-bold text-sm leading-tight">RM Agent</p>
-            <p className="text-xs text-slate-400 leading-tight">Platform</p>
+            <p className="font-bold text-sm leading-tight">Digital Workers</p>
+            <p className="text-xs text-slate-400 leading-tight">Enterprise AI Platform</p>
           </div>
         </div>
       </div>
 
-      {/* Active agent info */}
+      {/* Active worker info */}
       <div className="px-5 py-4 flex-1 overflow-y-auto space-y-5">
         {agent ? (
           <>
             <div>
-              <p className="text-xs text-slate-500 uppercase tracking-wider font-medium mb-2">Active Agent</p>
-              <div className="bg-slate-800 rounded-xl p-3">
-                <span className="text-xl">{agent.icon}</span>
-                <p className="text-sm font-semibold mt-1 leading-tight">{agent.name}</p>
-                <p className="text-xs text-slate-400 mt-1 leading-snug">{agent.tagline}</p>
+              <p className="text-xs text-slate-500 uppercase tracking-wider font-medium mb-2">Working with</p>
+              <div className="bg-slate-800 rounded-xl p-3 flex items-center gap-3">
+                <div className="w-10 h-10 rounded-lg bg-slate-700 flex items-center justify-center text-xl shrink-0">
+                  {agent.icon}
+                </div>
+                <div className="min-w-0">
+                  <p className="font-bold text-base leading-tight">{agent.workerName}</p>
+                  <p className="text-xs text-slate-400 mt-0.5 leading-snug">{agent.workerRole}</p>
+                </div>
               </div>
             </div>
 
@@ -101,11 +105,20 @@ function Sidebar({ agent, rmId, onRmIdChange, sessionId, onNewSession, phase }) 
           </>
         ) : (
           <div>
-            <p className="text-xs text-slate-500 uppercase tracking-wider font-medium mb-2">Available</p>
+            <p className="text-xs text-slate-500 uppercase tracking-wider font-medium mb-2">Your Team</p>
             <div className="space-y-1.5">
-              {AGENTS.map((a) => (
-                <div key={a.id} className="flex items-center gap-2 text-xs text-slate-400">
-                  <span>{a.icon}</span>{a.name}
+              {AGENTS.filter((a) => !a.comingSoon).map((a) => (
+                <div key={a.id} className="flex items-center gap-2 text-xs text-slate-300">
+                  <span>{a.icon}</span>
+                  <span className="font-medium">{a.workerName}</span>
+                  <span className="text-slate-500">· Active</span>
+                </div>
+              ))}
+              {AGENTS.filter((a) => a.comingSoon).slice(0, 3).map((a) => (
+                <div key={a.id} className="flex items-center gap-2 text-xs text-slate-600">
+                  <span>{a.icon}</span>
+                  <span>{a.workerName}</span>
+                  <span>· Soon</span>
                 </div>
               ))}
             </div>
@@ -117,13 +130,13 @@ function Sidebar({ agent, rmId, onRmIdChange, sessionId, onNewSession, phase }) 
       <div className="px-5 py-4 border-t border-slate-700 space-y-3">
         <div>
           <label className="text-xs text-slate-500 uppercase tracking-wider font-medium block mb-1.5">
-            <User className="w-3 h-3 inline mr-1 -mt-0.5" />RM Identity
+            <User className="w-3 h-3 inline mr-1 -mt-0.5" />Your Name
           </label>
           <input
             type="text"
             value={rmId}
             onChange={(e) => onRmIdChange(e.target.value)}
-            placeholder="Your name / RM ID"
+            placeholder="Your name"
             className="w-full bg-slate-800 border border-slate-700 text-white text-xs rounded-lg px-3 py-2
               outline-none focus:ring-2 focus:ring-blue-500 placeholder-slate-500"
           />
@@ -150,7 +163,7 @@ export default function App() {
   const [rmId,          setRmId]          = useState('RM')
   const [sessionId,     setSessionId]     = useState(() => uuidv4())
 
-  const { steps, activeStep, output, clientName, status, error, run, reset } = useAgentStream()
+  const { steps, activeStep, thoughts, output, clientName, status, error, run, reset } = useAgentStream()
 
   // ── Handlers ────────────────────────────────────────────────────────────────
 
@@ -223,14 +236,16 @@ export default function App() {
         {/* Main content */}
         <main className="flex-1 flex flex-col overflow-hidden">
 
-          {/* Phase: SELECT */}
+          {/* Phase: SELECT — Staff Directory */}
           {phase === PHASES.SELECT && (
             <div className="flex-1 overflow-y-auto p-8">
               <div className="mb-8">
-                <h1 className="text-2xl font-bold text-slate-900">Select an Agent</h1>
-                <p className="text-slate-500 mt-1">Choose an AI agent to help with your task</p>
+                <h1 className="text-2xl font-bold text-slate-900">Your Digital Team</h1>
+                <p className="text-slate-500 mt-1">
+                  AI workers embedded in your workflows — each with a defined role, data access, and specialist skills.
+                </p>
               </div>
-              <AgentSelector agents={AGENTS} onSelect={handleAgentSelect} />
+              <AgentSelector onSelect={handleAgentSelect} />
             </div>
           )}
 
@@ -238,8 +253,12 @@ export default function App() {
           {phase === PHASES.CONFIGURE && selectedAgent && (
             <div className="flex-1 overflow-y-auto p-8">
               <div className="mb-8">
-                <h1 className="text-2xl font-bold text-slate-900">{selectedAgent.name}</h1>
-                <p className="text-slate-500 mt-1">{selectedAgent.description}</p>
+                <div className="flex items-center gap-3 mb-1">
+                  <span className="text-2xl">{selectedAgent.icon}</span>
+                  <h1 className="text-2xl font-bold text-slate-900">{selectedAgent.workerName}</h1>
+                </div>
+                <p className="text-sm font-semibold text-slate-500">{selectedAgent.workerRole}</p>
+                <p className="text-slate-500 mt-2 text-sm">{selectedAgent.description}</p>
               </div>
               <PromptBuilder agent={selectedAgent} onSubmit={handlePromptSubmit} />
             </div>
@@ -261,6 +280,9 @@ export default function App() {
                 error={error}
                 onRefine={handleRefine}
                 agent={selectedAgent}
+                steps={steps}
+                activeStep={activeStep}
+                thoughts={thoughts}
               />
             </div>
           )}
