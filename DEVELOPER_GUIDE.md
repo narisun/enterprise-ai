@@ -1,61 +1,232 @@
-# Developer Guide — Enterprise AI Platform
+# Developer Guide — Meridian Enterprise AI Platform
 
-This guide explains the architecture, the role of every component, and how to build new agents and MCP servers using the shared SDK. Read the System Overview and Platform SDK sections before starting any new service.
+This guide is the primary reference for engineers building on the Meridian platform. It covers local environment setup, how the platform SDK works, and step-by-step walkthroughs for building new agents and MCP servers.
 
 ---
 
 ## Table of Contents
 
-1. [System Overview](#1-system-overview)
+1. [Local Development Setup](#1-local-development-setup)
 2. [Platform SDK — Separation of Concerns](#2-platform-sdk--separation-of-concerns)
-3. [Component Reference](#3-component-reference)
-4. [Authorization Chain — JWT → AgentContext → OPA → PostgreSQL](#4-authorization-chain--jwt--agentcontext--opa--postgresql)
-5. [Test Data Architecture](#5-test-data-architecture)
-6. [Step-by-Step: Building a New Agent](#6-step-by-step-building-a-new-agent)
-7. [Step-by-Step: Building a New MCP Server](#7-step-by-step-building-a-new-mcp-server)
+3. [Authorization Chain — JWT → AgentContext → OPA → PostgreSQL](#3-authorization-chain--jwt--agentcontext--opa--postgresql)
+4. [Test Data Architecture](#4-test-data-architecture)
+5. [Step-by-Step: Building a New Agent](#5-step-by-step-building-a-new-agent)
+6. [Step-by-Step: Building a New MCP Server](#6-step-by-step-building-a-new-mcp-server)
+7. [Component Reference](#7-component-reference)
 8. [Environment Variables](#8-environment-variables)
-9. [Data Flow: Generic Chat Request](#9-data-flow-generic-chat-request)
-10. [Data Flow: RM Prep Brief Request](#10-data-flow-rm-prep-brief-request)
+9. [Data Flows](#9-data-flows)
 
 ---
 
-## 1. System Overview
+## 1. Local Development Setup
 
-This platform hosts two independently deployable agents:
+### 1.1 Prerequisites
 
-**Generic Chat Agent** — a LangGraph ReAct loop connected to a secure read-only SQL tool (`data-mcp`). It serves the Chainlit `chat-ui` and a REST `/chat` endpoint.
+Install these once. All versions are minimum requirements.
 
-**RM Prep Agent** — a LangGraph `StateGraph` orchestrator that prepares relationship manager client briefs. It fans out to three specialist MCP servers in parallel (Salesforce CRM, bank payments, news), synthesises the results with a larger model, and returns structured Markdown.
+| Tool | Minimum version | macOS | Ubuntu / WSL 2 |
+|---|---|---|---|
+| Docker Desktop | Latest | [docker.com](https://docker.com) | [docker.com](https://docker.com) |
+| Python | 3.11 | `brew install python@3.11` | `apt install python3-full python3-venv` |
+| Make | Any | pre-installed | `apt install make` |
+| OPA CLI | 0.65 | `brew install opa` | see below |
+| Git | 2.x | pre-installed | `apt install git` |
 
-```
-  ┌─────────────────────────┐        ┌───────────────────────────────────┐
-  │  Chainlit Chat UI :8501  │        │  Streamlit RM Prep UI :8502       │
-  └────────────┬────────────┘        └──────────────┬────────────────────┘
-               │ API key (Bearer)                    │ JWT (Bearer)
-               ▼                                     ▼
-  ┌────────────────────────┐        ┌────────────────────────────────────┐
-  │  Agent Service  :8000  │        │  RM Prep Agent  :8003              │
-  │  ReAct loop            │        │  StateGraph orchestrator           │
-  │  · data-mcp  :8080     │        │  · salesforce-mcp  :8081           │
-  │    (SQL tool)          │        │  · payments-mcp    :8082           │
-  └────────┬───────────────┘        │  · news-search-mcp :8083           │
-           │                        └──────────┬──────────┬──────────────┘
-           │                                   │          │
-           └──────────────────────────┬────────┘          │
-                                      ▼                    ▼
-                           ┌──────────────────┐  ┌──────────────────┐
-                           │  PostgreSQL :5432 │  │  OPA  :8181      │
-                           │  · agent memory   │  │  · tool_auth     │
-                           │  · salesforce.*   │  │  · rm_prep_authz │
-                           │  · bankdw.*       │  └──────────────────┘
-                           └──────────────────┘
-                    ┌────────────────────────────────┐
-                    │  Shared infra (one container each)│
-                    │  LiteLLM :4000  Redis  OTel :4318 │
-                    └────────────────────────────────┘
+**OPA CLI on Ubuntu / WSL 2:**
+```bash
+curl -L -o opa \
+  https://github.com/open-policy-agent/opa/releases/download/v0.65.0/opa_linux_amd64_static
+chmod +x opa && sudo mv opa /usr/local/bin/opa
+opa version   # → OPA 0.65.0
 ```
 
-All services run on one Docker bridge network (`ai-network`). Containers reach each other by service name — no hardcoded IPs.
+**WSL 2 additional steps (Windows only):**
+```powershell
+# PowerShell (run as Administrator)
+wsl --install
+# Restart when prompted, then in Ubuntu:
+```
+```bash
+sudo apt update && sudo apt install -y python3-full python3-venv make curl git
+# Enable Docker Desktop → Settings → Resources → WSL Integration → your Ubuntu distro → Apply
+```
+
+> **Line endings:** Run `git config core.autocrlf false` inside WSL before cloning. Docker images require Unix line endings.
+
+---
+
+### 1.2 First-time Setup
+
+```bash
+# 1. Clone the repo
+git clone <repo-url> enterprise-ai
+cd enterprise-ai
+
+# 2. Install the shared SDK into a local venv
+make sdk-install
+# This creates .venv/ and installs platform-sdk in editable mode.
+# Activate it for IDE import resolution:
+source .venv/bin/activate   # or .venv\Scripts\Activate.ps1 on Windows
+
+# 3. Configure environment variables
+cp .env.example .env
+```
+
+Open `.env` and fill in the required values:
+
+```bash
+# LLM provider — choose Azure (recommended) or AWS
+AZURE_API_KEY=your-azure-key
+AZURE_API_BASE=https://your-instance.openai.azure.com
+
+# Infrastructure secrets — generate these
+INTERNAL_API_KEY=$(python -c "import secrets; print('sk-ent-' + secrets.token_hex(24))")
+JWT_SECRET=$(python -c "import secrets; print(secrets.token_hex(32))")
+POSTGRES_PASSWORD=$(python -c "import secrets; print(secrets.token_hex(16))")
+REDIS_PASSWORD=$(python -c "import secrets; print(secrets.token_hex(16))")
+
+# Optional — for live news in development
+TAVILY_API_KEY=tvly-...
+```
+
+---
+
+### 1.3 Start the Stack
+
+```bash
+# Full stack — CRM, payments, news, all test data (recommended for local dev)
+make dev-test-up
+```
+
+On first start Docker will build images (5–10 min). Subsequent starts take about 30 seconds. On the first start of a fresh `pgdata` volume, PostgreSQL runs all init scripts to seed the test data. If you see the health check fail for `pgvector`, the init scripts are still running — wait 60 seconds and retry.
+
+**What `make dev-test-up` starts:**
+
+| Service | Port | Purpose |
+|---|---|---|
+| Meridian RM Prep UI | 8502 | Streamlit brief-writing UI |
+| Chat UI | 8501 | Chainlit generic chat |
+| RM Prep Agent | 8003 | Brief orchestrator API |
+| Generic Agent | 8000 | ReAct chat API |
+| LiteLLM Proxy | 4000 | Multi-cloud LLM router |
+| Salesforce MCP | 8081 | CRM data tool server |
+| Payments MCP | 8082 | Bank payment tool server |
+| News MCP | 8083 | News search tool server |
+| Data MCP | 8080 | Generic SQL tool server |
+| PostgreSQL | 5432 | Primary data store |
+| Redis | 6379 | Cache + session store |
+| OPA | 8181 | Authorization policy engine |
+| OTel Collector | 4318 | Trace aggregation |
+
+Verify everything is healthy:
+```bash
+make dev-logs                                          # watch all logs
+curl http://localhost:8003/health                      # → {"status":"ok"}
+curl http://localhost:8000/health                      # → {"status":"ok"}
+curl http://localhost:8181/health                      # → {}
+curl http://localhost:4000/health                      # → {"status":"healthy"}
+```
+
+---
+
+### 1.4 Day-to-day Commands
+
+```bash
+make dev-test-up     # Start full stack (CRM + payments test data)
+make dev-up          # Start without test data (generic chat only)
+make dev-down        # Stop all containers
+make dev-reset       # Wipe pgdata volume and restart from scratch
+make dev-logs        # Follow all container logs
+make dev-restart     # Restart all containers (no data loss)
+make sdk-install     # Rebuild the venv after platform-sdk changes
+
+# Testing
+make test            # Unit tests + OPA policy tests — no Docker required
+make test-unit       # Layer 1 only (seconds, no external deps)
+make test-integration # Layer 2 — requires dev-test-up
+make test-evals      # Layer 3 — requires full stack + LLM creds
+make test-policies   # OPA policy unit tests only
+make lint            # ruff linter across all Python
+```
+
+> **When to run `make dev-reset`:** Any time you change a database init script (`platform/db/`), change the schema, or switch between `make dev-up` and `make dev-test-up`. The `pgdata` Docker volume must be wiped for init scripts to re-run.
+
+---
+
+### 1.5 Generate Test Tokens for Manual API Testing
+
+```bash
+# Print all available test JWT tokens:
+python tests/fixtures/test_tokens.py
+
+# Use a manager token to generate a brief:
+TOKEN=$(python -c "
+from tests.fixtures.test_tokens import get_token
+print(get_token('carol_manager'))
+")
+
+curl -s -X POST http://localhost:8003/brief/persona \
+  -H "Authorization: Bearer ${INTERNAL_API_KEY}" \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"prompt\": \"Prepare a pre-meeting brief for Microsoft Corp.\",
+    \"rm_id\": \"dev-test\",
+    \"session_id\": \"local-001\",
+    \"jwt_token\": \"${TOKEN}\"
+  }" | python -m json.tool
+```
+
+Available test personas and their access levels:
+
+| Persona | Role | Accounts | AML visible | Compliance visible |
+|---|---|---|---|---|
+| `alice_rm` | rm | 4 assigned | no | no |
+| `bob_senior_rm` | senior_rm | all | yes | no |
+| `carol_manager` | manager | all | yes | no |
+| `dan_compliance` | compliance_officer | all | yes | yes |
+| `grace_readonly` | readonly | none | — | — |
+
+---
+
+### 1.6 Running Tests Locally
+
+```bash
+# Layer 1 — unit tests (no Docker, no LLM, runs in ~5 seconds)
+source .venv/bin/activate
+pytest tests/unit/ -m unit -v
+
+# OPA policy tests
+opa test tools/policies/opa/ -v
+
+# Layer 2 — integration tests (requires make dev-test-up first)
+pytest tests/integration/ -m integration -v --timeout=60
+
+# Layer 3 — eval tests (requires full stack + LLM credentials in .env)
+pytest tests/evals/ -m "eval and slow" -v --timeout=300
+
+# Run a single test class:
+pytest tests/unit/test_auth.py::TestAgentContextColumnMasking -v
+
+# Run a specific eval case:
+pytest tests/evals/test_faithfulness.py::TestFaithfulnessMicrosoftManager -v
+```
+
+---
+
+### 1.7 IDE Setup (VS Code / PyCharm)
+
+After `make sdk-install`, point your IDE at `.venv/bin/python` (or `.venv\Scripts\python.exe` on Windows). This gives you import completion for `platform_sdk` across all services.
+
+For VS Code, add to `.vscode/settings.json`:
+
+```json
+{
+  "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
+  "python.analysis.extraPaths": [
+    "${workspaceFolder}/platform-sdk"
+  ]
+}
+```
 
 ---
 
@@ -63,90 +234,140 @@ All services run on one Docker bridge network (`ai-network`). Containers reach e
 
 ### Why a shared SDK?
 
-Without a shared SDK every new service independently implements authentication, OPA integration, Redis caching, context compaction, structured logging, and OpenTelemetry tracing — duplicated code, inconsistent behaviour, bugs fixed in one place but not others.
+Without a shared SDK every new service independently implements API key verification, OPA calls, Redis connection management, context window trimming, structured logging, and OpenTelemetry tracing. Each reimplementation is a chance for divergence, bugs fixed in one place but not others, and security properties that vary across services.
 
-The `platform-sdk` moves these **cross-cutting concerns** into one tested, versioned package. A new service imports and calls; it never re-implements.
-
-### The SDK modules
+The `platform-sdk` collapses all cross-cutting concerns into one tested, versioned package. Service code imports what it needs; it never reimplements any of these.
 
 ```
 platform-sdk/platform_sdk/
 │
-├── auth.py          ← "Who is calling, and what are they allowed to see?"
-├── config.py        ← "What does this service need to know?"
-├── security.py      ← "Is this request allowed?"
-├── cache.py         ← "Have we seen this before?"
-├── compaction.py    ← "Is the context window getting too full?"
-├── agent.py         ← "Build me a LangGraph agent or specialist node"
-│
-├── logging.py       ← "Write structured JSON logs"
-├── telemetry.py     ← "Emit OpenTelemetry traces"
-└── llm_client.py    ← "Call the LLM directly (no agent loop)"
+├── auth.py       — "Who is calling, and what are they allowed to see?"
+├── config.py     — "What does this service need to know about itself?"
+├── security.py   — "Is this specific request authorized?"
+├── cache.py      — "Have we computed this result recently?"
+├── compaction.py — "Is the context window getting too full?"
+├── agent.py      — "Build me a LangGraph agent or specialist sub-agent"
+├── logging.py    — "Write structured JSON logs with keyword args"
+└── telemetry.py  — "Emit OpenTelemetry traces automatically"
 ```
+
+A new MCP tool server needs roughly 80 lines of service code to be fully production-ready. The SDK handles the rest.
 
 ---
 
 ### `auth.py` — AgentContext
 
-**The problem:** The RM Prep agent needs to enforce row-level security (which accounts an RM can see) and column-level security (which compliance fields are visible) across three different MCP servers. Passing raw JWT tokens through every layer is insecure; re-verifying the JWT in each MCP server adds crypto overhead and couples all servers to the auth secret.
-
-**The solution:** `AgentContext` — a frozen dataclass that carries verified identity and permission claims for one RM session. The orchestrator verifies the JWT once and serialises the context as base64-JSON in `X-Agent-Context`. Each MCP server reads and deserialises the header (no JWT re-verification needed) and uses the context to build OPA row/col filters before querying PostgreSQL.
+`AgentContext` is the central identity object. It carries the verified identity and permission claims for one user session and is the single source of truth for all downstream authorization decisions.
 
 ```python
 from platform_sdk import AgentContext
 
-# At the API boundary (RM Prep agent server.py):
+# At the API boundary — verify once:
 ctx = AgentContext.from_jwt(request.headers["Authorization"].removeprefix("Bearer "))
+# ctx.rm_id, ctx.role, ctx.assigned_account_ids, ctx.compliance_clearance
 
-# Forward to every MCP bridge:
-bridge = MCPToolBridge(sf_url, agent_context=ctx)
+# Development bypass (AUTH_MODE=none in .env):
+ctx = AgentContext.anonymous()   # full-access context, no JWT needed
 
-# In an MCP server tool handler (tools/shared/mcp_auth.py):
-ctx = get_agent_context()          # reads ContextVar set by AgentContextMiddleware
-row_filter = ctx.build_row_filters_crm()   # {"Account": ["001AAA", "002AAA"]} for rm role
-col_mask   = ctx.build_col_mask()          # ["AMLRiskCategory", ...] for standard clearance
+# Forward to MCP tools via HMAC-signed X-Agent-Context header:
+bridge = MCPToolBridge(mcp_url, agent_context=ctx)
 
-if not ctx.can_access_account(resolved_account_id):
+# Inside an MCP tool handler:
+from tools.shared.mcp_auth import get_agent_context
+ctx = get_agent_context()
+if not ctx.can_access_account(account_id):
     return json.dumps({"error": "access_denied"})
+
+# Build filters for SQL queries:
+row_filter = ctx.build_row_filters_crm()       # {"Account": ["001AAA", "002BBB"]}
+col_mask   = ctx.build_col_mask()              # ["AMLRiskCategory", "SanctionsScreeningStatus"]
+clearance  = ctx.has_clearance("aml_view")     # True / False
 ```
 
-The `AgentContext.anonymous()` class method provides a fully-cleared dev context when `AUTH_MODE=none` in local development.
+The context is **HMAC-signed** when forwarded downstream. MCP servers verify the signature before trusting the context, which prevents a compromised agent from forging a higher-clearance identity.
 
 ---
 
 ### `config.py` — Typed configuration
 
-Two typed dataclasses — `AgentConfig` for agent services and `MCPConfig` for MCP servers — each with a `from_env()` classmethod that reads all environment variables once, validates them, and applies bounds-checked defaults.
+Two dataclasses — `AgentConfig` for agents and `MCPConfig` for MCP servers — each with a `from_env()` classmethod that reads and validates all environment variables once at startup.
 
 ```python
 from platform_sdk import AgentConfig, MCPConfig
 
+# In an agent service:
 config = AgentConfig.from_env()
-# config.model_route, config.recursion_limit, config.enable_compaction ...
+# config.model_route        — LiteLLM route name
+# config.recursion_limit    — max tool-call iterations
+# config.enable_compaction  — bool
+# config.specialist_model_route
 
+# In an MCP server:
 config = MCPConfig.from_env()
-# config.opa_url, config.opa_timeout_seconds, config.max_result_bytes ...
+# config.opa_url            — OPA decision endpoint
+# config.opa_timeout_seconds
+# config.max_result_bytes   — response size cap
 ```
 
 ---
 
-### `security.py` — OPA client and API key verification
-
-`OpaClient` — async OPA decision client with retry, timeout, and fail-closed handling:
+### `security.py` — OPA and API key verification
 
 ```python
-from platform_sdk import OpaClient, MCPConfig
+from platform_sdk import OpaClient, MCPConfig, make_api_key_verifier
 
+# OPA client — fail-closed: OPA unreachable → deny
 opa = OpaClient(MCPConfig.from_env())
-allowed = await opa.authorize("my_tool_name", {"query": q, "session_id": sid})
+allowed = await opa.authorize("my_tool", {"session_id": sid, "role": role})
 if not allowed:
     return "ERROR: Unauthorized."
+
+# FastAPI Bearer key dependency
+verify_api_key = make_api_key_verifier()
+
+@app.post("/brief")
+async def brief(body: BriefRequest, _: str = Depends(verify_api_key)):
+    ...
 ```
 
-`make_api_key_verifier()` — FastAPI dependency for `Authorization: Bearer <key>`:
+Both helpers are fail-closed by design. An unconfigured `INTERNAL_API_KEY` rejects all requests. OPA returning a network error is treated as a denial.
+
+---
+
+### `cache.py` — Tool result caching
+
+Results are stored in Redis keyed by `sha256(tool_name + canonical_args)`. The cache degrades gracefully — if Redis is unavailable, tools run normally without caching.
 
 ```python
-from platform_sdk import make_api_key_verifier
+from platform_sdk import ToolResultCache
+from platform_sdk.cache import make_cache_key
+
+_cache = ToolResultCache.from_env(ttl_seconds=1800)
+
+@mcp.tool()
+async def get_client_profile(client_name: str) -> str:
+    key = make_cache_key("get_client_profile", {"client_name": client_name})
+    if _cache:
+        cached = await _cache.get(key)
+        if cached:
+            return cached
+
+    result = await _fetch_from_db(client_name)
+
+    # Never cache errors — callers should get fresh retries on errors
+    if _cache and not result.startswith('{"error"'):
+        await _cache.set(key, result)
+
+    return result
+```
+
+> **Cache key isolation:** Always include clearance-level information in the key when the same tool returns different data for different clearance levels. See `payments-mcp` for the `col_mask_key` pattern.
+
+---
+
+### `security.py` — `make_api_key_verifier`
+
+```python
 verify_api_key = make_api_key_verifier()
 
 @app.post("/chat")
@@ -154,71 +375,55 @@ async def chat(body: ChatRequest, _: str = Depends(verify_api_key)):
     ...
 ```
 
-Both are **fail-closed**: OPA unreachable → deny; `INTERNAL_API_KEY` not set → all requests rejected.
+Reads `INTERNAL_API_KEY` from the environment. Uses a timing-safe comparison to prevent timing attacks. Returns 401 with no body on failure.
 
 ---
 
-### `cache.py` — Tool-result caching
+### `agent.py` — LangGraph factories
 
-`ToolResultCache` stores results in Redis keyed by `sha256(tool_name + args)`. Degrades gracefully when Redis is unavailable.
+`build_agent(tools, config, prompt)` — ReAct loop for interactive agents:
 
 ```python
-# Preferred pattern — explicit cache check inside the tool handler
-from platform_sdk import ToolResultCache
-from platform_sdk.cache import make_cache_key
+from platform_sdk import AgentConfig, build_agent
+from langchain_core.messages import HumanMessage
 
-_cache = ToolResultCache.from_env(ttl_seconds=1800)
+config = AgentConfig.from_env()
+agent  = build_agent(tools, config=config, prompt=system_prompt)
 
-@mcp.tool()
-async def my_tool(client_name: str) -> str:
-    if _cache:
-        key = make_cache_key("my_tool", {"client_name": client_name})
-        cached = await _cache.get(key)
-        if cached:
-            return cached
+result = await agent.ainvoke(
+    {"messages": [HumanMessage(content=user_message)]},
+    config={"recursion_limit": config.recursion_limit,
+            "configurable": {"thread_id": session_id}},
+)
+reply = result["messages"][-1].content
+```
 
-    result = await _do_work(client_name)
+`build_specialist_agent(tools, config, prompt, model_override)` — single-domain sub-agent for StateGraph nodes:
 
-    if _cache and not result.startswith('{"error"'):
-        await _cache.set(key, result)
+```python
+from platform_sdk import build_specialist_agent
 
-    return result
+crm_agent = build_specialist_agent(
+    tools         = sf_tools,
+    config        = config,
+    prompt        = crm_prompt,
+    model_override = config.specialist_model_route,   # Haiku
+)
+result = await crm_agent.ainvoke({"messages": [HumanMessage(content=f"Client: {name}")]})
 ```
 
 ---
 
 ### `compaction.py` — Context window trimming
 
-`make_compaction_modifier(config)` returns a LangGraph `state_modifier` that trims the oldest messages when the token count exceeds `config.context_token_limit`, always preserving the system message.
-
 ```python
 from platform_sdk.compaction import make_compaction_modifier
+
 modifier = make_compaction_modifier(config)
-# Passed to build_agent() — you rarely need this directly.
+# Passed automatically when using build_agent() — not usually needed directly.
 ```
 
----
-
-### `agent.py` — LangGraph agent factories
-
-Two factories:
-
-`build_agent(tools, config, prompt)` — ReAct agent for the generic chat service:
-
-```python
-from platform_sdk import AgentConfig, build_agent
-config = AgentConfig.from_env()
-agent  = build_agent(tools, config=config, prompt=system_prompt)
-result = await agent.ainvoke({"messages": [HumanMessage(content=msg)]}, ...)
-```
-
-`build_specialist_agent(tools, config, prompt, model_override)` — single-tool-call node for the RM Prep pipeline (Haiku by default, callers can override):
-
-```python
-from platform_sdk import build_specialist_agent
-crm_agent = build_specialist_agent(sf_tools, config, crm_prompt, model_override=config.specialist_model_route)
-result = await crm_agent.ainvoke({"messages": [HumanMessage(content=f"Client: {name}")]})
-```
+Trims oldest messages when the token count approaches `config.context_token_limit`. Always preserves the system message.
 
 ---
 
@@ -227,213 +432,131 @@ result = await crm_agent.ainvoke({"messages": [HumanMessage(content=f"Client: {n
 ```python
 from platform_sdk import configure_logging, get_logger, setup_telemetry
 
-configure_logging()
-setup_telemetry("my-service-name")
+configure_logging()                         # set up structlog JSON output
+setup_telemetry("my-service-name")          # configure OTel SDK + exporters
 log = get_logger(__name__)
 
-log.info("event_name", client=name, duration_ms=42)
-# → {"event": "event_name", "client": "...", "duration_ms": 42, "timestamp": "..."}
+log.info("tool_called", client=name, duration_ms=42, cached=False)
+# → {"event": "tool_called", "client": "...", "duration_ms": 42, "cached": false, "timestamp": "..."}
 ```
+
+Call `configure_logging()` and `setup_telemetry()` at module level in every service's `server.py`. The OTel SDK auto-instruments FastAPI, asyncpg, and httpx calls — no manual span creation needed for standard I/O.
 
 ---
 
-## 3. Component Reference
-
-### Generic Agent Service
-**Location:** `agents/src/`
-
-FastAPI + LangGraph ReAct agent. Connects to `data-mcp` at startup via the `MCPToolBridge`. The bridge converts MCP tool schemas (JSON Schema) into typed LangChain `StructuredTool` objects. Bearer auth via `make_api_key_verifier()`. SSE connection lifecycle owned by a background `asyncio.Task` to avoid AnyIO cancel-scope cross-task errors.
-
-### RM Prep Agent
-**Location:** `agents/rm-prep/src/`
-
-A LangGraph `StateGraph` (not a ReAct loop). Stages:
-
-1. **parse_intent** — Haiku structured extraction: client name, intent type, meeting date
-2. **route** — Python dict lookup: maps intent to which agents to invoke (`full_brief` → all three)
-3. **gather_crm / gather_payments / gather_news** — parallel specialist nodes, each backed by a dedicated MCP server
-4. **synthesize** — Sonnet structured output into `RMBrief` Pydantic model
-5. **format_brief** — Jinja2 render to Markdown
-
-Model tiering is intentional: fast/cheap Haiku for extraction and tool calls; Sonnet only for the synthesis step that requires coherent writing.
-
-### Salesforce MCP (`salesforce-mcp` :8081)
-**Location:** `tools/salesforce-mcp/src/server.py`
-
-Queries the `salesforce.*` PostgreSQL schema (mirroring standard Salesforce object names). One tool: `get_salesforce_summary(client_name)`. Makes 7 queries per call: account lookup, contacts, activities (Events UNION Tasks), open opportunities, open tasks, open service cases, active contracts. Returns a flat JSON object including `account_id` (used by the payments tool as a join key) and `account_name` (the exact string used in `bankdw` as the party name).
-
-Cache TTL: 1800s.
-
-### Payments MCP (`payments-mcp` :8082)
-**Location:** `tools/payments-mcp/src/server.py`
-
-Queries `bankdw.fact_payments` and `bankdw.dim_party` using `client_name` (= `Account.Name` = `dim_party.PartyName`) as the join key. One tool: `get_payment_summary(client_name, days=90)`. Makes 7 queries: outbound by rail, inbound by rail, prior-period trend, top counterparties, status mix, sending bank diversity, party compliance profile. The compliance profile fields (`AMLRiskCategory`, `SanctionsScreeningStatus`, etc.) are subject to column-level masking by the `AgentContextMiddleware`.
-
-Cache TTL: 3600s.
-
-### News Search MCP (`news-search-mcp` :8083)
-**Location:** `tools/news-search-mcp/src/server.py`
-
-One tool: `search_company_news(company_name)`. Uses Tavily Search API when `TAVILY_API_KEY` is set; falls back to deterministic mock data for the 4 seed companies in development. Derives an `aggregate_signal` label (RISK / OPPORTUNITY / POSITIVE / NEUTRAL / NO_NEWS) from article sentiment and signal types.
-
-Cache TTL: 1800s.
-
-### Shared Auth Helpers (`tools/shared/mcp_auth.py`)
-
-`AgentContextMiddleware` — Starlette ASGI middleware. Reads `X-Agent-Context` header, base64-decodes it, stores in a `ContextVar`. Tool handlers call `get_agent_context()` to retrieve the per-request context without passing it through every function argument.
-
-Policy helpers: `can_access_account()`, `build_row_filters_crm()`, `build_row_filters_payments()`, `build_col_mask()`, `check_access()`.
-
-### MCPToolBridge (`agents/src/mcp_bridge.py`)
-SSE client that connects to one MCP server and converts all its tools to LangChain `StructuredTool` objects. Accepts optional `agent_context` and forwards it as `X-Agent-Context` on the connection. The SSE connection lifecycle is owned by a dedicated `asyncio.Task` to avoid AnyIO cancel-scope errors in frameworks like Chainlit where request start and end run in different tasks.
-
-### OPA Policies (`tools/policies/opa/`)
-
-**`tool_auth.rego`** — data-mcp policy. Checks session UUID, query type (SELECT-only), and agent role. Package `mcp.tools`.
-
-**`rm_prep_authz.rego`** — RM Prep policy. Package `rm_prep.authz`. Role hierarchy (readonly=0 … compliance_officer=3). Outputs `result` object:
-- `allow` — boolean
-- `reason` — human-readable denial reason
-- `row_filters` — `{"Account": [...account_ids...]}` for `rm` role; `{}` for elevated roles
-- `col_mask` — list of column names to redact (AML columns for standard; all compliance columns for aml_view; empty for compliance_full)
-
-### LiteLLM
-**Location:** `platform/config/litellm-local.yaml`, `litellm-prod.yaml`
-
-Multi-cloud LLM proxy. Routes `complex-routing` → Azure GPT-4o (synthesis), `fast-routing` → Azure GPT-4o-mini (extraction/tool calls). The RM Prep agent uses both routes. LiteLLM handles failover (Azure → Bedrock in prod) and Redis prompt caching. The `master_key` must match `INTERNAL_API_KEY`.
-
----
-
-## 4. Authorization Chain — JWT → AgentContext → OPA → PostgreSQL
+## 3. Authorization Chain — JWT → AgentContext → OPA → PostgreSQL
 
 ```
- RM Prep UI
-     │  Authorization: Bearer <JWT>
-     ▼
- rm-prep-agent/src/server.py
-     │  AgentContext.from_jwt(token)
-     │  Raises jwt.InvalidSignatureError on tampered tokens
-     │  Raises jwt.ExpiredSignatureError on expired tokens
-     ▼
- AgentContext(
-   rm_id="rm-001", role="rm", team_id="treasury-west",
-   assigned_account_ids=("001AAA","002AAA"),
-   compliance_clearance=("standard",)
- )
-     │  MCPToolBridge(sf_url, agent_context=ctx)
-     │  → SSE connection header: X-Agent-Context: <base64-JSON>
-     ▼
- salesforce-mcp / payments-mcp
-     │  AgentContextMiddleware reads header → ContextVar
-     │  get_agent_context() in tool handler
-     ▼
- OPA rm_prep_authz.rego
-     │  input = {rm_id, role, assigned_account_ids, clearance, tool, resource}
-     │  → result.allow, result.row_filters, result.col_mask
-     ▼
- PostgreSQL
-     │  WHERE "AccountId" = ANY($assigned_account_ids)   ← row filter
-     │  NULL-out AMLRiskCategory, RiskRating, ...         ← col mask
-     ▼
- JSON response (masked fields absent or null)
+HTTP request
+     │
+     ├─ 1. Bearer token verified by make_api_key_verifier() or from_jwt()
+     ├─ 2. JWT decoded → AgentContext (role, clearance, assigned_accounts)
+     ├─ 3. AgentContext HMAC-signed → X-Agent-Context header on MCP calls
+     ├─ 4. MCP middleware: HMAC verified, context decoded into ContextVar
+     ├─ 5. OPA called: allow? + row_filters + col_mask returned
+     └─ 6. SQL: WHERE AccountId = ANY($ids) + NULLed columns applied
 ```
 
-**Role matrix:**
+### Role and clearance matrix
 
-| Role | Accounts visible | AML columns | Sanctions/PEP columns |
+| Role | Row scope | AML columns | Compliance columns |
 |---|---|---|---|
-| `readonly` | none (tool denied) | — | — |
-| `rm` | assigned only | masked | masked |
-| `senior_rm` | all | visible | masked |
-| `manager` | all | visible | masked |
-| `compliance_officer` | all | visible | visible |
+| `readonly` | none (tool denied entirely) | — | — |
+| `rm` | assigned_account_ids only | masked (null) | masked (null) |
+| `senior_rm` | all accounts | visible | masked (null) |
+| `manager` | all accounts | visible | masked (null) |
+| `compliance_officer` | all accounts | visible | visible |
 
-**Test JWT personas** (generated by `tests/fixtures/test_tokens.py`):
+The OPA policy (`rm_prep_authz.rego`) returns a structured `result` object — not just a boolean:
 
-| Persona | Role | Accounts | Clearance |
-|---|---|---|---|
-| `alice_rm` | rm | 4 assigned | standard |
-| `eve_rm_single` | rm | 1 assigned | standard |
-| `frank_rm_empty` | rm | 0 (all denied) | standard |
-| `bob_senior_rm` | senior_rm | all | standard + aml_view |
-| `carol_manager` | manager | all | standard + aml_view |
-| `dan_compliance` | compliance_officer | all | standard + aml_view + compliance_full |
-| `grace_readonly` | readonly | none | standard |
-
-```bash
-# Generate tokens for manual testing:
-python tests/fixtures/test_tokens.py
-
-# Use alice_rm token against the RM Prep API:
-TOKEN=$(python -c "from tests.fixtures.test_tokens import get_token; print(get_token('alice_rm'))")
-curl -X POST http://localhost:8003/brief \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"message": "Prepare a brief for Microsoft Corp."}'
+```json
+{
+  "allow": true,
+  "reason": "",
+  "row_filters": { "Account": ["001AAA", "002BBB"] },
+  "col_mask":   ["AMLRiskCategory", "SanctionsScreeningStatus", "PEPFlag"]
+}
 ```
+
+MCP servers apply both filters in SQL, never in Python, to avoid loading restricted data into memory before filtering it out.
+
+### Why HMAC-signed context instead of JWT forwarding
+
+Forwarding the user's JWT to MCP servers would require distributing the JWT signing secret to every MCP server. Instead, the RM Prep Agent signs the `AgentContext` with a separate `AGENT_CONTEXT_SECRET`. MCP servers share only this secret — they cannot forge a context with higher clearance because the HMAC would not verify. If an MCP server is compromised, it cannot elevate its own access.
 
 ---
 
-## 5. Test Data Architecture
+## 4. Test Data Architecture
 
-### Why PostgreSQL for both test and prod?
+The `docker-compose.test.yml` overlay adds synthetic CRM and payments data to the same PostgreSQL instance used in development, with zero code changes between test and production environments.
 
-Using the same PostgreSQL engine in test eliminates the main source of test-vs-prod divergence: SQL dialect differences, type handling, and query planner behaviour. No adapter abstraction layer, no code switches, no `if test: use_duckdb() else: use_postgres()`.
+### How PostgreSQL init works
 
-### How the overlay works
-
-`docker-compose.test.yml` adds volume mounts to the existing `pgvector` service. PostgreSQL's Docker image runs all files in `/docker-entrypoint-initdb.d/` alphabetically on the **first start of a fresh volume**:
+On the **first start of a fresh volume**, PostgreSQL runs every file in `/docker-entrypoint-initdb.d/` alphabetically:
 
 ```
-01-init.sql               → base extensions, roles
-02-rm_prep_schema.sql     → rm_prep tables (public schema)
-03-rm_prep_seed.sql       → rm_prep seed data
-20_test_sfcrm_schema.sql  → CREATE SCHEMA salesforce + 15 tables
-21_test_sfcrm_seed.sql    → COPY FROM /testdata/sfcrm/*.csv
-30_test_bankdw_schema.sql → CREATE SCHEMA bankdw + 5 tables
-31_test_bankdw_seed.sql   → COPY FROM /testdata/bankdw/*.csv
+01-init.sql               → extensions (pgvector, uuid-ossp), roles
+02-rm_prep_schema.sql     → rm_prep.* tables (sessions, briefs)
+03-rm_prep_seed.sql       → initial seed data
+20_test_sfcrm_schema.sql  → salesforce.* schema + 15 tables
+21_test_sfcrm_seed.sql    → COPY FROM testdata/sfcrm/*.csv  (45 accounts)
+30_test_bankdw_schema.sql → bankdw.* schema + 5 tables
+31_test_bankdw_seed.sql   → COPY FROM testdata/bankdw/*.csv (1,000 payments)
 ```
 
-**Key:** scripts only run on a brand-new volume. If a volume already exists from a previous `docker compose up`, PostgreSQL silently skips init. Run `make dev-reset` (which does `down -v` then `up --build`) after any schema change.
+> Init scripts only run once per volume. After any schema change, run `make dev-reset` to wipe the volume and re-run.
 
-### Schema cross-domain identity spine
+### Cross-domain identity spine
 
-All 45 Salesforce accounts in `sfcrm/Account.csv` have a 1:1 match in `bankdw/dim_party.csv` by `Name` = `PartyName`. This is the join key that allows `payments-mcp` to look up payment data by the company name retrieved from Salesforce. The `payments-mcp` tool signature uses `client_name` (not `client_id`) for this reason.
+Every account in `sfcrm/Account.csv` has a matching row in `bankdw/dim_party.csv` by `Name = PartyName`. This is the join key that lets `payments-mcp` look up payment data given only a company name from Salesforce.
 
-### testdata contents
+### Test data coverage
 
-| File | Rows | Purpose |
+| File | Rows | Coverage |
 |---|---|---|
-| `sfcrm/Account.csv` | 45 | Fortune 500 companies — all major industries |
+| `sfcrm/Account.csv` | 45 | Fortune 500 companies across all major industries |
 | `sfcrm/Contact.csv` | ~180 | 4 contacts per account |
-| `sfcrm/Opportunity.csv` | ~135 | 3 open opps per account |
-| `sfcrm/Task.csv` | ~225 | 5 tasks per account |
-| `sfcrm/Event.csv` | ~90 | 2 events per account |
-| `sfcrm/Case.csv` | ~90 | 2 cases per account |
-| `sfcrm/Contract.csv` | ~45 | 1 contract per account |
-| `bankdw/fact_payments.csv` | 1000 | Synthetic payment transactions |
-| `bankdw/dim_party.csv` | 45 | Same 45 companies with compliance profiles |
-| `bankdw/dim_bank.csv` | 8 | Realistic US banks |
-| `bankdw/dim_product.csv` | 4 | ACH, Wire, RTP, SWIFT |
-| `bankdw/bridge_party_account.csv` | 2000 | Account-to-bank relationships |
+| `sfcrm/Opportunity.csv` | ~135 | 3 open opportunities per account |
+| `sfcrm/Task.csv` + `Event.csv` | ~315 | Recent activity history |
+| `sfcrm/Case.csv` + `Contract.csv` | ~90 | Service + contract records |
+| `bankdw/fact_payments.csv` | 1,000 | Synthetic payment transactions |
+| `bankdw/dim_party.csv` | 45 | Compliance profiles (varied: AML:High, KYC:Pending, PEP-flagged) |
+| `bankdw/dim_bank.csv` | 8 | Realistic US correspondent banks |
+| `bankdw/dim_product.csv` | 4 | ACH, Wire, RTP, SWIFT rails |
 
-Compliance profiles are deliberately varied to cover authorization test paths: some accounts are KYC:Pending, some AML:High, some PEP-flagged — ensuring tests exercise masking logic at all clearance levels.
+Compliance profiles are deliberately varied so tests exercise column masking at every clearance level — some accounts are high AML risk, some PEP-flagged, some clean. This ensures the masking logic is exercised rather than trivially passing because all test data is clean.
 
 ---
 
-## 6. Step-by-Step: Building a New Agent
+## 5. Step-by-Step: Building a New Agent
 
-This walkthrough builds a **Document Analysis Agent** — a ReAct agent that reads documents from a hypothetical `docs-mcp` server. The pattern is identical for any other single-domain ReAct agent.
+This section covers two patterns: a **ReAct agent** (interactive, tool-calling loop) and a **StateGraph orchestrator** (deterministic, parallel fan-out). Choose the right pattern for your use case before starting.
 
-### Step 1 — Create the project structure
+| Use ReAct when... | Use StateGraph when... |
+|---|---|
+| The user drives tool selection interactively | Every domain must always be checked |
+| The number of tool calls is unbounded | The workflow has a fixed shape |
+| You need a conversational back-and-forth | You need auditable, reproducible outputs |
+| Example: generic Q&A, data exploration | Example: RM brief, credit memo, compliance report |
+
+---
+
+### Pattern A: ReAct Agent (Interactive)
+
+This walkthrough builds a **Contract Review Agent** — an RM asks questions about their clients' active contracts and the agent retrieves and explains them.
+
+#### Step 1 — Project structure
 
 ```bash
-mkdir -p agents-docanalysis/src/prompts
-touch agents-docanalysis/src/{__init__,server,graph}.py
-touch agents-docanalysis/Dockerfile agents-docanalysis/requirements.txt
+mkdir -p agents/contract-review/src/prompts
+touch agents/contract-review/src/__init__.py
+touch agents/contract-review/src/server.py
+touch agents/contract-review/src/graph.py
+touch agents/contract-review/Dockerfile
+touch agents/contract-review/requirements.txt
 ```
 
-### Step 2 — Write `requirements.txt`
+#### Step 2 — `requirements.txt`
 
 ```
 fastapi>=0.111.0
@@ -444,215 +567,582 @@ langgraph>=0.2.0
 httpx>=0.27.0
 ```
 
-The `platform-sdk` is **not** listed here — it is installed via `Dockerfile` from the monorepo root.
+The `platform-sdk` is **not** listed — it is installed by the Dockerfile from the monorepo root.
 
-### Step 3 — Write the Dockerfile
+#### Step 3 — `Dockerfile`
 
 ```dockerfile
 FROM python:3.11-slim
 WORKDIR /app
+
+# Install the shared SDK first (separate layer — changes rarely)
 COPY platform-sdk/ /platform-sdk/
 RUN pip install --no-cache-dir /platform-sdk/
-COPY agents-docanalysis/requirements.txt .
+
+# Install service dependencies
+COPY agents/contract-review/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-COPY agents-docanalysis/src/ ./src/
-CMD ["uvicorn", "src.server:app", "--host", "0.0.0.0", "--port", "8001"]
+
+# Copy service source
+COPY agents/contract-review/src/ ./src/
+
+CMD ["uvicorn", "src.server:app", "--host", "0.0.0.0", "--port", "8004"]
 ```
 
-### Step 4 — Write `graph.py`
+#### Step 4 — `src/graph.py`
 
 ```python
 from pathlib import Path
 from jinja2 import Environment, FileSystemLoader
 from platform_sdk import AgentConfig, build_agent
 
-_jinja_env = Environment(loader=FileSystemLoader(str(Path(__file__).parent / "prompts")), autoescape=False)
+_PROMPTS_DIR = Path(__file__).parent / "prompts"
+_jinja = Environment(loader=FileSystemLoader(str(_PROMPTS_DIR)), autoescape=False)
 
-def build_doc_agent(tools: list):
+
+def build_contract_agent(tools: list):
+    """Build a ReAct agent for contract review queries."""
     config = AgentConfig.from_env()
-    prompt = _jinja_env.get_template("doc_agent.j2").render(tool_names=[t.name for t in tools])
+    prompt = _jinja.get_template("contract_agent.j2").render(
+        tool_names=[t.name for t in tools]
+    )
     return build_agent(tools, config=config, prompt=prompt)
 ```
 
-### Step 5 — Write `server.py`
+#### Step 5 — `src/prompts/contract_agent.j2`
+
+```jinja
+You are a contract review assistant for relationship managers at a financial institution.
+You have access to the following tools: {{ tool_names | join(", ") }}.
+
+When asked about a client's contracts, always:
+1. Retrieve the contract data using the available tool.
+2. Summarise key terms: value, expiry date, status, and any renewal flags.
+3. Flag contracts expiring within 90 days.
+
+Never fabricate contract terms. If data is unavailable, say so clearly.
+```
+
+#### Step 6 — `src/server.py`
 
 ```python
 import os
 import uuid
 from contextlib import asynccontextmanager
+
 from fastapi import Depends, FastAPI, HTTPException, Request
 from langchain_core.messages import HumanMessage
 from pydantic import BaseModel, Field
-from platform_sdk import AgentConfig, configure_logging, get_logger, make_api_key_verifier, setup_telemetry
-from .mcp_bridge import MCPToolBridge, set_session_id, reset_session_id
-from .graph import build_doc_agent
+
+from platform_sdk import (
+    AgentConfig,
+    AgentContext,
+    configure_logging,
+    get_logger,
+    make_api_key_verifier,
+    setup_telemetry,
+)
+from agents.src.mcp_bridge import MCPToolBridge   # reuse shared bridge
+
+from .graph import build_contract_agent
 
 configure_logging()
-setup_telemetry(os.getenv("SERVICE_NAME", "doc-analysis-agent"))
+setup_telemetry(os.getenv("SERVICE_NAME", "contract-review-agent"))
 log = get_logger(__name__)
 
 _config = AgentConfig.from_env()
 verify_api_key = make_api_key_verifier()
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Shared bridge — session_id is injected per-request via ContextVar (set_session_id)
-    bridge = MCPToolBridge(os.environ["DOCS_MCP_SSE_URL"])
+    # Decode the agent context once at startup for dev convenience;
+    # in production, context is injected per-request from the JWT.
+    ctx = AgentContext.anonymous() if os.getenv("AUTH_MODE") == "none" else None
+    bridge = MCPToolBridge(os.environ["CONTRACTS_MCP_SSE_URL"], agent_context=ctx)
     await bridge.connect()
     tools = await bridge.get_langchain_tools()
-    app.state.agent = build_doc_agent(tools)
+    app.state.agent = build_contract_agent(tools)
     app.state.bridge = bridge
+    log.info("contract_agent_ready", tool_count=len(tools))
     yield
     await bridge.disconnect()
 
+
 app = FastAPI(lifespan=lifespan)
+
 
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=_config.max_message_length)
-    # Always a valid UUID — OPA _valid_session_id requires UUID format
     session_id: str = Field(default_factory=lambda: str(uuid.uuid4()), max_length=128)
+    jwt_token: str | None = Field(default=None)     # JWT from RM Prep UI
+
+
+class ChatResponse(BaseModel):
+    content: str
+    session_id: str
+
 
 @app.get("/health")
 async def health():
     return {"status": "ok"}
 
-@app.post("/chat")
+
+@app.post("/chat", response_model=ChatResponse)
 async def chat(body: ChatRequest, req: Request, _: str = Depends(verify_api_key)):
-    # Bind trusted session_id to this async context so execute_read_query tool
-    # calls get the correct workspace UUID regardless of what the LLM passes.
-    sid_token = set_session_id(body.session_id)
+    # Build per-request AgentContext from JWT (or anonymous in dev)
+    if body.jwt_token and os.getenv("AUTH_MODE") != "none":
+        ctx = AgentContext.from_jwt(body.jwt_token)
+    else:
+        ctx = AgentContext.anonymous()
+
+    log.info("chat_request", session_id=body.session_id, role=ctx.role)
+
     try:
         result = await req.app.state.agent.ainvoke(
             {"messages": [HumanMessage(content=body.message)]},
-            config={"recursion_limit": _config.recursion_limit, "configurable": {"thread_id": body.session_id}},
+            config={
+                "recursion_limit": _config.recursion_limit,
+                "configurable": {"thread_id": body.session_id},
+            },
         )
-        return {"content": result["messages"][-1].content, "session_id": body.session_id}
+        return ChatResponse(
+            content=result["messages"][-1].content,
+            session_id=body.session_id,
+        )
     except Exception as exc:
-        log.error("chat_error", error=str(exc))
-        raise HTTPException(status_code=500, detail="Internal error")
-    finally:
-        reset_session_id(sid_token)
+        log.error("chat_error", error=str(exc), session_id=body.session_id)
+        raise HTTPException(status_code=500, detail="Internal agent error")
 ```
 
-### Step 6 — Register in `docker-compose.yml`
+#### Step 7 — Register in `docker-compose.yml`
 
 ```yaml
-  doc-analysis-agent:
+  contract-review-agent:
     build:
       context: .
-      dockerfile: agents-docanalysis/Dockerfile
-    container_name: ai-doc-agent
+      dockerfile: agents/contract-review/Dockerfile
+    container_name: ai-contract-agent
     environment:
-      LITELLM_BASE_URL: http://litellm:4000/v1
-      DOCS_MCP_SSE_URL: http://docs-mcp:8082/sse
-      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
-      SERVICE_NAME: doc-analysis-agent
-      ENABLE_COMPACTION: "true"
+      LITELLM_BASE_URL:      http://litellm:4000/v1
+      INTERNAL_API_KEY:      ${INTERNAL_API_KEY}
+      JWT_SECRET:            ${JWT_SECRET}
+      CONTRACTS_MCP_SSE_URL: http://salesforce-mcp:8081/sse
+      SERVICE_NAME:          contract-review-agent
+      ENABLE_COMPACTION:     "true"
+      AUTH_MODE:             ${AUTH_MODE:-jwt}
       <<: *otel-env
     depends_on:
-      litellm:
-        condition: service_healthy
-      docs-mcp:
-        condition: service_healthy
-    networks:
-      - ai-network
+      litellm:        { condition: service_healthy }
+      salesforce-mcp: { condition: service_healthy }
+    networks: [ai-network]
     ports:
-      - "127.0.0.1:8001:8001"
+      - "127.0.0.1:8004:8004"
 ```
+
+#### Step 8 — Write unit tests
+
+Add `tests/unit/test_contract_agent.py` covering:
+- Prompt rendering for various tool lists
+- Request model validation (message length bounds, session_id defaults)
+- Any response parsing logic
+
+Add `tests/evals/test_contract_quality.py` covering:
+- Does the brief mention contract expiry dates from the fixture data?
+- Does it correctly flag near-expiry contracts?
+- Does it avoid fabricating contract values?
 
 ---
 
-## 7. Step-by-Step: Building a New MCP Server
+### Pattern B: StateGraph Orchestrator (Deterministic Multi-domain)
 
-This walkthrough builds a **Web Search MCP Server**. The pattern applies to any external API.
+This walkthrough builds a **Credit Memo Agent** — it fetches financial statements (from a hypothetical `financials-mcp`), payment history (`payments-mcp`), and news (`news-mcp`) in parallel, then synthesises a structured credit memo.
 
-### Step 1 — Create the project structure
+The pattern is identical to the RM Prep Agent. Use the RM Prep source as the primary reference (`agents/rm-prep/src/`).
 
-```bash
-mkdir -p tools/search-mcp/src
-touch tools/search-mcp/src/{__init__,server}.py
-touch tools/search-mcp/Dockerfile tools/search-mcp/requirements.txt
-```
-
-### Step 2 — Write `server.py`
+#### Step 1 — Define the state
 
 ```python
-import json, os
+# agents/credit-memo/src/state.py
+from typing import TypedDict, Optional
+
+class CreditMemoState(TypedDict):
+    # Input
+    client_name:       str
+    requested_amount:  float
+    rm_id:             str
+    session_id:        str
+    agent_context_header: str      # X-Agent-Context value, forwarded to MCPs
+
+    # Intermediate outputs — populated by specialist nodes
+    financials_output: Optional[str]
+    payments_output:   Optional[str]
+    news_output:       Optional[str]
+
+    # Final output
+    memo_markdown:     Optional[str]
+    error:             Optional[str]
+```
+
+#### Step 2 — Define the graph
+
+```python
+# agents/credit-memo/src/graph.py
+from langgraph.graph import StateGraph, END
+from .state import CreditMemoState
+from .nodes import (
+    parse_request,
+    gather_financials,
+    gather_payments,
+    gather_news,
+    synthesize_memo,
+    format_memo,
+)
+
+def build_credit_memo_graph():
+    graph = StateGraph(CreditMemoState)
+
+    graph.add_node("parse_request",    parse_request)
+    graph.add_node("gather_financials", gather_financials)
+    graph.add_node("gather_payments",  gather_payments)
+    graph.add_node("gather_news",      gather_news)
+    graph.add_node("synthesize_memo",  synthesize_memo)
+    graph.add_node("format_memo",      format_memo)
+
+    graph.set_entry_point("parse_request")
+
+    # parse_request → parallel fan-out
+    graph.add_edge("parse_request", "gather_financials")
+    graph.add_edge("parse_request", "gather_payments")
+    graph.add_edge("parse_request", "gather_news")
+
+    # All three specialists → synthesize
+    graph.add_edge("gather_financials", "synthesize_memo")
+    graph.add_edge("gather_payments",   "synthesize_memo")
+    graph.add_edge("gather_news",       "synthesize_memo")
+
+    # synthesize → format → end
+    graph.add_edge("synthesize_memo", "format_memo")
+    graph.add_edge("format_memo", END)
+
+    return graph.compile()
+```
+
+#### Step 3 — Specialist nodes
+
+Each specialist node follows the same pattern:
+
+```python
+# agents/credit-memo/src/nodes.py
+import json
+from langchain_core.messages import HumanMessage
+from platform_sdk import AgentConfig, build_specialist_agent
+
+async def gather_payments(state: CreditMemoState) -> dict:
+    """Fan-out node: fetch payment history from payments-mcp."""
+    from agents.src.mcp_bridge import MCPToolBridge
+    from platform_sdk import AgentContext
+
+    # Reconstruct context from the forwarded header
+    ctx = AgentContext.from_header(state["agent_context_header"])
+
+    bridge = MCPToolBridge(os.environ["PAYMENTS_MCP_SSE_URL"], agent_context=ctx)
+    await bridge.connect()
+    tools = await bridge.get_langchain_tools()
+
+    config = AgentConfig.from_env()
+    agent  = build_specialist_agent(tools, config, PAYMENTS_PROMPT, config.specialist_model_route)
+
+    result = await agent.ainvoke({
+        "messages": [HumanMessage(
+            content=f'Call get_payment_summary with client_name="{state["client_name"]}"'
+        )]
+    })
+    await bridge.disconnect()
+
+    output = result["messages"][-1].content
+    return {"payments_output": output}
+```
+
+#### Step 4 — Structured output model
+
+```python
+# agents/credit-memo/src/memo.py
+from pydantic import BaseModel
+from typing import Optional
+
+class CreditMemo(BaseModel):
+    client_name:          str
+    requested_amount:     float
+    recommended_amount:   Optional[float]
+    term_months:          Optional[int]
+    key_ratios:           dict[str, str]      # {"debt_equity": "1.2x", ...}
+    risk_flags:           list[str]
+    recommendation:       str                 # "APPROVE" / "DECLINE" / "REFER"
+    summary:              str
+
+    def to_markdown(self) -> str:
+        # Render to structured Markdown for downstream consumption
+        ...
+```
+
+#### Key differences from ReAct
+
+In a StateGraph orchestrator, there is no "decide which tools to call" step. The graph always calls all three specialists. This is the right choice for regulated document generation because:
+
+- A credit committee can verify that financial, payment, and news data were all consulted
+- No LLM decision can cause a required data source to be skipped
+- The structured `CreditMemo` output is a typed contract, not free text
+
+---
+
+## 6. Step-by-Step: Building a New MCP Server
+
+This walkthrough builds a **Contracts MCP Server** that queries the `salesforce.Contract__c` table. All platform MCP servers follow this pattern.
+
+### Step 1 — Project structure
+
+```bash
+mkdir -p tools/contracts-mcp/src
+touch tools/contracts-mcp/src/__init__.py
+touch tools/contracts-mcp/src/server.py
+touch tools/contracts-mcp/Dockerfile
+touch tools/contracts-mcp/requirements.txt
+```
+
+### Step 2 — `requirements.txt`
+
+```
+fastmcp>=0.9.0
+asyncpg>=0.29.0
+starlette>=0.37.0
+```
+
+### Step 3 — `Dockerfile`
+
+```dockerfile
+FROM python:3.11-slim
+WORKDIR /app
+
+COPY platform-sdk/ /platform-sdk/
+RUN pip install --no-cache-dir /platform-sdk/
+
+COPY tools/contracts-mcp/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Include the shared auth helpers
+COPY tools/shared/ /app/tools/shared/
+COPY tools/contracts-mcp/src/ ./src/
+
+ENV PYTHONPATH=/app
+CMD ["python", "-m", "src.server"]
+```
+
+### Step 4 — `src/server.py`
+
+```python
+"""
+Contracts MCP Server.
+
+Exposes one tool: get_contract_summary(client_name).
+Enforces row-level security (assigned accounts only for rm role)
+and column-level security (contract value masked for readonly).
+"""
+import json
+import os
 from contextlib import asynccontextmanager
 from typing import Optional
-import httpx
+
+import asyncpg
 from mcp.server.fastmcp import FastMCP
-from platform_sdk import MCPConfig, ToolResultCache, configure_logging, get_logger
+
+from platform_sdk import (
+    MCPConfig,
+    OpaClient,
+    ToolResultCache,
+    configure_logging,
+    get_logger,
+    setup_telemetry,
+)
 from platform_sdk.cache import make_cache_key
+from tools.shared.mcp_auth import AgentContextMiddleware, get_agent_context
+
+# ── Startup ────────────────────────────────────────────────────────────────────
 
 configure_logging()
+setup_telemetry(os.getenv("SERVICE_NAME", "contracts-mcp"))
 log = get_logger(__name__)
 
 _config = MCPConfig.from_env()
-_cache: Optional[ToolResultCache] = None
-_http:  Optional[httpx.AsyncClient] = None
+PORT    = int(os.environ.get("PORT", 8085))
 
-TRANSPORT = os.environ.get("MCP_TRANSPORT", "sse")
-PORT = int(os.environ.get("PORT", 8084))
+_db_pool: Optional[asyncpg.Pool] = None
+_opa:     Optional[OpaClient]    = None
+_cache:   Optional[ToolResultCache] = None
+
 
 @asynccontextmanager
 async def _lifespan(server: FastMCP):
-    global _cache, _http
-    _cache = ToolResultCache.from_env(ttl_seconds=60)
-    _http  = httpx.AsyncClient(
-        base_url=os.environ.get("SEARCH_API_URL", ""),
-        headers={"Authorization": f"Bearer {os.environ.get('SEARCH_API_KEY', '')}"},
-        timeout=10.0,
+    global _db_pool, _opa, _cache
+    _db_pool = await asyncpg.create_pool(
+        host     = os.environ["DB_HOST"],
+        port     = int(os.environ.get("DB_PORT", 5432)),
+        user     = os.environ["DB_USER"],
+        password = os.environ["DB_PASS"],
+        database = os.environ["DB_NAME"],
+        min_size = 2,
+        max_size = 10,
     )
-    log.info("search_mcp_ready")
+    _opa   = OpaClient(_config)
+    _cache = ToolResultCache.from_env(ttl_seconds=1800)
+    log.info("contracts_mcp_ready", port=PORT)
     yield
-    await _http.aclose()
+    if _db_pool:
+        await _db_pool.close()
 
-mcp = FastMCP("search-mcp", lifespan=_lifespan, host="0.0.0.0", port=PORT)
+
+mcp = FastMCP(
+    "contracts-mcp",
+    lifespan     = _lifespan,
+    host         = "0.0.0.0",
+    port         = PORT,
+    middleware   = [AgentContextMiddleware],   # populates ContextVar per request
+)
+
+
+# ── Tool implementation ────────────────────────────────────────────────────────
 
 @mcp.tool()
-async def web_search(query: str, max_results: int = 5) -> str:
+async def get_contract_summary(client_name: str) -> str:
     """
-    Search the web and return top results as JSON.
+    Retrieve active contract summary for a client.
 
     Args:
-        query:       The search query.
-        max_results: Number of results (1–10).
+        client_name: The company name exactly as it appears in Salesforce.
+
     Returns:
-        JSON string with articles list, or error JSON.
+        JSON object with contracts list, or an error string.
     """
+    # 1. Read caller identity from the signed X-Agent-Context header
+    ctx = get_agent_context()
+    log.info("contracts_tool_call", client_name=client_name, role=ctx.role)
+
+    # 2. Authorise the call via OPA
+    allowed = await _opa.authorize(
+        "get_contract_summary",
+        {
+            "role":       ctx.role,
+            "rm_id":      ctx.rm_id,
+            "session_id": ctx.session_id,
+            "resource":   client_name,
+        },
+    )
+    if not allowed:
+        log.warning("contracts_unauthorized", client_name=client_name, role=ctx.role)
+        return json.dumps({"error": "Unauthorized — insufficient permissions for this tool."})
+
+    # 3. Check the cache (key includes clearance level to isolate per-role results)
+    col_mask_key = ":".join(sorted(ctx.build_col_mask()))
+    cache_key    = make_cache_key(
+        "get_contract_summary",
+        {"client_name": client_name, "col_mask_key": col_mask_key},
+    )
     if _cache:
-        key = make_cache_key("web_search", {"query": query, "max_results": max_results})
-        cached = await _cache.get(key)
+        cached = await _cache.get(cache_key)
         if cached:
+            log.info("contracts_cache_hit", client_name=client_name)
             return cached
 
-    log.info("web_search_call", query=query)
-    try:
-        resp = await _http.get("", params={"q": query, "count": min(max_results, 10)})
-        resp.raise_for_status()
-        results = resp.json().get("results", [])
-        output = json.dumps(results, default=str)
-    except Exception as exc:
-        log.error("web_search_error", error=str(exc))
-        return json.dumps({"error": str(exc)})
+    # 4. Apply row-level security: rm role sees only assigned accounts
+    row_filters = ctx.build_row_filters_crm()
+    assigned_ids = row_filters.get("Account") or []
+    if ctx.role == "rm" and not assigned_ids:
+        return json.dumps({"no_data": True, "reason": "No accounts assigned to this RM."})
 
+    # 5. Query with row filter and column masking
+    try:
+        result = await _query_contracts(client_name, assigned_ids, ctx.build_col_mask())
+    except asyncpg.PostgresError as exc:
+        log.error("contracts_db_error", error=str(exc))
+        return f"ERROR: Database error: {exc}"
+    except Exception as exc:
+        import traceback
+        log.error("contracts_unexpected_error", error=str(exc),
+                  tb=traceback.format_exc())
+        return f"ERROR: Unexpected error: {exc}"
+
+    # 6. Store in cache (never cache errors)
+    output = json.dumps(result, default=str)
     if _cache and not output.startswith('{"error"'):
-        await _cache.set(key, output)
+        await _cache.set(cache_key, output)
+
     return output
 
+
+async def _query_contracts(
+    client_name: str,
+    assigned_ids: list[str],
+    col_mask: list[str],
+) -> dict:
+    """Run the actual SQL. Applies row and column security."""
+    assert _db_pool is not None
+
+    # Column masking: null out any masked column in the SELECT list
+    contract_value_col = (
+        "NULL::numeric AS \"ContractValue\""
+        if "ContractValue" in col_mask
+        else '"ContractValue"'
+    )
+
+    # Row filter: rm role gets a restricted account list; others see all
+    if assigned_ids:
+        account_filter = 'AND a."Id" = ANY($2::text[])'
+        params = [client_name, assigned_ids]
+    else:
+        account_filter = ""
+        params = [client_name]
+
+    rows = await _db_pool.fetch(
+        f"""
+        SELECT
+            c."Id"            AS contract_id,
+            c."ContractNumber" AS contract_number,
+            c."Status"        AS status,
+            c."StartDate"     AS start_date,
+            c."EndDate"       AS end_date,
+            {contract_value_col},
+            c."Description"   AS description
+        FROM salesforce."Contract" c
+        JOIN salesforce."Account"  a ON a."Id" = c."AccountId"
+        WHERE a."Name" ILIKE $1
+          {account_filter}
+          AND c."Status" IN ('Activated', 'Draft')
+        ORDER BY c."EndDate" ASC
+        LIMIT 20
+        """,
+        *params,
+    )
+
+    contracts = [dict(r) for r in rows]
+    return {
+        "client_name": client_name,
+        "contract_count": len(contracts),
+        "contracts": contracts,
+    }
+
+
 if __name__ == "__main__":
-    mcp.run(transport=TRANSPORT)
+    mcp.run(transport=os.environ.get("MCP_TRANSPORT", "sse"))
 ```
 
-### Step 3 — Add an OPA allow rule
+### Step 5 — OPA policy
 
-Add to `tools/policies/opa/tool_auth.rego`:
+Add a rule to `tools/policies/opa/rm_prep_authz.rego`:
 
 ```rego
-allow if {
-    input.tool == "web_search"
-    allowed_roles[input.agent_role]
+# get_contract_summary is available to all roles except readonly
+allow_tool["get_contract_summary"] if {
+    input.role != "readonly"
     input.session_id != ""
 }
 ```
@@ -660,150 +1150,231 @@ allow if {
 Add a unit test to `tool_auth_test.rego`:
 
 ```rego
-test_web_search_allowed if {
-    allow with input as {
-        "tool": "web_search", "agent_role": "data_analyst_agent",
-        "session_id": "123e4567-e89b-12d3-a456-426614174000", "query": "AI trends"
+test_contracts_rm_allowed if {
+    allow_tool["get_contract_summary"] with input as {
+        "role": "rm", "rm_id": "rm-001",
+        "session_id": "123e4567-e89b-12d3-a456-426614174000",
+        "resource": "Microsoft Corp"
+    }
+}
+
+test_contracts_readonly_denied if {
+    not allow_tool["get_contract_summary"] with input as {
+        "role": "readonly", "rm_id": "rm-999",
+        "session_id": "123e4567-e89b-12d3-a456-426614174000",
+        "resource": "Microsoft Corp"
     }
 }
 ```
 
-Run: `make test-policies`
-
-### Step 4 — Register in `docker-compose.yml`
-
-```yaml
-  search-mcp:
-    build:
-      context: .
-      dockerfile: tools/search-mcp/Dockerfile
-    container_name: ai-search-mcp
-    environment:
-      MCP_TRANSPORT: sse
-      SEARCH_API_KEY: ${SEARCH_API_KEY}
-      SEARCH_API_URL: ${SEARCH_API_URL}
-      SERVICE_NAME: search-mcp
-      ENVIRONMENT: ${ENVIRONMENT:-local}
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
-      REDIS_PASSWORD: ${REDIS_PASSWORD}
-      ENABLE_TOOL_CACHE: "true"
-      <<: *otel-env
-    depends_on:
-      redis:
-        condition: service_healthy
-      opa:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "python3", "-c",
-             "import socket,sys; s=socket.socket(); r=s.connect_ex(('localhost',8084)); s.close(); sys.exit(0 if r==0 else 1)"]
-      interval: 15s
-      timeout: 5s
-      retries: 5
-    networks:
-      - ai-network
-    ports:
-      - "127.0.0.1:8084:8084"
+```bash
+make test-policies   # must pass before the server can be deployed
 ```
 
-### What the SDK handles for you
+### Step 6 — Register in `docker-compose.yml`
 
-| Concern | Without SDK | With SDK |
+```yaml
+  contracts-mcp:
+    build:
+      context: .
+      dockerfile: tools/contracts-mcp/Dockerfile
+    container_name: ai-contracts-mcp
+    environment:
+      MCP_TRANSPORT:   sse
+      PORT:            "8085"
+      SERVICE_NAME:    contracts-mcp
+      ENVIRONMENT:     ${ENVIRONMENT:-local}
+      DB_HOST:         pgvector
+      DB_PORT:         "5432"
+      DB_USER:         ${POSTGRES_USER:-postgres}
+      DB_PASS:         ${POSTGRES_PASSWORD}
+      DB_NAME:         ${POSTGRES_DB:-ai_platform}
+      OPA_URL:         http://opa:8181
+      REDIS_HOST:      redis
+      REDIS_PORT:      "6379"
+      REDIS_PASSWORD:  ${REDIS_PASSWORD}
+      ENABLE_TOOL_CACHE: "true"
+      TOOL_CACHE_TTL:  "1800"
+      <<: *otel-env
+    depends_on:
+      pgvector: { condition: service_healthy }
+      opa:      { condition: service_healthy }
+      redis:    { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "python3", "-c",
+             "import socket,sys; s=socket.socket(); r=s.connect_ex(('localhost',8085)); s.close(); sys.exit(0 if r==0 else 1)"]
+      interval: 15s
+      timeout:   5s
+      retries:   5
+    networks: [ai-network]
+    ports:
+      - "127.0.0.1:8085:8085"
+```
+
+### Step 7 — Write integration tests
+
+Add `tests/integration/test_contracts_sql.py` covering:
+- Column alias regression (same pattern as `test_payments_sql.py`)
+- Row filter with `assigned_ids` returns only matching accounts
+- Column masking returns `None` for `ContractValue` when clearance is `standard`
+- Unknown client returns an empty list (not an error)
+
+### Step 8 — Write eval fixtures
+
+Add `tests/evals/fixtures/case_NNN_contracts_*.json` with:
+- `crm_output`: mocked Salesforce data including contracts
+- `payments_output`: mocked payments (or error if not relevant)
+- `news_output`: mocked news
+- `expected_rubric`: criteria like `cites_contract_value`, `flags_near_expiry`, `compliance_fields_not_mentioned`
+
+---
+
+### What the SDK handles automatically
+
+| Concern | Code without SDK | Code with SDK |
 |---|---|---|
-| Configuration | 10+ `os.environ.get()` calls | `MCPConfig.from_env()` — one call, fully typed |
+| Configuration | 12+ `os.environ.get()` calls with defaults | `MCPConfig.from_env()` |
 | OPA enforcement | ~40 lines: httpx, retry, timeout, fail-closed | `OpaClient(_config).authorize(tool, input)` |
-| Caching | Redis connection, key gen, error handling, TTL | `ToolResultCache.from_env()` + `make_cache_key()` |
-| Auth context | Header parsing, base64 decode, ContextVar management | `AgentContextMiddleware` + `get_agent_context()` |
-| Structured logging | Standard `logging` with no keyword arg support | `get_logger(__name__)` — JSON, keyword args |
-| Tracing | 15+ lines of OTel setup + idempotency guard | `setup_telemetry("service-name")` |
+| Redis caching | Connection pool, serialisation, TTL, error handling | `ToolResultCache.from_env(ttl=1800)` |
+| Cache key generation | Hash function + argument serialisation | `make_cache_key("tool", {"param": val})` |
+| Auth context | Header parsing, base64 decode, HMAC verify, ContextVar | `AgentContextMiddleware` + `get_agent_context()` |
+| Row/column filters | Policy call + SQL construction | `ctx.build_row_filters_crm()`, `ctx.build_col_mask()` |
+| Structured logging | `logging.getLogger()` + formatters | `get_logger(__name__)` with keyword args |
+| OTel tracing | 20+ lines: TracerProvider, exporters, propagators | `setup_telemetry("service-name")` |
+
+---
+
+## 7. Component Reference
+
+### RM Prep Agent (`agents/rm-prep/src/`)
+
+LangGraph `StateGraph` orchestrator. Stages:
+1. `parse_intent` — Haiku structured extraction: client name, intent, meeting date
+2. `route` — maps intent to specialist list (`full_brief` → all three)
+3. `gather_crm` / `gather_payments` / `gather_news` — parallel, each backed by a dedicated MCP server
+4. `synthesize` — Sonnet structured output → `RMBrief` Pydantic model
+5. `format_brief` — Jinja2 render → Markdown
+
+Model tiering: Haiku (fast, cheap) for extraction and tool calls; Sonnet only for the synthesis step that requires coherent writing.
+
+### Salesforce MCP (`tools/salesforce-mcp/` :8081)
+
+One tool: `get_salesforce_summary(client_name)`. Runs 7 queries: account profile, contacts, activities (Events UNION Tasks), open opportunities, open tasks, open cases, active contracts. Returns `account_id` — used by `payments-mcp` as the OPA resource identifier — and `account_name` — the exact string used as `dim_party.PartyName` in `bankdw`.
+
+### Payments MCP (`tools/payments-mcp/` :8082)
+
+One tool: `get_payment_summary(client_name)`. Runs 7 queries: outbound by rail, inbound by rail, prior-period trend, top counterparties, status mix, sending bank diversity, party compliance profile. Compliance profile fields are subject to column masking. `_DEFAULT_DAYS = 360` is hardcoded — the LLM never passes this parameter, eliminating a class of type errors.
+
+### News MCP (`tools/news-search-mcp/` :8083)
+
+One tool: `search_company_news(company_name)`. Uses Tavily Search API when `TAVILY_API_KEY` is set; falls back to deterministic mock data for the 4 seed companies. Derives an `aggregate_signal` label (RISK / OPPORTUNITY / POSITIVE / NEUTRAL / NO_NEWS).
+
+### Data MCP (`tools/data-mcp/` :8080)
+
+Generic secure SQL tool for the chat agent. Exposes `execute_read_query(sql, session_id)`. Enforces SELECT-only via OPA. Restricts queries to the workspace schema for the calling session.
+
+### Shared Auth Helpers (`tools/shared/mcp_auth.py`)
+
+`AgentContextMiddleware` — Starlette ASGI middleware. Reads and HMAC-verifies `X-Agent-Context`, populates a `ContextVar` per request. Tool handlers call `get_agent_context()` to retrieve the context without threading it through every function argument.
+
+### MCPToolBridge (`agents/src/mcp_bridge.py`)
+
+SSE client that connects to one MCP server and converts its tools to LangChain `StructuredTool` objects. Accepts an optional `agent_context` and forwards it as `X-Agent-Context` on the connection. The SSE connection lifecycle is owned by a dedicated `asyncio.Task` to avoid AnyIO cancel-scope errors in frameworks like Chainlit.
 
 ---
 
 ## 8. Environment Variables
 
-All configuration is injected via environment variables. Never hardcode values. See `.env.example` for the full list with descriptions.
+All configuration is injected via environment variables. Run `cp .env.example .env` to start.
 
-### Shared / infra
+### Core secrets
 
-| Variable | Purpose |
-|---|---|
-| `INTERNAL_API_KEY` | Shared Bearer token — agent↔LiteLLM, client↔agent, UI↔agent |
-| `POSTGRES_PASSWORD` | PostgreSQL admin password |
-| `REDIS_PASSWORD` | Redis auth password |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | OTel collector OTLP HTTP endpoint |
+| Variable | Purpose | Example |
+|---|---|---|
+| `INTERNAL_API_KEY` | Shared Bearer token — UI↔agent, agent↔LiteLLM | `sk-ent-abc123...` |
+| `JWT_SECRET` | HMAC-SHA256 secret for RM JWTs | 64-char hex string |
+| `AGENT_CONTEXT_SECRET` | HMAC secret for X-Agent-Context header signing | 64-char hex string |
+| `POSTGRES_PASSWORD` | PostgreSQL admin password | strong random |
+| `REDIS_PASSWORD` | Redis auth password | strong random |
 
-### RM Prep auth
+### LLM routing
 
-| Variable | Purpose |
-|---|---|
-| `JWT_SECRET` | HMAC-SHA256 secret for signing/verifying RM JWTs |
-| `AUTH_MODE` | `jwt` (enforce JWT) or `none` (dev bypass — uses anonymous context) |
-| `SHOW_TEST_LOGIN` | `true` → show persona selector in rm-prep-ui |
+| Variable | Purpose | Default |
+|---|---|---|
+| `LITELLM_BASE_URL` | LiteLLM proxy URL | `http://litellm:4000/v1` |
+| `AZURE_API_KEY` | Azure OpenAI key | — |
+| `AZURE_API_BASE` | Azure OpenAI base URL | — |
+| `AWS_ACCESS_KEY_ID` | For Bedrock fallback | — |
+| `AWS_SECRET_ACCESS_KEY` | For Bedrock fallback | — |
 
 ### Agent services
 
-| Variable | Purpose |
-|---|---|
-| `LITELLM_BASE_URL` | LiteLLM proxy URL (default `http://litellm:4000/v1`) |
-| `AGENT_MODEL_ROUTE` | LiteLLM route for main agent calls |
-| `ENABLE_COMPACTION` | `true`/`false` — context window trimming |
-| `AGENT_CONTEXT_TOKEN_LIMIT` | Token budget before compaction fires |
-| `AGENT_RECURSION_LIMIT` | Max tool-call iterations (1–50) |
-| `SALESFORCE_MCP_URL` | Salesforce MCP SSE URL (RM Prep agent) |
-| `PAYMENTS_MCP_URL` | Payments MCP SSE URL (RM Prep agent) |
-| `NEWS_MCP_URL` | News MCP SSE URL (RM Prep agent) |
+| Variable | Purpose | Default |
+|---|---|---|
+| `AUTH_MODE` | `jwt` or `none` (dev bypass) | `jwt` |
+| `SHOW_TEST_LOGIN` | Show persona selector in UI | `false` |
+| `ENABLE_COMPACTION` | Context window trimming | `true` |
+| `AGENT_CONTEXT_TOKEN_LIMIT` | Token budget before compaction | `8000` |
+| `AGENT_RECURSION_LIMIT` | Max tool-call iterations | `15` |
+| `SALESFORCE_MCP_URL` | Salesforce MCP SSE URL | — |
+| `PAYMENTS_MCP_URL` | Payments MCP SSE URL | — |
+| `NEWS_MCP_URL` | News MCP SSE URL | — |
 
 ### MCP servers
 
-| Variable | Purpose |
-|---|---|
-| `MCP_TRANSPORT` | `sse` (default) or `stdio` |
-| `PORT` | Server port (8080 data-mcp, 8081 SF, 8082 payments, 8083 news) |
-| `OPA_URL` | OPA decision endpoint |
-| `ENVIRONMENT` | `local`/`prod` — stamped into OPA input |
-| `DB_HOST` / `DB_PORT` / `DB_USER` / `DB_PASS` / `DB_NAME` | PostgreSQL connection |
-| `REDIS_HOST` / `REDIS_PORT` | Redis for tool result cache |
-| `ENABLE_TOOL_CACHE` | `true`/`false` |
-| `TOOL_CACHE_TTL` | Cache TTL in seconds |
-| `TAVILY_API_KEY` | News search API key — omit to use mock data in dev |
+| Variable | Purpose | Default |
+|---|---|---|
+| `MCP_TRANSPORT` | `sse` or `stdio` | `sse` |
+| `PORT` | Server listen port | per-service |
+| `OPA_URL` | OPA decision endpoint | `http://opa:8181` |
+| `ENVIRONMENT` | `local` or `prod` | `local` |
+| `DB_HOST` / `DB_PORT` / `DB_USER` / `DB_PASS` / `DB_NAME` | PostgreSQL connection | — |
+| `REDIS_HOST` / `REDIS_PORT` | Redis | `redis` / `6379` |
+| `ENABLE_TOOL_CACHE` | Enable Redis caching | `true` |
+| `TOOL_CACHE_TTL` | Cache TTL in seconds | per-service |
+| `TAVILY_API_KEY` | Live news search — omit for mock data | — |
 
 ---
 
-## 9. Data Flow: Generic Chat Request
+## 9. Data Flows
 
-1. Client sends `POST /chat` with `Authorization: Bearer <INTERNAL_API_KEY>`.
-2. `make_api_key_verifier()` validates — 401 if invalid.
-3. LangGraph ReAct loop starts. LLM reasons via LiteLLM → Azure OpenAI.
-4. LiteLLM checks Redis prompt cache — returns cached response on hit (no Azure round-trip).
-5. `make_compaction_modifier` trims message list if token count exceeds budget.
-6. LLM calls a tool → MCP bridge sends call to `data-mcp` over open SSE connection.
-7. `OpaClient.authorize()` checks OPA — fail-closed if OPA is unreachable.
-8. `ToolResultCache.get()` checks Redis — returns cached result on hit.
-9. Cache miss: `data-mcp` runs SELECT via asyncpg in the workspace schema.
-10. `ToolResultCache.set()` stores result in Redis.
-11. Tool result returned to LangGraph; LLM incorporates it or calls another tool.
-12. Final answer returned as `{"content": "...", "session_id": "..."}`.
+### Generic Chat Request
 
-Every step emits an OTel span — full trace in Dynatrace with agent→LiteLLM→MCP→OPA→DB latency per hop.
+```
+Client → POST /chat (Bearer INTERNAL_API_KEY)
+  → make_api_key_verifier() validates → 401 if invalid
+  → LangGraph ReAct loop starts
+  → LiteLLM checks Redis semantic cache → hit: return cached LLM response
+  → LLM reasons, decides to call a tool
+  → MCPToolBridge sends call to data-mcp over SSE
+  → data-mcp: OpaClient.authorize() → fail-closed if OPA unreachable
+  → data-mcp: ToolResultCache.get() → hit: return cached result
+  → data-mcp: asyncpg SELECT in workspace schema
+  → data-mcp: ToolResultCache.set()
+  → Tool result → LangGraph → LLM incorporates it or calls another tool
+  → Final answer → {"content": "...", "session_id": "..."}
+```
 
----
+Every step emits an OTel span. Full trace visible in your OTel backend (Dynatrace, Jaeger, etc.) with per-hop latency for agent → LiteLLM → MCP → OPA → DB.
 
-## 10. Data Flow: RM Prep Brief Request
+### RM Prep Brief Request
 
-1. RM logs into Streamlit UI (`rm-prep-ui`) — picks persona in test mode or logs in with credentials.
-2. UI signs a JWT and sends `POST /brief` with `Authorization: Bearer <JWT>`.
-3. RM Prep agent verifies JWT → creates `AgentContext(role, assigned_account_ids, compliance_clearance)`.
-4. **parse_intent** node (Haiku): extracts `client_name`, `intent_type`, `meeting_date`.
-5. **route** node: maps intent to which agents to invoke — `full_brief` → all three.
-6. **gather_crm**, **gather_payments**, **gather_news** execute in parallel (LangGraph fan-out):
-   - Each specialist node invokes its MCP server via a `MCPToolBridge` carrying the `AgentContext`.
-   - MCP server middleware reads `X-Agent-Context`, populates ContextVar.
-   - Tool handler calls `check_access()` and `build_row_filters_*()` / `build_col_mask()`.
-   - OPA returns `allow`, `row_filters`, `col_mask` for the caller's role.
-   - PostgreSQL query runs with account ID filter; AML/compliance columns nulled out if not cleared.
-   - Result JSON returned to specialist node.
-7. **synthesize** node (Sonnet): receives CRM + payments + news JSON, outputs structured `RMBrief`.
-8. **format_brief** node: Jinja2-renders `RMBrief` to Markdown.
-9. Response returned to Streamlit UI; brief displayed with collapsible source sections.
+```
+RM → POST /brief/persona (Bearer INTERNAL_API_KEY + jwt_token in body)
+  → AgentContext.from_jwt(jwt_token) — verified once at boundary
+  → parse_intent (Haiku): client name, intent type, meeting date
+  → route: full_brief → dispatch all three specialists in parallel
+  ┌─ gather_crm:      MCPToolBridge → salesforce-mcp
+  │    → AgentContextMiddleware reads X-Agent-Context
+  │    → OPA: allow? + row_filters (assigned accounts) + col_mask (AML columns)
+  │    → PostgreSQL: WHERE AccountId = ANY($ids), NULL AML cols if standard
+  ├─ gather_payments: MCPToolBridge → payments-mcp
+  │    → same auth chain, bankdw queries, compliance col masking
+  └─ gather_news:     MCPToolBridge → news-search-mcp
+       → Tavily API or mock data
+  → synthesize (Sonnet): CRM + payments + news JSON → RMBrief Pydantic model
+  → format_brief: Jinja2 render → Markdown
+  → {"brief_markdown": "...", "session_id": "..."}
+```
 
-Standard RM (`alice_rm`) sees only her 4 assigned accounts and no AML/compliance fields. Compliance officer (`dan_compliance`) sees all accounts and all fields — same code path, different OPA decision.
+Standard RM (`alice_rm`) sees only her 4 assigned accounts and no AML fields. Compliance officer (`dan_compliance`) sees all accounts and all fields. Same code path — OPA decides the difference.
