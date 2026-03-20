@@ -16,46 +16,125 @@
  * field names — those concerns live entirely in the API layer.
  */
 
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { LayoutGrid, ChevronRight, User, Zap, HelpCircle, Settings, FlaskConical } from 'lucide-react'
 
-import AgentSelector from './components/AgentSelector.jsx'
-import PromptBuilder from './components/PromptBuilder.jsx'
-import OutputCanvas  from './components/OutputCanvas.jsx'
+import AgentSelector    from './components/AgentSelector.jsx'
+import PromptBuilder    from './components/PromptBuilder.jsx'
+import OutputCanvas     from './components/OutputCanvas.jsx'
+import DataSourceDetail from './components/DataSourceDetail.jsx'
+import HelpGuide        from './components/HelpGuide.jsx'
+import SettingsPanel    from './components/SettingsPanel.jsx'
+import { DEFAULT_SETTINGS, loadSettings, saveSettings } from './components/SettingsPanel.jsx'
+import UserProfile      from './components/UserProfile.jsx'
 import { useAgentStream }                    from './hooks/useAgentStream.js'
 import { useSession }                        from './hooks/useSession.js'
 import { getAgentClient }                    from './api/agentClients.js'
 import { fetchPersonaToken, fetchPersonas }  from './api/apiClient.js'
 import { AGENTS } from './config/agents.js'
+import { getDataSource } from './config/dataSources.js'
 
-const PHASES = { SELECT: 'select', CONFIGURE: 'configure', EXECUTE: 'execute' }
+const PHASES = {
+  SELECT:      'select',
+  CONFIGURE:   'configure',
+  EXECUTE:     'execute',
+  DATA_SOURCE: 'data-source',
+  HELP:        'help',
+  SETTINGS:    'settings',
+  PROFILE:     'profile',
+}
+
+// ── URL ↔ phase helpers ───────────────────────────────────────────────────────
+// These keep the address bar in sync with the phase state so the URL is
+// meaningful and bookmarkable. Vite's dev server already serves index.html
+// for any path (historyApiFallback is on by default), so deep links work
+// without additional server config in development.
+
+function phaseToPath(phase, extra = {}) {
+  switch (phase) {
+    case PHASES.CONFIGURE:   return `/agent/${extra.selectedAgentId ?? ''}`
+    case PHASES.EXECUTE:     return `/agent/${extra.selectedAgentId ?? ''}/run`
+    case PHASES.DATA_SOURCE: return `/data/${extra.selectedSource ?? ''}`
+    case PHASES.HELP:        return '/help'
+    case PHASES.SETTINGS:    return '/settings'
+    case PHASES.PROFILE:     return '/profile'
+    default:                 return '/'
+  }
+}
+
+// Parse the current pathname back into a partial history state object so the
+// app can restore to the correct phase on a hard refresh or deep-link visit.
+function pathToState(pathname) {
+  const parts = pathname.replace(/^\//, '').split('/').filter(Boolean)
+  if (!parts.length)                              return { phase: PHASES.SELECT }
+  if (parts[0] === 'agent' && parts[1]) {
+    if (parts[2] === 'run')                       return { phase: PHASES.EXECUTE,     selectedAgentId: parts[1] }
+                                                  return { phase: PHASES.CONFIGURE,   selectedAgentId: parts[1] }
+  }
+  if (parts[0] === 'data'     && parts[1])        return { phase: PHASES.DATA_SOURCE, selectedSource:  parts[1] }
+  if (parts[0] === 'help')                        return { phase: PHASES.HELP }
+  if (parts[0] === 'settings')                    return { phase: PHASES.SETTINGS }
+  if (parts[0] === 'profile')                     return { phase: PHASES.PROFILE }
+  return { phase: PHASES.SELECT }
+}
 
 // ── Breadcrumb ────────────────────────────────────────────────────────────────
-function Breadcrumb({ phase, agent, onSelectClick, onAgentClick }) {
+function Breadcrumb({ phase, agent, selectedSourceId, onSelectClick, onAgentClick }) {
+  const source = selectedSourceId ? getDataSource(selectedSourceId) : null
   return (
     <nav className="flex items-center gap-1.5 text-sm text-slate-500 select-none">
-      <button
-        onClick={onSelectClick}
+      <a
+        href="/"
+        onClick={(e) => { e.preventDefault(); onSelectClick() }}
         className="hover:text-slate-800 transition-colors flex items-center gap-1"
       >
         <LayoutGrid className="w-3.5 h-3.5" />
-        Meridian
-      </button>
-      {phase !== PHASES.SELECT && (
+        Quantitix
+      </a>
+      {phase !== PHASES.SELECT && phase !== PHASES.DATA_SOURCE &&
+       phase !== PHASES.HELP   && phase !== PHASES.SETTINGS &&
+       phase !== PHASES.PROFILE && (
         <>
           <ChevronRight className="w-3.5 h-3.5 text-slate-300" />
-          <button
-            onClick={onAgentClick}
+          <a
+            href={agent ? `/agent/${agent.id}` : '#'}
+            onClick={(e) => { e.preventDefault(); onAgentClick() }}
             className={`transition-colors ${phase === PHASES.CONFIGURE ? 'text-slate-800 font-medium' : 'hover:text-slate-800'}`}
           >
             {agent?.workerName ?? '…'}
-          </button>
+          </a>
         </>
       )}
       {phase === PHASES.EXECUTE && (
         <>
           <ChevronRight className="w-3.5 h-3.5 text-slate-300" />
           <span className="text-slate-800 font-medium">Results</span>
+        </>
+      )}
+      {phase === PHASES.DATA_SOURCE && source && (
+        <>
+          <ChevronRight className="w-3.5 h-3.5 text-slate-300" />
+          <span className="text-slate-800 font-medium">
+            {source.icon} {source.label}
+          </span>
+        </>
+      )}
+      {phase === PHASES.HELP && (
+        <>
+          <ChevronRight className="w-3.5 h-3.5 text-slate-300" />
+          <span className="text-slate-800 font-medium">Help</span>
+        </>
+      )}
+      {phase === PHASES.SETTINGS && (
+        <>
+          <ChevronRight className="w-3.5 h-3.5 text-slate-300" />
+          <span className="text-slate-800 font-medium">Settings</span>
+        </>
+      )}
+      {phase === PHASES.PROFILE && (
+        <>
+          <ChevronRight className="w-3.5 h-3.5 text-slate-300" />
+          <span className="text-slate-800 font-medium">My Profile</span>
         </>
       )}
     </nav>
@@ -184,21 +263,26 @@ function PersonaSelector({ onPersonaChange }) {
 }
 
 // ── Sidebar ───────────────────────────────────────────────────────────────────
-function Sidebar({ agent, rmId, onRmIdChange, sessionId, onNewSession, onPersonaChange }) {
+function Sidebar({ agent, rmId, onRmIdChange, sessionId, onNewSession, onPersonaChange, onDataSourceClick, onLogoClick, onProfileClick }) {
   return (
     <aside className="w-60 shrink-0 bg-slate-900 text-white flex flex-col h-full">
 
       {/* ── Logo — sits at the same height as the content sub-header ─────── */}
       <div className="px-5 h-14 flex items-center border-b border-slate-700/60 shrink-0">
-        <div className="flex items-center gap-2.5">
+        <a
+          href="/"
+          onClick={(e) => { e.preventDefault(); onLogoClick() }}
+          className="flex items-center gap-2.5 hover:opacity-80 transition-opacity"
+          title="Go to home"
+        >
           <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center shrink-0">
             <Zap className="w-3.5 h-3.5 text-white" />
           </div>
           <div>
-            <p className="font-bold text-sm leading-tight tracking-tight">Meridian</p>
-            <p className="text-xs text-slate-400 leading-tight">Enterprise Intelligence</p>
+            <p className="font-bold text-sm leading-tight tracking-tight">Quantitix</p>
+            <p className="text-xs text-slate-400 leading-tight">Agentic AI</p>
           </div>
-        </div>
+        </a>
       </div>
 
       {/* ── Active worker / team roster ───────────────────────────────────── */}
@@ -223,11 +307,25 @@ function Sidebar({ agent, rmId, onRmIdChange, sessionId, onNewSession, onPersona
                 <p className="text-xs text-slate-500 uppercase tracking-widest font-semibold mb-2 px-1">Data Sources</p>
                 <div className="space-y-1">
                   {agent.dataSources.map((src) => (
-                    <div key={src.label} className="flex items-center gap-2.5 px-1 py-1.5 rounded-lg text-xs text-slate-300 hover:bg-slate-800/50 transition-colors">
-                      <span className="text-sm">{src.icon}</span>
-                      <span>{src.label}</span>
-                      <span className="ml-auto w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" title="Connected" />
-                    </div>
+                    src.sourceId ? (
+                      <a
+                        key={src.label}
+                        href={`/data/${src.sourceId}`}
+                        onClick={(e) => { e.preventDefault(); onDataSourceClick?.(src.sourceId) }}
+                        className="flex items-center gap-2.5 px-1 py-1.5 rounded-lg text-xs text-slate-300 hover:bg-slate-800/50 transition-colors group"
+                        title={`View ${src.label} details`}
+                      >
+                        <span className="text-sm">{src.icon}</span>
+                        <span className="group-hover:text-white transition-colors">{src.label}</span>
+                        <span className="ml-auto w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" title="Connected" />
+                      </a>
+                    ) : (
+                      <div key={src.label} className="flex items-center gap-2.5 px-1 py-1.5 text-xs text-slate-300">
+                        <span className="text-sm">{src.icon}</span>
+                        <span>{src.label}</span>
+                        <span className="ml-auto w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
+                      </div>
+                    )
                   ))}
                 </div>
               </div>
@@ -263,20 +361,23 @@ function Sidebar({ agent, rmId, onRmIdChange, sessionId, onNewSession, onPersona
 
       {/* ── User identity ─────────────────────────────────────────────────── */}
       <div className="px-4 py-4 border-t border-slate-700/60 space-y-3">
-        {/* Editable RM name displayed as an identity chip */}
-        <div className="flex items-center gap-2.5">
-          <div className="w-7 h-7 rounded-full bg-blue-600 flex items-center justify-center shrink-0">
-            <User className="w-3.5 h-3.5 text-white" />
+        {/* Avatar + name — click to open profile */}
+        <a
+          href="/profile"
+          onClick={(e) => { e.preventDefault(); onProfileClick() }}
+          className="w-full flex items-center gap-2.5 rounded-lg px-1 py-1 hover:bg-slate-800/60 transition-colors group"
+          title="View my profile"
+        >
+          <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center shrink-0 text-white text-xs font-bold">
+            {(rmId || 'RM').trim().split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase() ?? '').join('') || 'RM'}
           </div>
-          <input
-            type="text"
-            value={rmId}
-            onChange={(e) => onRmIdChange(e.target.value)}
-            placeholder="Your name"
-            className="flex-1 bg-transparent text-white text-xs font-medium outline-none
-              placeholder-slate-500 border-b border-transparent focus:border-slate-600 transition-colors pb-0.5"
-          />
-        </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-semibold text-white leading-tight truncate group-hover:text-blue-300 transition-colors">
+              {rmId || 'Your name'}
+            </p>
+            <p className="text-[10px] text-slate-500 leading-tight">View profile →</p>
+          </div>
+        </a>
         <button
           onClick={onNewSession}
           className="w-full text-xs text-slate-400 hover:text-white border border-slate-700/60 hover:border-slate-600
@@ -294,9 +395,22 @@ function Sidebar({ agent, rmId, onRmIdChange, sessionId, onNewSession, onPersona
 
 // ── Root App ──────────────────────────────────────────────────────────────────
 export default function App() {
-  const [phase,         setPhase]         = useState(PHASES.SELECT)
-  const [selectedAgent, setSelectedAgent] = useState(null)
-  const [rmId,          setRmId]          = useState('RM')
+  const [phase,           setPhase]           = useState(PHASES.SELECT)
+  const [selectedAgent,   setSelectedAgent]   = useState(null)
+  const [rmId,            setRmId]            = useState('RM')
+  const [selectedSource,  setSelectedSource]  = useState(null)   // sourceId string
+  const [prevPhase,       setPrevPhase]       = useState(null)   // phase to return to from DATA_SOURCE / HELP / SETTINGS
+
+  // ── Persistent settings ──────────────────────────────────────────────────────
+  const [settings, setSettings] = useState(() => loadSettings())
+
+  const handleSettingChange = useCallback((key, value) => {
+    setSettings((prev) => {
+      const next = { ...prev, [key]: value }
+      saveSettings(next)
+      return next
+    })
+  }, [])
 
   // Test persona state — null in production, auto-set to 'manager' in dev
   const [personaName, setPersonaName] = useState(null)
@@ -313,15 +427,94 @@ export default function App() {
 
   const { steps, activeStep, thoughts, streamingText, output, clientName, status, error, run, reset } = useAgentStream()
 
+  // ── History API integration ──────────────────────────────────────────────────
+  // Every phase transition pushes a history entry so the browser back/forward
+  // buttons navigate the phase stack naturally.  The popstate handler restores
+  // all state from the serialised history entry — no manual prevPhase tracking
+  // is needed for back navigation; we keep prevPhase only for overlay phases
+  // that need to know where to return when the user closes them mid-session.
+
+  // Guard so the popstate handler never re-pushes while restoring.
+  const isRestoringFromHistory = useRef(false)
+
+  // Low-level push helper — always call this alongside any setPhase().
+  // Passes the mapped URL path so the address bar updates on every transition.
+  const pushPhase = useCallback((newPhase, extra = {}) => {
+    if (isRestoringFromHistory.current) return
+    const path = phaseToPath(newPhase, extra)
+    window.history.pushState({ phase: newPhase, ...extra }, '', path)
+  }, [])
+
+  // On mount: seed history from the current URL so hard-refresh / deep-links
+  // restore the correct phase, and ensure the very first back-press has a
+  // valid history entry to land on.
+  useEffect(() => {
+    const initialState = pathToState(window.location.pathname)
+    window.history.replaceState(
+      { phase: initialState.phase, ...initialState },
+      '',
+      window.location.pathname,
+    )
+    // Apply deep-link state to React (SELECT is already the default)
+    if (initialState.phase !== PHASES.SELECT) {
+      setPhase(initialState.phase)
+      if (initialState.selectedAgentId) {
+        setSelectedAgent(AGENTS.find((a) => a.id === initialState.selectedAgentId) ?? null)
+      }
+      if (initialState.selectedSource) {
+        setSelectedSource(initialState.selectedSource)
+      }
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Restore full app state from a history entry (browser back / forward).
+  useEffect(() => {
+    const handlePopState = (e) => {
+      const s = e.state
+      isRestoringFromHistory.current = true
+
+      if (!s) {
+        // Popped past the first entry — reset to home
+        setPhase(PHASES.SELECT)
+        setSelectedAgent(null)
+        setSelectedSource(null)
+        setPrevPhase(null)
+        reset()
+        isRestoringFromHistory.current = false
+        return
+      }
+
+      const restoredPhase = s.phase ?? PHASES.SELECT
+      setPhase(restoredPhase)
+      setSelectedAgent(
+        s.selectedAgentId
+          ? AGENTS.find((a) => a.id === s.selectedAgentId) ?? null
+          : null
+      )
+      setSelectedSource(s.selectedSource ?? null)
+      setPrevPhase(s.prevPhase ?? null)
+
+      // Clear stream state when leaving EXECUTE via back/forward
+      if (restoredPhase !== PHASES.EXECUTE) reset()
+
+      isRestoringFromHistory.current = false
+    }
+
+    window.addEventListener('popstate', handlePopState)
+    return () => window.removeEventListener('popstate', handlePopState)
+  }, [reset]) // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── Handlers ────────────────────────────────────────────────────────────────
 
   const handleAgentSelect = useCallback((agent) => {
     setSelectedAgent(agent)
     setPhase(PHASES.CONFIGURE)
-  }, [])
+    pushPhase(PHASES.CONFIGURE, { selectedAgentId: agent.id })
+  }, [pushPhase])
 
   const handlePromptSubmit = useCallback(async (prompt) => {
     setPhase(PHASES.EXECUTE)
+    pushPhase(PHASES.EXECUTE, { selectedAgentId: selectedAgent?.id })
     // Endpoint and request shape are looked up from the API layer — App.jsx
     // does not hardcode routes or field names.
     // When a persona JWT is active (dev/local only) it is forwarded so the
@@ -331,7 +524,7 @@ export default function App() {
       endpoint: client.endpoint,
       body:     client.buildRequest(prompt, rmId, sessionId, personaJwt),
     })
-  }, [selectedAgent, rmId, sessionId, personaJwt, run])
+  }, [selectedAgent, rmId, sessionId, personaJwt, run, pushPhase])
 
   // Follow-up refinement — keeps the same session so the backend has context
   const handleRefine = useCallback(async (prompt) => {
@@ -347,10 +540,61 @@ export default function App() {
     newSession()
     setPhase(PHASES.SELECT)
     setSelectedAgent(null)
+    // Use replaceState so "New Session" clears the back stack rather than
+    // letting the user navigate back into a stale session.
+    window.history.replaceState({ phase: PHASES.SELECT }, '', '/')
   }, [reset, newSession])
 
-  const goToSelect    = useCallback(() => { reset(); setPhase(PHASES.SELECT);    setSelectedAgent(null) }, [reset])
-  const goToConfigure = useCallback(() => { reset(); setPhase(PHASES.CONFIGURE) }, [reset])
+  const goToSelect = useCallback(() => {
+    reset()
+    setPhase(PHASES.SELECT)
+    setSelectedAgent(null)
+    pushPhase(PHASES.SELECT)
+  }, [reset, pushPhase])
+
+  const goToConfigure = useCallback(() => {
+    reset()
+    setPhase(PHASES.CONFIGURE)
+    pushPhase(PHASES.CONFIGURE, { selectedAgentId: selectedAgent?.id })
+  }, [reset, selectedAgent, pushPhase])
+
+  // ── Data source navigation ───────────────────────────────────────────────────
+  const handleDataSourceClick = useCallback((sourceId) => {
+    setPrevPhase(phase)
+    setSelectedSource(sourceId)
+    setPhase(PHASES.DATA_SOURCE)
+    pushPhase(PHASES.DATA_SOURCE, { selectedSource: sourceId, prevPhase: phase })
+  }, [phase, pushPhase])
+
+  // Back from DATA_SOURCE — let the browser restore the previous entry.
+  const handleDataSourceBack = useCallback(() => {
+    window.history.back()
+  }, [])
+
+  // ── Help / Settings / Profile navigation ────────────────────────────────────
+  const openHelp = useCallback(() => {
+    setPrevPhase(phase)
+    setPhase(PHASES.HELP)
+    pushPhase(PHASES.HELP, { prevPhase: phase })
+  }, [phase, pushPhase])
+
+  const openSettings = useCallback(() => {
+    setPrevPhase(phase)
+    setPhase(PHASES.SETTINGS)
+    pushPhase(PHASES.SETTINGS, { prevPhase: phase })
+  }, [phase, pushPhase])
+
+  const openProfile = useCallback(() => {
+    setPrevPhase(phase)
+    setPhase(PHASES.PROFILE)
+    pushPhase(PHASES.PROFILE, { prevPhase: phase })
+  }, [phase, pushPhase])
+
+  // Back from any overlay (Help / Settings / Profile / DataSource) —
+  // delegate entirely to the browser so back button and UI button are identical.
+  const closeOverlay = useCallback(() => {
+    window.history.back()
+  }, [])
 
   // ── Render ────────────────────────────────────────────────────────────────────
   return (
@@ -365,6 +609,9 @@ export default function App() {
         sessionId={sessionId}
         onNewSession={handleNewSession}
         onPersonaChange={handlePersonaChange}
+        onDataSourceClick={handleDataSourceClick}
+        onLogoClick={goToSelect}
+        onProfileClick={openProfile}
       />
 
       {/* ── Content column ───────────────────────────────────────────────── */}
@@ -375,29 +622,88 @@ export default function App() {
           <Breadcrumb
             phase={phase}
             agent={selectedAgent}
+            selectedSourceId={selectedSource}
             onSelectClick={goToSelect}
             onAgentClick={goToConfigure}
           />
           <div className="flex items-center gap-2">
             <StatusPill status={status} />
             <div className="w-px h-4 bg-slate-200 mx-1" />
-            <button
+            <a
+              href="/help"
+              onClick={(e) => { e.preventDefault(); openHelp() }}
               title="Help & documentation"
-              className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
+              className={`p-1.5 rounded-lg transition-colors inline-flex items-center
+                ${phase === PHASES.HELP
+                  ? 'text-blue-600 bg-blue-50'
+                  : 'text-slate-400 hover:text-slate-600 hover:bg-slate-100'}`}
             >
               <HelpCircle className="w-4 h-4" />
-            </button>
-            <button
+            </a>
+            <a
+              href="/settings"
+              onClick={(e) => { e.preventDefault(); openSettings() }}
               title="Settings"
-              className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
+              className={`p-1.5 rounded-lg transition-colors inline-flex items-center
+                ${phase === PHASES.SETTINGS
+                  ? 'text-blue-600 bg-blue-50'
+                  : 'text-slate-400 hover:text-slate-600 hover:bg-slate-100'}`}
             >
               <Settings className="w-4 h-4" />
-            </button>
+            </a>
           </div>
         </header>
 
         {/* ── Main content ───────────────────────────────────────────────── */}
         <main className="flex-1 flex flex-col overflow-hidden">
+
+          {/* Phase: PROFILE */}
+          {phase === PHASES.PROFILE && (
+            <div className="flex-1 overflow-hidden bg-white">
+              <UserProfile
+                rmId={rmId}
+                onRmIdChange={setRmId}
+                sessionId={sessionId}
+                settings={{ ...settings, personaName }}
+                onOpenSettings={() => {
+                  setPrevPhase(PHASES.PROFILE)
+                  setPhase(PHASES.SETTINGS)
+                  pushPhase(PHASES.SETTINGS, { prevPhase: PHASES.PROFILE })
+                }}
+                onBack={closeOverlay}
+              />
+            </div>
+          )}
+
+          {/* Phase: HELP */}
+          {phase === PHASES.HELP && (
+            <div className="flex-1 overflow-hidden bg-white">
+              <HelpGuide onBack={closeOverlay} />
+            </div>
+          )}
+
+          {/* Phase: SETTINGS */}
+          {phase === PHASES.SETTINGS && (
+            <div className="flex-1 overflow-hidden bg-white">
+              <SettingsPanel
+                settings={settings}
+                onChange={handleSettingChange}
+                onBack={closeOverlay}
+                rmId={rmId}
+                onRmIdChange={setRmId}
+              />
+            </div>
+          )}
+
+          {/* Phase: DATA_SOURCE — data source detail page */}
+          {phase === PHASES.DATA_SOURCE && (
+            <div className="flex-1 overflow-hidden bg-white">
+              <DataSourceDetail
+                sourceId={selectedSource}
+                onBack={handleDataSourceBack}
+              />
+            </div>
+          )}
 
           {/* Phase: SELECT — Staff Directory */}
           {phase === PHASES.SELECT && (
@@ -408,7 +714,12 @@ export default function App() {
                   AI workers embedded in your workflows — each with a defined role, data access, and specialist skills.
                 </p>
               </div>
-              <AgentSelector onSelect={handleAgentSelect} />
+              <AgentSelector
+                onSelect={handleAgentSelect}
+                onDataSourceClick={handleDataSourceClick}
+                cardMinWidth={settings.cardMinWidth}
+                showComingSoon={settings.showComingSoon}
+              />
             </div>
           )}
 

@@ -1,0 +1,41 @@
+# Python virtual environments
+.venv
+**/.venv
+
+# Python cache
+**/__pycache__
+**/*.py[cod]
+**/*.egg-info
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+
+# Node modules and build output (agent-ui)
+frontends/agent-ui/node_modules
+frontends/agent-ui/dist
+
+# Local environment / secrets — never in image
+.env
+**/.env.*
+
+# Editor / OS artefacts
+.DS_Store
+**/.DS_Store
+.vscode
+.idea
+**/*.swp
+**/*.swo
+
+# Test output / coverage
+coverage
+.nyc_output
+htmlcov
+**/*.tsbuildinfo
+
+# Git
+.git
+.gitignore
+
+# Docker-related files (no need to copy into image)
+docker-compose*.yml
+*.dockerignore

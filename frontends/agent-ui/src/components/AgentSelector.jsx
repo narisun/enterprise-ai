@@ -6,6 +6,9 @@
  *
  * Live workers show a "Work with [Name]" CTA.
  * Coming-soon workers show an "In Development" badge and are non-interactive.
+ *
+ * Data source chips are clickable buttons that navigate to the DataSourceDetail
+ * page via the onDataSourceClick prop threaded down from App.jsx.
  */
 
 import { ArrowRight } from 'lucide-react'
@@ -24,10 +27,9 @@ const COLOR_MAP = {
 }
 
 // ── Worker card ───────────────────────────────────────────────────────────────
-function WorkerCard({ agent, onSelect }) {
+function WorkerCard({ agent, onSelect, onDataSourceClick }) {
   const c      = COLOR_MAP[agent.color] ?? COLOR_MAP.blue
   const isLive = !agent.comingSoon
-  const initials = agent.workerName.slice(0, 2).toUpperCase()
 
   return (
     <div
@@ -77,18 +79,38 @@ function WorkerCard({ agent, onSelect }) {
         {agent.description}
       </p>
 
-      {/* Data source chips */}
+      {/* Data source chips — clickable buttons */}
       {agent.dataSources?.length > 0 && (
         <div className="flex flex-wrap gap-1.5">
           {agent.dataSources.map((src) => (
-            <span
-              key={src.label}
-              className={`inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full font-medium
-                ${isLive ? c.src : 'bg-slate-100 text-slate-400'}`}
-            >
-              <span>{src.icon}</span>
-              {src.label}
-            </span>
+            src.sourceId ? (
+              <a
+                key={src.label}
+                href={`/data/${src.sourceId}`}
+                onClick={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  onDataSourceClick?.(src.sourceId)
+                }}
+                className={`inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full font-medium
+                  transition-all hover:scale-105 hover:shadow-sm cursor-pointer
+                  ${isLive ? c.src : 'bg-slate-100 text-slate-400'}`}
+                title={`View ${src.label} schema & details`}
+              >
+                <span>{src.icon}</span>
+                {src.label}
+                <span className="ml-0.5 opacity-60 text-[9px]">↗</span>
+              </a>
+            ) : (
+              <span
+                key={src.label}
+                className={`inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full font-medium
+                  ${isLive ? c.src : 'bg-slate-100 text-slate-400'}`}
+              >
+                <span>{src.icon}</span>
+                {src.label}
+              </span>
+            )
           ))}
         </div>
       )}
@@ -109,7 +131,7 @@ function WorkerCard({ agent, onSelect }) {
 }
 
 // ── Department section ────────────────────────────────────────────────────────
-function DepartmentSection({ name, workers, onSelect }) {
+function DepartmentSection({ name, workers, onSelect, onDataSourceClick, cardMinWidth = 280 }) {
   const liveCount   = workers.filter((w) => !w.comingSoon).length
   const totalCount  = workers.length
 
@@ -126,10 +148,15 @@ function DepartmentSection({ name, workers, onSelect }) {
         </span>
       </div>
 
-      {/* Worker cards grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+      {/* Worker cards grid — auto-fill: as many columns as fit */}
+      <div className="grid gap-4" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${cardMinWidth}px, 1fr))` }}>
         {workers.map((agent) => (
-          <WorkerCard key={agent.id} agent={agent} onSelect={onSelect} />
+          <WorkerCard
+            key={agent.id}
+            agent={agent}
+            onSelect={onSelect}
+            onDataSourceClick={onDataSourceClick}
+          />
         ))}
       </div>
     </section>
@@ -137,7 +164,7 @@ function DepartmentSection({ name, workers, onSelect }) {
 }
 
 // ── Main export ───────────────────────────────────────────────────────────────
-export default function AgentSelector({ onSelect }) {
+export default function AgentSelector({ onSelect, onDataSourceClick, cardMinWidth = 280, showComingSoon = true }) {
   const grouped   = byDepartment()
   const allAgents = Object.values(grouped).flat()
   const liveCount = allAgents.filter((a) => !a.comingSoon).length
@@ -164,19 +191,27 @@ export default function AgentSelector({ onSelect }) {
         </div>
         <div className="flex-1" />
         <p className="text-xs text-slate-400 italic">
-          Click any active worker to start a session
+          Click any active worker to start · click data sources to explore schemas
         </p>
       </div>
 
       {/* Department sections */}
-      {DEPARTMENTS.filter((d) => grouped[d]).map((dept) => (
-        <DepartmentSection
-          key={dept}
-          name={dept}
-          workers={grouped[dept]}
-          onSelect={onSelect}
-        />
-      ))}
+      {DEPARTMENTS.filter((d) => grouped[d]).map((dept) => {
+        const workers = showComingSoon
+          ? grouped[dept]
+          : grouped[dept].filter((a) => !a.comingSoon)
+        if (!workers.length) return null
+        return (
+          <DepartmentSection
+            key={dept}
+            name={dept}
+            workers={workers}
+            onSelect={onSelect}
+            onDataSourceClick={onDataSourceClick}
+            cardMinWidth={cardMinWidth}
+          />
+        )
+      })}
 
     </div>
   )

@@ -37,7 +37,7 @@
 
 /** @type {Record<string, AgentClient>} */
 export const agentClients = {
-  // ── RM Prep Agent (Alex) — rm-prep-agent:8003 ────────────────────────────
+  // ── RM Prep Agent — rm-prep-agent:8003 ───────────────────────────────────
   'rm-prep': {
     endpoint: '/api/brief',
     /**
@@ -57,7 +57,7 @@ export const agentClients = {
     }),
   },
 
-  // ── Portfolio Watch Agent (Morgan) — portfolio-watch-agent:8004 ──────────
+  // ── Portfolio Watch Agent — portfolio-watch-agent:8004 ───────────────────
   'portfolio-watch': {
     endpoint: '/api/portfolio-watch',
     /**
@@ -75,7 +75,7 @@ export const agentClients = {
 
   // ── Placeholder pattern for coming-soon agents ────────────────────────────
   //
-  // When you activate Casey, Jordan, Taylor, etc.:
+  // When you activate a coming-soon agent, add an entry here:
   //
   // 'credit-review': {
   //   endpoint: '/api/credit-review',
