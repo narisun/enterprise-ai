@@ -106,11 +106,20 @@ test-agents: sdk-install ## Run legacy agent service unit tests
 	@echo "→ Running agent tests..."
 	cd agents && $(REPO_ROOT)/$(PYTEST) tests/ -v --tb=short
 
-test-mcp: sdk-install ## Run data-mcp unit tests
-	@echo "→ Installing data-mcp dependencies..."
+test-mcp: sdk-install ## Run all MCP server unit tests
+	@echo "→ Installing MCP dependencies..."
 	$(PIP) install -r tools/data-mcp/requirements.txt --quiet
+	$(PIP) install -r tools/salesforce-mcp/requirements.txt --quiet 2>/dev/null || true
+	$(PIP) install -r tools/payments-mcp/requirements.txt --quiet 2>/dev/null || true
+	$(PIP) install -r tools/news-search-mcp/requirements.txt --quiet 2>/dev/null || true
 	@echo "→ Running data-mcp tests..."
 	cd tools/data-mcp && $(REPO_ROOT)/$(PYTEST) tests/ -v --tb=short
+	@echo "→ Running salesforce-mcp tests..."
+	cd tools/salesforce-mcp && $(REPO_ROOT)/$(PYTEST) tests/ -v --tb=short
+	@echo "→ Running payments-mcp tests..."
+	cd tools/payments-mcp && $(REPO_ROOT)/$(PYTEST) tests/ -v --tb=short
+	@echo "→ Running news-search-mcp tests..."
+	cd tools/news-search-mcp && $(REPO_ROOT)/$(PYTEST) tests/ -v --tb=short
 
 test-unit: sdk-install ## Run Layer 1 unit tests (auth, cache, brief rendering — no Docker)
 	@echo "→ Installing test + agent dependencies..."

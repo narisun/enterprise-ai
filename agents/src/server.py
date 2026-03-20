@@ -90,8 +90,31 @@ class ChatResponse(BaseModel):
 
 @app.get("/health")
 async def health():
-    """Kubernetes readiness / liveness probe target."""
+    """Kubernetes liveness probe — always returns ok if the process is running."""
     return {"status": "ok"}
+
+
+@app.get("/health/ready")
+async def health_ready(http_request: Request):
+    """Kubernetes readiness probe — checks downstream dependencies."""
+    checks = {}
+    healthy = True
+
+    # Check that agent executor is initialised
+    agent_ok = hasattr(http_request.app.state, "agent_executor") and http_request.app.state.agent_executor is not None
+    checks["agent"] = "ok" if agent_ok else "not_ready"
+    if not agent_ok:
+        healthy = False
+
+    # Check MCP bridge connectivity
+    bridge_ok = hasattr(http_request.app.state, "bridge") and http_request.app.state.bridge._session is not None
+    checks["mcp_bridge"] = "ok" if bridge_ok else "disconnected"
+    if not bridge_ok:
+        healthy = False
+
+    status_code = 200 if healthy else 503
+    from fastapi.responses import JSONResponse
+    return JSONResponse({"status": "ok" if healthy else "degraded", "checks": checks}, status_code=status_code)
 
 
 @app.post("/chat", response_model=ChatResponse)

@@ -24,7 +24,6 @@ Security fixes applied:
 """
 import json
 import os
-import sys
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Optional
@@ -33,6 +32,7 @@ import asyncpg
 from mcp.server.fastmcp import FastMCP
 
 from platform_sdk import MCPConfig, OpaClient, ToolResultCache, cached_tool, configure_logging, get_logger
+from platform_sdk.auth import assert_secrets_configured
 
 configure_logging()
 log = get_logger(__name__)
@@ -56,18 +56,7 @@ PORT = int(os.environ.get("PORT", 8082))
 _DEFAULT_DAYS = 360
 
 
-# ---- Startup secret assertion -----------------------------------------------
-
-def _assert_secrets() -> None:
-    """Refuse to start in production with the default JWT secret."""
-    env = os.environ.get("ENVIRONMENT", "prod")
-    secret = os.environ.get("JWT_SECRET", "dev-secret-change-in-prod")
-    if env == "prod" and secret == "dev-secret-change-in-prod":
-        log.error(
-            "startup_blocked",
-            reason="JWT_SECRET has not been rotated from the default value in a prod environment",
-        )
-        sys.exit(1)
+# ---- Startup secret assertion (delegated to SDK) ----------------------------
 
 
 # ---- Lifespan ---------------------------------------------------------------
@@ -76,7 +65,7 @@ def _assert_secrets() -> None:
 async def _lifespan(server: FastMCP):
     global _opa, _cache, _pool
 
-    _assert_secrets()
+    assert_secrets_configured()
 
     _opa = OpaClient(_config)
     log.info("opa_client_ready", url=_config.opa_url)
@@ -93,6 +82,7 @@ async def _lifespan(server: FastMCP):
         database=os.environ.get("DB_NAME", "ai_memory"),
         min_size=2,
         max_size=10,
+        statement_cache_size=_config.statement_cache_size,
     )
     log.info("payments_mcp_ready")
     yield
@@ -358,14 +348,6 @@ async def _get_payment_summary_impl(client_name: str, days: int, col_mask: list[
     return output
 
 
-@cached_tool(None)  # cache applied manually below after OPA + mask decisions
-async def _get_payment_summary_cached(client_name: str, days: int, col_mask_key: str) -> str:
-    """Cached inner implementation — col_mask_key is included in the cache key."""
-    # col_mask is reconstructed from col_mask_key (comma-separated sorted column names)
-    col_mask = col_mask_key.split(",") if col_mask_key else []
-    return await _get_payment_summary_impl(client_name, days, col_mask)
-
-
 @mcp.tool()
 async def get_payment_summary(client_name: str) -> str:
     """
@@ -445,22 +427,20 @@ async def get_payment_summary(client_name: str) -> str:
     try:
         result = await _get_payment_summary_impl(client_name, days, col_mask)
     except asyncpg.PostgresError as exc:
+        # Log full details server-side; return a safe message to the agent
         log.error("db_postgres_error", exc_type=type(exc).__name__, error=str(exc))
-        return f"ERROR: Database error ({type(exc).__name__}): {exc}"
+        return "ERROR: A database error occurred. Please check your query syntax."
     except asyncpg.InterfaceError as exc:
-        # Pool acquisition timeout, connection closed, etc. — NOT a subclass of PostgresError
         log.error("db_interface_error", exc_type=type(exc).__name__, error=str(exc))
-        return f"ERROR: Database interface error ({type(exc).__name__}): {exc}"
+        return "ERROR: A database connection error occurred. Please try again."
     except Exception as exc:
-        # Catch-all: log the full exception type so we can diagnose it
         log.error(
             "payments_unexpected_error",
             exc_type=type(exc).__name__,
             error=str(exc),
+            exc_info=True,
         )
-        import traceback
-        log.error("payments_traceback", tb=traceback.format_exc())
-        return f"ERROR: Unexpected error in payment summary ({type(exc).__name__}): {exc}"
+        return "ERROR: An unexpected error occurred. Please try again."
 
     # Cache the result
     if _cache is not None:

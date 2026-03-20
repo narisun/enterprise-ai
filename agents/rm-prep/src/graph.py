@@ -296,7 +296,19 @@ def build_rm_orchestrator(
     builder.add_edge("synthesize", "format_brief")
     builder.add_edge("format_brief", END)
 
-    checkpointer = MemorySaver()  
+    # Use config-driven checkpointer: "memory" for dev/test, "postgres" for prod
+    if config.checkpointer_type == "postgres" and config.checkpointer_db_url:
+        try:
+            from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+            checkpointer = AsyncPostgresSaver.from_conn_string(config.checkpointer_db_url)
+            log.info("checkpointer_ready", type="postgres")
+        except ImportError:
+            log.warning("postgres_checkpointer_unavailable", fallback="memory",
+                        reason="langgraph-checkpoint-postgres not installed")
+            checkpointer = MemorySaver()
+    else:
+        checkpointer = MemorySaver()
+        log.info("checkpointer_ready", type="memory")
     return builder.compile(checkpointer=checkpointer)
 
 
@@ -327,7 +339,7 @@ async def build_rm_orchestrator_with_bridges(
     context and by the ``/brief/persona`` endpoint for per-request persona
     testing where the X-Agent-Context header must carry a specific role.
     """
-    from .mcp_bridge import MCPToolBridge
+    from platform_sdk.mcp_bridge import MCPToolBridge
 
     bridges = {
         "salesforce": MCPToolBridge(sf_url,  agent_context=agent_context),

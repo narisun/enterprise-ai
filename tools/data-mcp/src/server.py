@@ -96,6 +96,7 @@ async def _lifespan(server: FastMCP) -> AsyncIterator[None]:
         port=DB_PORT,
         min_size=1,
         max_size=10,
+        statement_cache_size=_config.statement_cache_size,
     )
     log.info("db_pool_ready", host=DB_HOST, db=DB_NAME)
     log.info("startup_complete", transport=TRANSPORT)
@@ -194,6 +195,13 @@ async def execute_read_query(query: str, session_id: str) -> str:
 
         schema_name = f"ws_{session_id.replace('-', '_')}"
 
+        # Defence in depth: verify the schema name matches the expected pattern
+        # before interpolating it into SQL.  The UUID check above should prevent
+        # anything unexpected, but this regex is a second safety net.
+        import re as _re
+        if not _re.fullmatch(r"ws_[0-9a-f_]+", schema_name):
+            return "ERROR: Invalid session_id format — cannot construct schema name."
+
         try:
             async with _db_pool.acquire() as conn:
                 async with conn.transaction(readonly=True):
@@ -202,7 +210,9 @@ async def execute_read_query(query: str, session_id: str) -> str:
                     # connection when it is returned to the pool.
                     # statement_timeout prevents long-running or sleep() queries from
                     # holding a connection indefinitely (e.g. SELECT pg_sleep(300)).
-                    await conn.execute(f"SET LOCAL search_path TO {schema_name}, public")
+                    # Schema name is double-quoted as a PostgreSQL identifier for safety.
+                    safe_schema = f'"{schema_name}"'
+                    await conn.execute(f"SET LOCAL search_path TO {safe_schema}, public")
                     await conn.execute("SET LOCAL statement_timeout = '30s'")
                     records = await conn.fetch(query)
 

@@ -4,36 +4,50 @@ RM Prep Agent — brief data model and renderer.
 RMBrief is the structured output of the synthesis node.
 render_brief() converts it to formatted markdown for display.
 """
-from typing import Optional
-from pydantic import BaseModel, Field
+from typing import Annotated, Optional
+from pydantic import BaseModel, Field, StringConstraints
+
+# Constrained string type for list items — rejects empty strings and limits length
+_BriefItem = Annotated[str, StringConstraints(min_length=1, max_length=500, strip_whitespace=True)]
 
 
 class RMBrief(BaseModel):
     """Structured RM Meeting Preparation Brief."""
-    client_name: str = Field(description="Name of the client company")
-    meeting_date: Optional[str] = Field(None, description="Meeting date if known")
+    client_name: str = Field(min_length=1, max_length=256, description="Name of the client company")
+    meeting_date: Optional[str] = Field(None, max_length=64, description="Meeting date if known")
     executive_summary: str = Field(
+        min_length=1,
         description="2-3 sentence summary of the most important things the RM needs to know before the meeting"
     )
     recent_activity: str = Field(
+        min_length=1,
         description="Summary of recent CRM relationship history: last interaction, key contacts, open tasks. Cite dates and names from CRM data. Label as [CRM]."
     )
     payment_activity: str = Field(
+        min_length=1,
         description="90-day payment analysis: total volumes, trend %, payment types, international corridors, new corridors. Label as [Payments]."
     )
     latest_news: str = Field(
+        min_length=1,
         description="Recent news headlines with business implications. If no news, state 'No significant recent news detected.' Label as [News]."
     )
-    talking_points: list[str] = Field(
+    talking_points: list[_BriefItem] = Field(
+        min_length=1,
+        max_length=10,
         description="3-5 specific, actionable talking points grounded in the data — not generic advice"
     )
-    suggested_questions: list[str] = Field(
+    suggested_questions: list[_BriefItem] = Field(
+        min_length=1,
+        max_length=10,
         description="3-4 open-ended questions to ask the client during the meeting"
     )
     watch_items: str = Field(
+        min_length=1,
         description="Risks, opportunities, or items requiring attention. Include both positive signals and warning signs."
     )
-    sources: list[str] = Field(
+    sources: list[_BriefItem] = Field(
+        min_length=1,
+        max_length=20,
         description="Short citations for key facts, e.g. '[CRM: last meeting Feb 25]', '[Payments: +15% volume Q-o-Q]', '[News: Reuters Mar 12]'"
     )
 

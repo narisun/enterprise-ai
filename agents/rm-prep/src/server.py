@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
 from platform_sdk import AgentConfig, AgentContext, configure_logging, get_logger, make_api_key_verifier, setup_telemetry
+from platform_sdk.testing import TEST_PERSONAS
 from .graph import build_rm_orchestrator_with_bridges, orchestrator_lifespan
 
 configure_logging()
@@ -40,63 +41,18 @@ _PROGRESS_LABELS = {
     "format_brief":     "Brief ready",
 }
 
-# ─── Test Persona Registry (dev / local only) ─────────────────────────────────
-#
-# These personas cover the full role hierarchy so developers can verify that
-# row-level and column-level access controls work end-to-end without touching
-# a real identity provider.
-#
-# Account IDs are from the test seed data (platform/db/21_test_sfcrm_seed.sql):
-#   001000000000001AAA = Microsoft Corp.
-#   001000000000002AAA = Ford Motor Company
-#
-# The "rm" persona deliberately restricts access to two accounts so you can
-# confirm the row filter fires for any other company name.
+# ─── Test Persona Registry (centralised in platform_sdk.testing) ──────────────
+# Imported from the SDK so server, conftest, and integration tests share one source.
+_TEST_PERSONAS = TEST_PERSONAS
 
-_TEST_PERSONAS: dict[str, dict] = {
-    "manager": {
-        "rm_id":                "test-manager-001",
-        "rm_name":              "Alice Manager (test)",
-        "role":                 "manager",
-        "team_id":              "test-team",
-        "assigned_account_ids": [],          # managers see all accounts
-        "compliance_clearance": ["standard", "aml_view", "compliance_full"],
-        "description":          "Full access — all accounts, all compliance columns",
-    },
-    "senior_rm": {
-        "rm_id":                "test-senior-rm-001",
-        "rm_name":              "Bob Senior RM (test)",
-        "role":                 "senior_rm",
-        "team_id":              "test-team",
-        "assigned_account_ids": [],          # senior RMs see all accounts
-        "compliance_clearance": ["standard", "aml_view"],
-        "description":          "All accounts, AML columns visible, compliance columns masked",
-    },
-    "rm": {
-        "rm_id":                "test-rm-001",
-        "rm_name":              "Carol RM (test)",
-        "role":                 "rm",
-        "team_id":              "test-team",
-        "assigned_account_ids": [            # restricted book of business
-            "001000000000001AAA",            # Microsoft Corp.
-            "001000000000002AAA",            # Ford Motor Company
-        ],
-        "compliance_clearance": ["standard"],
-        "description":          "Row-restricted to 2 accounts (Microsoft, Ford); PII and AML columns masked",
-    },
-    "readonly": {
-        "rm_id":                "test-readonly-001",
-        "rm_name":              "Dave Readonly (test)",
-        "role":                 "readonly",
-        "team_id":              "test-team",
-        "assigned_account_ids": [],
-        "compliance_clearance": ["standard"],
-        "description":          "No data access — all tool calls return access_denied",
-    },
-}
-
-_JWT_SECRET = os.environ.get("JWT_SECRET", "dev-secret-change-in-prod")
+from platform_sdk.auth import _get_jwt_secret, _DEFAULT_DEV_SECRET
 _ENV        = os.environ.get("ENVIRONMENT", "prod")
+
+# Simple in-memory rate limiter for test token endpoint
+import time as _time
+_TOKEN_RATE_LIMIT = 30        # max requests per window
+_TOKEN_RATE_WINDOW = 60.0     # window in seconds
+_token_requests: list[float] = []
 
 
 def _is_dev_env() -> bool:
@@ -132,7 +88,7 @@ def _decode_jwt_to_agent_context(token: str) -> AgentContext:
     except ImportError:
         raise HTTPException(status_code=500, detail="PyJWT not installed on this server.")
     try:
-        payload = pyjwt.decode(token, _JWT_SECRET, algorithms=["HS256"])
+        payload = pyjwt.decode(token, _get_jwt_secret(), algorithms=["HS256"])
     except Exception as exc:
         raise HTTPException(status_code=401, detail=f"Invalid or expired JWT: {exc}")
     return AgentContext(
@@ -213,7 +169,24 @@ class PersonaInfo(BaseModel):
 
 @app.get("/health")
 async def health():
+    """Kubernetes liveness probe."""
     return {"status": "ok", "service": "rm-prep-agent"}
+
+
+@app.get("/health/ready")
+async def health_ready(request: Request):
+    """Kubernetes readiness probe — checks orchestrator and MCP bridges."""
+    checks = {}
+    healthy = True
+
+    orchestrator_ok = hasattr(request.app.state, "orchestrator") and request.app.state.orchestrator is not None
+    checks["orchestrator"] = "ok" if orchestrator_ok else "not_ready"
+    if not orchestrator_ok:
+        healthy = False
+
+    status_code = 200 if healthy else 503
+    from fastapi.responses import JSONResponse
+    return JSONResponse({"status": "ok" if healthy else "degraded", "checks": checks}, status_code=status_code)
 
 
 @app.post("/brief")
@@ -414,6 +387,13 @@ async def create_test_token(
     """
     _require_dev_env("/auth/token")
 
+    # Rate limiting — prevent brute-force token generation
+    now = _time.monotonic()
+    _token_requests[:] = [t for t in _token_requests if now - t < _TOKEN_RATE_WINDOW]
+    if len(_token_requests) >= _TOKEN_RATE_LIMIT:
+        raise HTTPException(status_code=429, detail="Rate limit exceeded. Try again later.")
+    _token_requests.append(now)
+
     try:
         import jwt as pyjwt
     except ImportError:
@@ -437,7 +417,7 @@ async def create_test_token(
         "iat":                  int(now.timestamp()),
         "exp":                  int((now + timedelta(seconds=body.expires_in)).timestamp()),
     }
-    token = pyjwt.encode(payload, _JWT_SECRET, algorithm="HS256")
+    token = pyjwt.encode(payload, _get_jwt_secret(), algorithm="HS256")
 
     log.info("test_token_issued", persona=body.persona, role=persona_data["role"])
 

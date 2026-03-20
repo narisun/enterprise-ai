@@ -91,43 +91,28 @@ def make_jwt(jwt_secret):
     return _make
 
 
-# ── Canned persona payloads (must mirror _TEST_PERSONAS in server.py) ─────────
+# ── Canned persona payloads — derived from platform_sdk.testing ────────────────
+# Single source of truth: platform_sdk.testing.TEST_PERSONAS
+
+from platform_sdk.testing import TEST_PERSONAS
 
 MICROSOFT_ID = "001000000000001AAA"
 FORD_ID       = "001000000000002AAA"
 
-PERSONA_MANAGER = {
-    "sub":                  "test-manager-001",
-    "name":                 "Alice Manager (test)",
-    "role":                 "manager",
-    "team_id":              "test-team",
-    "assigned_account_ids": [],
-    "compliance_clearance": ["standard", "aml_view", "compliance_full"],
-}
 
-PERSONA_SENIOR_RM = {
-    "sub":                  "test-senior-rm-001",
-    "name":                 "Bob Senior RM (test)",
-    "role":                 "senior_rm",
-    "team_id":              "test-team",
-    "assigned_account_ids": [],
-    "compliance_clearance": ["standard", "aml_view"],
-}
+def _persona_to_jwt_payload(persona: dict) -> dict:
+    """Convert a TEST_PERSONAS entry to a JWT claim set."""
+    return {
+        "sub":                  persona["rm_id"],
+        "name":                 persona["rm_name"],
+        "role":                 persona["role"],
+        "team_id":              persona["team_id"],
+        "assigned_account_ids": persona["assigned_account_ids"],
+        "compliance_clearance": persona["compliance_clearance"],
+    }
 
-PERSONA_RM = {
-    "sub":                  "test-rm-001",
-    "name":                 "Carol RM (test)",
-    "role":                 "rm",
-    "team_id":              "test-team",
-    "assigned_account_ids": [MICROSOFT_ID, FORD_ID],
-    "compliance_clearance": ["standard"],
-}
 
-PERSONA_READONLY = {
-    "sub":                  "test-readonly-001",
-    "name":                 "Dave Readonly (test)",
-    "role":                 "readonly",
-    "team_id":              "test-team",
-    "assigned_account_ids": [],
-    "compliance_clearance": ["standard"],
-}
+PERSONA_MANAGER   = _persona_to_jwt_payload(TEST_PERSONAS["manager"])
+PERSONA_SENIOR_RM = _persona_to_jwt_payload(TEST_PERSONAS["senior_rm"])
+PERSONA_RM        = _persona_to_jwt_payload(TEST_PERSONAS["rm"])
+PERSONA_READONLY  = _persona_to_jwt_payload(TEST_PERSONAS["readonly"])

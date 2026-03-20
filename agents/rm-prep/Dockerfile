@@ -16,8 +16,8 @@ COPY agents/rm-prep/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY agents/rm-prep/src/ /app/src/
-# MCPToolBridge is shared from the agents package
-COPY agents/src/mcp_bridge.py /app/src/mcp_bridge.py
+# MCPToolBridge now lives in platform-sdk (installed above)
+# The src/mcp_bridge.py shim re-exports from platform_sdk.mcp_bridge
 
 RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
 USER appuser

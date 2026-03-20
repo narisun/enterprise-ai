@@ -24,7 +24,8 @@ from typing import Optional
 
 from mcp.server.fastmcp import FastMCP
 
-from platform_sdk import MCPConfig, OpaClient, ToolResultCache, cached_tool, configure_logging, get_logger
+from platform_sdk import MCPConfig, OpaClient, ToolResultCache, cached_tool, configure_logging, get_logger, make_error
+from platform_sdk.authorized_tool import is_error_response
 
 configure_logging()
 log = get_logger(__name__)
@@ -192,7 +193,7 @@ async def _search_tavily(company_name: str) -> list:
     duration of the request.  We delegate it to a thread pool executor so
     other concurrent requests are not stalled.
     """
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     response = await loop.run_in_executor(
         None,
         lambda: _tavily_client.search(
@@ -245,14 +246,18 @@ async def search_company_news(company_name: str) -> str:
     # OPA authorization — same pattern as all other MCP tools.
     # This was missing entirely in the original implementation.
     if _opa is None:
-        return "ERROR: Service not initialised — OPA client not ready."
+        return make_error("service_not_initialised", "OPA client not ready.")
+
+    if not company_name or not company_name.strip():
+        return make_error("invalid_input", "company_name must not be empty.")
+    company_name = company_name.strip()[:256]
 
     is_authorized = await _opa.authorize(
         "search_company_news", {"company_name": company_name}
     )
     if not is_authorized:
-        log.warning("opa_denied", tool="search_company_news", company=company_name)
-        return "ERROR: Unauthorized. Execution blocked by policy engine."
+        log.warning("opa_denied", tool="search_company_news")
+        return make_error("unauthorized", "Execution blocked by policy engine.")
 
     # Cache lookup — keyed on company_name
     cache_key = None

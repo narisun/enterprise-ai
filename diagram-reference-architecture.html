@@ -1,625 +1,561 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Meridian — Enterprise Agentic AI Reference Architecture</title>
-<style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body {
-    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
-    background: #F0F4F8;
-    color: #1B2A47;
-    padding: 28px 24px 32px;
-  }
-  .page-header {
-    margin-bottom: 22px;
-    display: flex;
-    align-items: flex-end;
-    justify-content: space-between;
-    border-bottom: 3px solid #1B2A47;
-    padding-bottom: 12px;
-  }
-  .page-header h1 { font-size: 22px; font-weight: 700; color: #1B2A47; letter-spacing: 0.3px; }
-  .page-header p  { font-size: 12px; color: #5A6A82; margin-top: 3px; }
-  .meta { text-align: right; font-size: 11px; color: #8295AE; }
-  .diagram-wrap {
-    background: #fff;
-    border: 1px solid #D0D7E2;
-    border-radius: 10px;
-    padding: 18px 18px 14px;
-    box-shadow: 0 2px 12px rgba(27,42,71,0.07);
-    overflow-x: auto;
-  }
-  .legend-row {
-    display: flex; flex-wrap: wrap; gap: 18px;
-    margin-top: 14px; padding: 12px 16px;
-    background: #fff; border: 1px solid #D0D7E2;
-    border-radius: 8px;
-  }
-  .legend-item { display: flex; align-items: center; gap: 7px; font-size: 11.5px; color: #3A4A60; }
-  .ls { width: 20px; height: 12px; border-radius: 2px; flex-shrink: 0; }
-  .lborder { width: 20px; height: 12px; border-radius: 2px; flex-shrink: 0; border: 2px solid; background: transparent; }
-</style>
-</head>
-<body>
-
-<div class="page-header">
-  <div>
-    <h1>Enterprise Agentic AI — Reference Architecture</h1>
-    <p>Regulated Financial Services · Multi-Agent, MCP-native, Policy-enforced</p>
-  </div>
-  <div class="meta">March 2026 · v1.0<br>CONFIDENTIAL — Internal Use Only</div>
-</div>
-
-<div class="diagram-wrap">
-<svg viewBox="0 0 1260 1210" xmlns="http://www.w3.org/2000/svg"
-     style="width:100%;min-width:980px;display:block;">
-<defs>
-  <!-- Arrows -->
-  <marker id="a0" markerWidth="8" markerHeight="8" refX="7" refY="3.5" orient="auto">
-    <path d="M0,0 L7,3.5 L0,7 Z" fill="#8295AE"/>
-  </marker>
-  <marker id="a-sec" markerWidth="8" markerHeight="8" refX="7" refY="3.5" orient="auto">
-    <path d="M0,0 L7,3.5 L0,7 Z" fill="#C0392B"/>
-  </marker>
-  <marker id="a-obs" markerWidth="8" markerHeight="8" refX="7" refY="3.5" orient="auto">
-    <path d="M0,0 L7,3.5 L0,7 Z" fill="#6C5CE7"/>
-  </marker>
-  <marker id="a-wh" markerWidth="8" markerHeight="8" refX="7" refY="3.5" orient="auto">
-    <path d="M0,0 L7,3.5 L0,7 Z" fill="#fff"/>
-  </marker>
-  <!-- Filters -->
-  <filter id="sh" x="-5%" y="-5%" width="110%" height="115%">
-    <feDropShadow dx="0" dy="1" stdDeviation="2" flood-color="#1B2A47" flood-opacity="0.12"/>
-  </filter>
-  <filter id="sh2" x="-5%" y="-5%" width="110%" height="115%">
-    <feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#1B2A47" flood-opacity="0.18"/>
-  </filter>
-  <!-- Gradients for layer bands -->
-  <linearGradient id="g-client"  x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" style="stop-color:#E8F4FD"/><stop offset="100%" style="stop-color:#D6EAF8"/></linearGradient>
-  <linearGradient id="g-gw"     x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" style="stop-color:#EBF5FB"/><stop offset="100%" style="stop-color:#D6EAF8"/></linearGradient>
-  <linearGradient id="g-agent"  x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" style="stop-color:#E8F8F5"/><stop offset="100%" style="stop-color:#D5F5E3"/></linearGradient>
-  <linearGradient id="g-sdk"    x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" style="stop-color:#F4ECF7"/><stop offset="100%" style="stop-color:#E8DAEF"/></linearGradient>
-  <linearGradient id="g-mcp"    x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" style="stop-color:#FEFBD8"/><stop offset="100%" style="stop-color:#FCF3CF"/></linearGradient>
-  <linearGradient id="g-data"   x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" style="stop-color:#EAF2FF"/><stop offset="100%" style="stop-color:#D6E8FF"/></linearGradient>
-  <linearGradient id="g-infra"  x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" style="stop-color:#F2F3F4"/><stop offset="100%" style="stop-color:#E5E8EB"/></linearGradient>
-  <!-- Cross-cut gradients -->
-  <linearGradient id="g-security" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" style="stop-color:#FDEDEC"/><stop offset="100%" style="stop-color:#FADBD8"/></linearGradient>
-  <linearGradient id="g-observe"  x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" style="stop-color:#F3EFFD"/><stop offset="100%" style="stop-color:#E8DAEF"/></linearGradient>
-  <linearGradient id="g-model" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" style="stop-color:#FDECEA"/><stop offset="100%" style="stop-color:#FAD9C8"/></linearGradient>
-</defs>
-
-<!-- ═══════════════════════════════════════════════════
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Meridian — Enterprise Agentic AI Reference Architecture</title>
+        <style>* { box-sizing: border-box; margin: 0; padding: 0; } body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background: #F0F4F8; color: #1B2A47; padding: 28px 24px 32px; } .page-header { margin-bottom: 22px; display: flex; align-items: flex-end; justify-content: space-between; border-bottom: 3px solid #1B2A47; padding-bottom: 12px; } .page-header h1 { font-size: 22px; font-weight: 700; color: #1B2A47; letter-spacing: 0.3px; } .page-header p { font-size: 12px; color: #5A6A82; margin-top: 3px; } .meta { text-align: right; font-size: 11px; color: #8295AE; } .diagram-wrap { background: #fff; border: 1px solid #D0D7E2; border-radius: 10px; padding: 18px 18px 14px; box-shadow: 0 2px 12px rgba(27,42,71,0.07); overflow-x: auto; } .legend-row { display: flex; flex-wrap: wrap; gap: 18px; margin-top: 14px; padding: 12px 16px; background: #fff; border: 1px solid #D0D7E2; border-radius: 8px; } .legend-item { display: flex; align-items: center; gap: 7px; font-size: 11.5px; color: #3A4A60; } .ls { width: 20px; height: 12px; border-radius: 2px; flex-shrink: 0; } .lborder { width: 20px; height: 12px; border-radius: 2px; flex-shrink: 0; border: 2px solid; background: transparent; }</style>
+    </head>
+    <body>
+        <div class="page-header">
+            <div>
+                <h1>Enterprise Agentic AI — Reference Architecture</h1>
+                <p>Financial Services &middot; Multi-Agent, MCP-native, Policy-enforced</p>
+            </div>
+            <div class="meta">March 2026 · v1.0<br>CONFIDENTIAL — Internal Use Only
+            </div>
+        </div>
+        <div class="diagram-wrap">
+            <svg viewBox="0 0 1260 1210" xmlns="http://www.w3.org/2000/svg" style="width:100%;min-width:980px;display:block;">
+                <defs>
+                    <!-- Arrows -->
+                    <marker id="a0" markerWidth="8" markerHeight="8" refX="7" refY="3.5" orient="auto">
+                        <path d="M0,0 L7,3.5 L0,7 Z" fill="#8295AE"/>
+                    </marker>
+                    <marker id="a-sec" markerWidth="8" markerHeight="8" refX="7" refY="3.5" orient="auto">
+                        <path d="M0,0 L7,3.5 L0,7 Z" fill="#C0392B"/>
+                    </marker>
+                    <marker id="a-obs" markerWidth="8" markerHeight="8" refX="7" refY="3.5" orient="auto">
+                        <path d="M0,0 L7,3.5 L0,7 Z" fill="#6C5CE7"/>
+                    </marker>
+                    <marker id="a-wh" markerWidth="8" markerHeight="8" refX="7" refY="3.5" orient="auto">
+                        <path d="M0,0 L7,3.5 L0,7 Z" fill="#fff"/>
+                    </marker>
+                    <!-- Filters -->
+                    <filter id="sh" x="-5%" y="-5%" width="110%" height="115%">
+                        <feDropShadow dx="0" dy="1" stdDeviation="2" flood-color="#1B2A47" flood-opacity="0.12"/>
+                    </filter>
+                    <filter id="sh2" x="-5%" y="-5%" width="110%" height="115%">
+                        <feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#1B2A47" flood-opacity="0.18"/>
+                    </filter>
+                    <!-- Gradients for layer bands -->
+                    <linearGradient id="g-client" x1="0%" y1="0%" x2="100%" y2="0%">
+                        <stop offset="0%" style="stop-color:#E8F4FD"/>
+                        <stop offset="100%" style="stop-color:#D6EAF8"/>
+                    </linearGradient>
+                    <linearGradient id="g-gw" x1="0%" y1="0%" x2="100%" y2="0%">
+                        <stop offset="0%" style="stop-color:#EBF5FB"/>
+                        <stop offset="100%" style="stop-color:#D6EAF8"/>
+                    </linearGradient>
+                    <linearGradient id="g-agent" x1="0%" y1="0%" x2="100%" y2="0%">
+                        <stop offset="0%" style="stop-color:#E8F8F5"/>
+                        <stop offset="100%" style="stop-color:#D5F5E3"/>
+                    </linearGradient>
+                    <linearGradient id="g-sdk" x1="0%" y1="0%" x2="100%" y2="0%">
+                        <stop offset="0%" style="stop-color:#F4ECF7"/>
+                        <stop offset="100%" style="stop-color:#E8DAEF"/>
+                    </linearGradient>
+                    <linearGradient id="g-mcp" x1="0%" y1="0%" x2="100%" y2="0%">
+                        <stop offset="0%" style="stop-color:#FEFBD8"/>
+                        <stop offset="100%" style="stop-color:#FCF3CF"/>
+                    </linearGradient>
+                    <linearGradient id="g-data" x1="0%" y1="0%" x2="100%" y2="0%">
+                        <stop offset="0%" style="stop-color:#EAF2FF"/>
+                        <stop offset="100%" style="stop-color:#D6E8FF"/>
+                    </linearGradient>
+                    <linearGradient id="g-infra" x1="0%" y1="0%" x2="100%" y2="0%">
+                        <stop offset="0%" style="stop-color:#F2F3F4"/>
+                        <stop offset="100%" style="stop-color:#E5E8EB"/>
+                    </linearGradient>
+                    <!-- Cross-cut gradients -->
+                    <linearGradient id="g-security" x1="0%" y1="0%" x2="0%" y2="100%">
+                        <stop offset="0%" style="stop-color:#FDEDEC"/>
+                        <stop offset="100%" style="stop-color:#FADBD8"/>
+                    </linearGradient>
+                    <linearGradient id="g-observe" x1="0%" y1="0%" x2="0%" y2="100%">
+                        <stop offset="0%" style="stop-color:#F3EFFD"/>
+                        <stop offset="100%" style="stop-color:#E8DAEF"/>
+                    </linearGradient>
+                    <linearGradient id="g-model" x1="0%" y1="0%" x2="100%" y2="0%">
+                        <stop offset="0%" style="stop-color:#FDECEA"/>
+                        <stop offset="100%" style="stop-color:#FAD9C8"/>
+                    </linearGradient>
+                </defs>
+                <!-- ═══════════════════════════════════════════════════
      OUTER CHROME + COLUMN GUIDES
 ═══════════════════════════════════════════════════ -->
-<!-- Main architecture body (layer columns) -->
-<rect x="8"   y="8"   width="1244" height="1198" rx="8" fill="#FAFBFC" stroke="#CBD5E0" stroke-width="1.5"/>
-
-<!-- Left: Security cross-cut column -->
-<rect x="14"  y="14"  width="86"   height="1182" rx="6" fill="url(#g-security)" stroke="#E74C3C" stroke-width="1.5" opacity="0.9"/>
-<!-- Security label — plain text, top of column -->
-<text x="57" y="30" text-anchor="middle" font-size="11" font-weight="700" fill="#C0392B">Security</text>
-<text x="57" y="44" text-anchor="middle" font-size="9"  fill="#C0392B">Zero-Trust</text>
-
-<!-- Right: Observability cross-cut column -->
-<rect x="1160" y="14" width="86"   height="1182" rx="6" fill="url(#g-observe)" stroke="#6C5CE7" stroke-width="1.5" opacity="0.9"/>
-<!-- Observability label — plain text, top of column -->
-<text x="1203" y="30" text-anchor="middle" font-size="11" font-weight="700" fill="#6C5CE7">Observability</text>
-<text x="1203" y="44" text-anchor="middle" font-size="9"  fill="#6C5CE7">Dynatrace · OTel</text>
-
-<!-- ═══════════════════════════════════════════════════
+                <!-- Main architecture body (layer columns) -->
+                <rect x="8" y="8" width="1244" height="1198" rx="8" fill="#FAFBFC" stroke="#CBD5E0" stroke-width="1.5"/>
+                <!-- Left: Security cross-cut column -->
+                <rect x="14" y="14" width="86" height="1182" rx="6" fill="url(#g-security)" stroke="#E74C3C" stroke-width="1.5" opacity="0.9"/>
+                <!-- Security label — plain text, top of column -->
+                <text x="57" y="30" text-anchor="middle" font-size="11" font-weight="700" fill="#C0392B">Security</text>
+                <text x="57" y="44" text-anchor="middle" font-size="9" fill="#C0392B">Zero-Trust</text>
+                <!-- Right: Observability cross-cut column -->
+                <rect x="1160" y="14" width="86" height="1182" rx="6" fill="url(#g-observe)" stroke="#6C5CE7" stroke-width="1.5" opacity="0.9"/>
+                <!-- Observability label — plain text, top of column -->
+                <text x="1203" y="30" text-anchor="middle" font-size="11" font-weight="700" fill="#6C5CE7">Observability</text>
+                <text x="1203" y="44" text-anchor="middle" font-size="9" fill="#6C5CE7">Dynatrace · OTel</text>
+                <!-- ═══════════════════════════════════════════════════
      HORIZONTAL LAYER BANDS  (7 layers)
 ═══════════════════════════════════════════════════ -->
-
-<!-- LAYER 1: Client / Consumer -->
-<rect x="108" y="18"  width="1044" height="108" rx="5" fill="url(#g-client)" stroke="#2E86C1" stroke-width="1.5"/>
-<text x="118" y="34"  font-size="10" font-weight="700" fill="#1A5276" letter-spacing="0.8">L1  ·  CLIENT &amp; CONSUMER LAYER</text>
-
-<!-- LAYER 2: API Gateway & Auth -->
-<rect x="108" y="134" width="1044" height="100" rx="5" fill="url(#g-gw)"    stroke="#1E8BC3" stroke-width="1.5"/>
-<text x="118" y="150" font-size="10" font-weight="700" fill="#1A5276" letter-spacing="0.8">L2  ·  API GATEWAY &amp; IDENTITY LAYER</text>
-
-<!-- LAYER 3: Agent Orchestration -->
-<rect x="108" y="242" width="1044" height="154" rx="5" fill="url(#g-agent)"  stroke="#1ABC9C" stroke-width="1.5"/>
-<text x="118" y="258" font-size="10" font-weight="700" fill="#0E6655" letter-spacing="0.8">L3  ·  AGENT ORCHESTRATION LAYER</text>
-
-<!-- LAYER 4: Platform SDK -->
-<rect x="108" y="404" width="1044" height="86"  rx="5" fill="url(#g-sdk)"    stroke="#8E44AD" stroke-width="1.5"/>
-<text x="118" y="420" font-size="10" font-weight="700" fill="#6C3483" letter-spacing="0.8">L4  ·  SHARED PLATFORM SERVICES  (SDK)</text>
-
-<!-- LAYER 5: MCP Tools -->
-<rect x="108" y="498" width="1044" height="200" rx="5" fill="url(#g-mcp)"    stroke="#D4AC0D" stroke-width="1.5"/>
-<text x="118" y="514" font-size="10" font-weight="700" fill="#7D6608" letter-spacing="0.8">L5  ·  TOOL &amp; INTEGRATION LAYER  (MCP / SSE  ·  Agent Skills)</text>
-
-<!-- LAYER 6: Data -->
-<rect x="108" y="706" width="1044" height="100" rx="5" fill="url(#g-data)"   stroke="#2980B9" stroke-width="1.5"/>
-<text x="118" y="722" font-size="10" font-weight="700" fill="#1A5276" letter-spacing="0.8">L6  ·  DATA &amp; CACHE LAYER</text>
-
-<!-- LAYER 7: Infrastructure -->
-<rect x="108" y="814" width="1044" height="156" rx="5" fill="url(#g-infra)"  stroke="#7F8C8D" stroke-width="1.5"/>
-<text x="118" y="830" font-size="10" font-weight="700" fill="#2C3E50" letter-spacing="0.8">L7  ·  INFRASTRUCTURE &amp; DEPLOYMENT LAYER</text>
-
-<!-- ═══════════════════════════════════════════════════
+                <!-- LAYER 1: Client / Consumer -->
+                <rect x="108" y="18" width="1044" height="108" rx="5" fill="url(#g-client)" stroke="#2E86C1" stroke-width="1.5"/>
+                <text x="118" y="34" font-size="10" font-weight="700" fill="#1A5276" letter-spacing="0.8">L1  ·  CLIENT &amp; CONSUMER LAYER</text>
+                <!-- LAYER 2: API Gateway & Auth -->
+                <rect x="108" y="134" width="1044" height="100" rx="5" fill="url(#g-gw)" stroke="#1E8BC3" stroke-width="1.5"/>
+                <text x="118" y="150" font-size="10" font-weight="700" fill="#1A5276" letter-spacing="0.8">L2  ·  API GATEWAY &amp; IDENTITY LAYER</text>
+                <!-- LAYER 3: Agent Orchestration -->
+                <rect x="108" y="242" width="1044" height="154" rx="5" fill="url(#g-agent)" stroke="#1ABC9C" stroke-width="1.5"/>
+                <text x="118" y="258" font-size="10" font-weight="700" fill="#0E6655" letter-spacing="0.8">L3  ·  AGENT ORCHESTRATION LAYER</text>
+                <!-- LAYER 4: Platform SDK -->
+                <rect x="108" y="404" width="1044" height="86" rx="5" fill="url(#g-sdk)" stroke="#8E44AD" stroke-width="1.5"/>
+                <text x="118" y="420" font-size="10" font-weight="700" fill="#6C3483" letter-spacing="0.8">L4  ·  SHARED PLATFORM SERVICES  (SDK)</text>
+                <!-- LAYER 5: MCP Tools -->
+                <rect x="108" y="498" width="1044" height="200" rx="5" fill="url(#g-mcp)" stroke="#D4AC0D" stroke-width="1.5"/>
+                <text x="118" y="514" font-size="10" font-weight="700" fill="#7D6608" letter-spacing="0.8">L5  ·  TOOL &amp; INTEGRATION LAYER  (MCP / SSE  ·  Agent Skills)</text>
+                <!-- LAYER 6: Data -->
+                <rect x="108" y="706" width="1044" height="100" rx="5" fill="url(#g-data)" stroke="#2980B9" stroke-width="1.5"/>
+                <text x="118" y="722" font-size="10" font-weight="700" fill="#1A5276" letter-spacing="0.8">L6  ·  DATA &amp; CACHE LAYER</text>
+                <!-- LAYER 7: Infrastructure -->
+                <rect x="108" y="814" width="1044" height="156" rx="5" fill="url(#g-infra)" stroke="#7F8C8D" stroke-width="1.5"/>
+                <text x="118" y="830" font-size="10" font-weight="700" fill="#2C3E50" letter-spacing="0.8">L7  ·  INFRASTRUCTURE &amp; DEPLOYMENT LAYER</text>
+                <!-- ═══════════════════════════════════════════════════
      LAYER 1 — CLIENT COMPONENTS
 ═══════════════════════════════════════════════════ -->
-<!-- Web App -->
-<rect x="126" y="44" width="160" height="68" rx="6" fill="#2E86C1" filter="url(#sh)"/>
-<text x="206" y="68"  text-anchor="middle" font-size="12" font-weight="700" fill="#fff">Web Application</text>
-<text x="206" y="84"  text-anchor="middle" font-size="10" fill="#AED6F1">React / Vite  ·  :5173</text>
-<text x="206" y="98"  text-anchor="middle" font-size="10" fill="#AED6F1">Auth0 PKCE flow</text>
-
-<!-- Chat UI -->
-<rect x="304" y="44" width="160" height="68" rx="6" fill="#2874A6" filter="url(#sh)"/>
-<text x="384" y="68"  text-anchor="middle" font-size="12" font-weight="700" fill="#fff">Conversational UI</text>
-<text x="384" y="84"  text-anchor="middle" font-size="10" fill="#AED6F1">Chainlit  ·  :8000</text>
-<text x="384" y="98"  text-anchor="middle" font-size="10" fill="#AED6F1">Session persistence</text>
-
-<!-- API Consumer -->
-<rect x="482" y="44" width="160" height="68" rx="6" fill="#21618C" filter="url(#sh)"/>
-<text x="562" y="68"  text-anchor="middle" font-size="12" font-weight="700" fill="#fff">API Consumer</text>
-<text x="562" y="84"  text-anchor="middle" font-size="10" fill="#AED6F1">REST / Server-Sent Events</text>
-<text x="562" y="98"  text-anchor="middle" font-size="10" fill="#AED6F1">Bearer token auth</text>
-
-<!-- Mobile / Other -->
-<rect x="660" y="44" width="160" height="68" rx="6" fill="#1A5276" filter="url(#sh)"/>
-<text x="740" y="68"  text-anchor="middle" font-size="12" font-weight="700" fill="#fff">Mobile / Desktop</text>
-<text x="740" y="84"  text-anchor="middle" font-size="10" fill="#AED6F1">OAuth Authorization</text>
-<text x="740" y="98"  text-anchor="middle" font-size="10" fill="#AED6F1">Code + PKCE</text>
-
-<!-- CI / Test runner -->
-<rect x="838" y="44" width="160" height="68" rx="6" fill="#154360" filter="url(#sh)"/>
-<text x="918" y="68"  text-anchor="middle" font-size="12" font-weight="700" fill="#fff">CI / Test Runner</text>
-<text x="918" y="84"  text-anchor="middle" font-size="10" fill="#AED6F1">pytest · M2M token</text>
-<text x="918" y="98"  text-anchor="middle" font-size="10" fill="#AED6F1">client_credentials flow</text>
-
-<!-- ═══════════════════════════════════════════════════
+                <!-- Web App -->
+                <rect x="126" y="44" width="160" height="68" rx="6" fill="#2E86C1" filter="url(#sh)"/>
+                <text x="206" y="68" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">Web Application</text>
+                <text x="206" y="84" text-anchor="middle" font-size="10" fill="#AED6F1">React / Vite  ·  :5173</text>
+                <text x="206" y="98" text-anchor="middle" font-size="10" fill="#AED6F1">Auth0 PKCE flow</text>
+                <!-- Chat UI -->
+                <rect x="304" y="44" width="160" height="68" rx="6" fill="#2874A6" filter="url(#sh)"/>
+                <text x="384" y="68" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">Conversational UI</text>
+                <text x="384" y="84" text-anchor="middle" font-size="10" fill="#AED6F1">Chainlit  ·  :8000</text>
+                <text x="384" y="98" text-anchor="middle" font-size="10" fill="#AED6F1">Session persistence</text>
+                <!-- API Consumer -->
+                <rect x="482" y="44" width="160" height="68" rx="6" fill="#21618C" filter="url(#sh)"/>
+                <text x="562" y="68" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">API Consumer</text>
+                <text x="562" y="84" text-anchor="middle" font-size="10" fill="#AED6F1">REST / Server-Sent Events</text>
+                <text x="562" y="98" text-anchor="middle" font-size="10" fill="#AED6F1">Bearer token auth</text>
+                <!-- Mobile / Other -->
+                <rect x="660" y="44" width="160" height="68" rx="6" fill="#1A5276" filter="url(#sh)"/>
+                <text x="740" y="68" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">Mobile / Desktop</text>
+                <text x="740" y="84" text-anchor="middle" font-size="10" fill="#AED6F1">OAuth Authorization</text>
+                <text x="740" y="98" text-anchor="middle" font-size="10" fill="#AED6F1">Code + PKCE</text>
+                <!-- CI / Test runner -->
+                <rect x="838" y="44" width="160" height="68" rx="6" fill="#154360" filter="url(#sh)"/>
+                <text x="918" y="68" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">CI / Test Runner</text>
+                <text x="918" y="84" text-anchor="middle" font-size="10" fill="#AED6F1">pytest · M2M token</text>
+                <text x="918" y="98" text-anchor="middle" font-size="10" fill="#AED6F1">client_credentials flow</text>
+                <!-- ═══════════════════════════════════════════════════
      LAYER 2 — API GATEWAY & IDENTITY
 ═══════════════════════════════════════════════════ -->
-<!-- Auth0 / IdP -->
-<rect x="126" y="158" width="188" height="68" rx="6" fill="#EB5757" filter="url(#sh)"/>
-<text x="220" y="182" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">Identity Provider</text>
-<text x="220" y="198" text-anchor="middle" font-size="10" fill="#FADBD8">Auth0 / Azure AD / Okta</text>
-<text x="220" y="212" text-anchor="middle" font-size="10" fill="#FADBD8">OAuth 2.0 + OIDC  ·  RS256 JWKS</text>
-
-<!-- API Gateway -->
-<rect x="330" y="158" width="188" height="68" rx="6" fill="#C0392B" filter="url(#sh)"/>
-<text x="424" y="182" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">API Gateway</text>
-<text x="424" y="198" text-anchor="middle" font-size="10" fill="#FADBD8">TLS termination  ·  Rate limiting</text>
-<text x="424" y="212" text-anchor="middle" font-size="10" fill="#FADBD8">Token validation  ·  CORS</text>
-
-<!-- Token Enrichment -->
-<rect x="534" y="158" width="188" height="68" rx="6" fill="#A93226" filter="url(#sh)"/>
-<text x="628" y="182" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">Token Enrichment</text>
-<text x="628" y="198" text-anchor="middle" font-size="10" fill="#FADBD8">Auth0 Action / Post-Login hook</text>
-<text x="628" y="212" text-anchor="middle" font-size="10" fill="#FADBD8">role  ·  book_of_business  ·  clearance</text>
-
-<!-- Service Auth -->
-<rect x="738" y="158" width="188" height="68" rx="6" fill="#922B21" filter="url(#sh)"/>
-<text x="832" y="182" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">Service Auth</text>
-<text x="832" y="198" text-anchor="middle" font-size="10" fill="#FADBD8">INTERNAL_API_KEY (M2M)</text>
-<text x="832" y="212" text-anchor="middle" font-size="10" fill="#FADBD8">HMAC-SHA256 context header</text>
-
-<!-- ═══════════════════════════════════════════════════
+                <!-- Auth0 / IdP -->
+                <rect x="126" y="158" width="188" height="68" rx="6" fill="#EB5757" filter="url(#sh)"/>
+                <text x="220" y="182" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">Identity Provider</text>
+                <text x="220" y="198" text-anchor="middle" font-size="10" fill="#FADBD8">Auth0 / Azure AD / Okta</text>
+                <text x="220" y="212" text-anchor="middle" font-size="10" fill="#FADBD8">OAuth 2.0 + OIDC  ·  RS256 JWKS</text>
+                <!-- API Gateway -->
+                <rect x="330" y="158" width="188" height="68" rx="6" fill="#C0392B" filter="url(#sh)"/>
+                <text x="424" y="182" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">API Gateway</text>
+                <text x="424" y="198" text-anchor="middle" font-size="10" fill="#FADBD8">TLS termination  ·  Rate limiting</text>
+                <text x="424" y="212" text-anchor="middle" font-size="10" fill="#FADBD8">Token validation  ·  CORS</text>
+                <!-- Token Enrichment -->
+                <rect x="534" y="158" width="188" height="68" rx="6" fill="#A93226" filter="url(#sh)"/>
+                <text x="628" y="182" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">Token Enrichment</text>
+                <text x="628" y="198" text-anchor="middle" font-size="10" fill="#FADBD8">Auth0 Action / Post-Login hook</text>
+                <text x="628" y="212" text-anchor="middle" font-size="10" fill="#FADBD8">role  ·  book_of_business  ·  clearance</text>
+                <!-- Service Auth -->
+                <rect x="738" y="158" width="188" height="68" rx="6" fill="#922B21" filter="url(#sh)"/>
+                <text x="832" y="182" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">Service Auth</text>
+                <text x="832" y="198" text-anchor="middle" font-size="10" fill="#FADBD8">INTERNAL_API_KEY (M2M)</text>
+                <text x="832" y="212" text-anchor="middle" font-size="10" fill="#FADBD8">HMAC-SHA256 context header</text>
+                <!-- ═══════════════════════════════════════════════════
      LAYER 3 — AGENT ORCHESTRATION
 ═══════════════════════════════════════════════════ -->
-
-<!-- ReAct Agent -->
-<rect x="126" y="268" width="194" height="116" rx="6" fill="#1ABC9C" filter="url(#sh)"/>
-<text x="223" y="291" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">ReAct Agent</text>
-<text x="223" y="308" text-anchor="middle" font-size="10" fill="#D5F5E3">Generic chat  ·  :8000</text>
-<text x="223" y="324" text-anchor="middle" font-size="10" fill="#D5F5E3">create_react_agent()</text>
-<text x="223" y="340" text-anchor="middle" font-size="10" fill="#D5F5E3">MCPBridge → StructuredTool</text>
-<text x="223" y="356" text-anchor="middle" font-size="10" fill="#D5F5E3">Dynamic tool discovery</text>
-<rect x="130" y="360" width="186" height="20" rx="3" fill="#0E8070"/>
-<text x="223" y="374" text-anchor="middle" font-size="9" fill="#A9DFBF">Pattern: Tool-use loop (ReAct)</text>
-
-<!-- StateGraph Orchestrator -->
-<rect x="336" y="268" width="194" height="116" rx="6" fill="#17A589" filter="url(#sh)"/>
-<text x="433" y="291" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">Orchestration Agent</text>
-<text x="433" y="308" text-anchor="middle" font-size="10" fill="#D5F5E3">RM Prep  ·  :8003</text>
-<text x="433" y="324" text-anchor="middle" font-size="10" fill="#D5F5E3">StateGraph + parallel nodes</text>
-<text x="433" y="340" text-anchor="middle" font-size="10" fill="#D5F5E3">parse → route → [gather‖]</text>
-<text x="433" y="356" text-anchor="middle" font-size="10" fill="#D5F5E3">→ synthesize → format</text>
-<rect x="340" y="360" width="186" height="20" rx="3" fill="#0E8070"/>
-<text x="433" y="374" text-anchor="middle" font-size="9" fill="#A9DFBF">Pattern: Deterministic StateGraph</text>
-
-<!-- DeepAgent -->
-<rect x="546" y="268" width="194" height="116" rx="6" fill="#117A65" filter="url(#sh)"/>
-<text x="643" y="287" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">DeepAgent</text>
-<text x="643" y="302" text-anchor="middle" font-size="10" fill="#D5F5E3">Goal-oriented  ·  :8004</text>
-<text x="643" y="316" text-anchor="middle" font-size="10" fill="#D5F5E3">Task planning · Subagent-spawning</text>
-<text x="643" y="330" text-anchor="middle" font-size="10" fill="#D5F5E3">File system context · Long-term memory</text>
-<text x="643" y="344" text-anchor="middle" font-size="10" fill="#D5F5E3">Capability registry · Agent harness</text>
-<rect x="550" y="358" width="186" height="20" rx="3" fill="#0E8070"/>
-<text x="643" y="372" text-anchor="middle" font-size="9" fill="#A9DFBF">Pattern: Agentic harness loop</text>
-
-<!-- Model Router -->
-<rect x="756" y="268" width="194" height="116" rx="6" fill="#0E6655" filter="url(#sh)"/>
-<text x="853" y="291" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">LLM Gateway</text>
-<text x="853" y="308" text-anchor="middle" font-size="10" fill="#D5F5E3">LiteLLM Proxy  ·  :4000</text>
-<text x="853" y="324" text-anchor="middle" font-size="10" fill="#D5F5E3">fast-routing   → GPT-4o-mini</text>
-<text x="853" y="340" text-anchor="middle" font-size="10" fill="#D5F5E3">complex-routing → GPT-4o</text>
-<text x="853" y="356" text-anchor="middle" font-size="10" fill="#D5F5E3">Semantic cache  ·  fallback</text>
-<rect x="760" y="360" width="186" height="20" rx="3" fill="#0E4A3E"/>
-<text x="853" y="374" text-anchor="middle" font-size="9" fill="#A9DFBF">Model tiering by env var</text>
-
-<!-- Prompt Template block -->
-<rect x="966" y="268" width="178" height="52" rx="6" fill="#0A5140" filter="url(#sh)"/>
-<text x="1055" y="289" text-anchor="middle" font-size="11" font-weight="700" fill="#fff">Prompt Templates</text>
-<text x="1055" y="305" text-anchor="middle" font-size="10" fill="#A9DFBF">Jinja2 · agents/*/prompts/</text>
-<text x="1055" y="319" text-anchor="middle" font-size="9" fill="#7DC9AE">Versioned separately from code</text>
-
-<!-- Context / Memory block -->
-<rect x="966" y="330" width="178" height="54" rx="6" fill="#0A5140" filter="url(#sh)"/>
-<text x="1055" y="351" text-anchor="middle" font-size="11" font-weight="700" fill="#fff">Context &amp; Memory</text>
-<text x="1055" y="367" text-anchor="middle" font-size="10" fill="#A9DFBF">Checkpointer (mem / PG)</text>
-<text x="1055" y="381" text-anchor="middle" font-size="9" fill="#7DC9AE">Compaction · token budget</text>
-
-<!-- ═══════════════════════════════════════════════════
+                <!-- ReAct Agent -->
+                <rect x="126" y="268" width="194" height="116" rx="6" fill="#1ABC9C" filter="url(#sh)"/>
+                <text x="223" y="291" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">ReAct Agent</text>
+                <text x="223" y="308" text-anchor="middle" font-size="10" fill="#D5F5E3">Generic chat  ·  :8000</text>
+                <text x="223" y="324" text-anchor="middle" font-size="10" fill="#D5F5E3">create_react_agent()</text>
+                <text x="223" y="340" text-anchor="middle" font-size="10" fill="#D5F5E3">MCPBridge → StructuredTool</text>
+                <text x="223" y="356" text-anchor="middle" font-size="10" fill="#D5F5E3">Dynamic tool discovery</text>
+                <rect x="130" y="360" width="186" height="20" rx="3" fill="#0E8070"/>
+                <text x="223" y="374" text-anchor="middle" font-size="9" fill="#A9DFBF">Pattern: Tool-use loop (ReAct)</text>
+                <!-- StateGraph Orchestrator -->
+                <rect x="336" y="268" width="194" height="116" rx="6" fill="#17A589" filter="url(#sh)"/>
+                <text x="433" y="291" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">Orchestration Agent</text>
+                <text x="433" y="308" text-anchor="middle" font-size="10" fill="#D5F5E3">RM Prep  ·  :8003</text>
+                <text x="433" y="324" text-anchor="middle" font-size="10" fill="#D5F5E3">StateGraph + parallel nodes</text>
+                <text x="433" y="340" text-anchor="middle" font-size="10" fill="#D5F5E3">parse → route → [gather‖ + RAG]</text>
+                <text x="433" y="356" text-anchor="middle" font-size="10" fill="#D5F5E3">→ synthesize → format</text>
+                <rect x="340" y="360" width="186" height="20" rx="3" fill="#0E8070"/>
+                <text x="433" y="374" text-anchor="middle" font-size="9" fill="#A9DFBF">Pattern: Deterministic StateGraph</text>
+                <!-- DeepAgent -->
+                <rect x="546" y="268" width="194" height="116" rx="6" fill="#117A65" filter="url(#sh)"/>
+                <text x="643" y="287" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">DeepAgent</text>
+                <text x="643" y="302" text-anchor="middle" font-size="10" fill="#D5F5E3">Goal-oriented  ·  :8004</text>
+                <text x="643" y="316" text-anchor="middle" font-size="10" fill="#D5F5E3">Task planning · Subagent-spawning</text>
+                <text x="643" y="330" text-anchor="middle" font-size="10" fill="#D5F5E3">File system context · Long-term memory</text>
+                <text x="643" y="344" text-anchor="middle" font-size="10" fill="#D5F5E3">Capability registry · Agent harness</text>
+                <rect x="550" y="358" width="186" height="20" rx="3" fill="#0E8070"/>
+                <text x="643" y="372" text-anchor="middle" font-size="9" fill="#A9DFBF">Pattern: Agentic harness loop</text>
+                <!-- Model Router -->
+                <rect x="756" y="268" width="194" height="116" rx="6" fill="#0E6655" filter="url(#sh)"/>
+                <text x="853" y="291" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">LLM Gateway</text>
+                <text x="853" y="308" text-anchor="middle" font-size="10" fill="#D5F5E3">LiteLLM Proxy  ·  :4000</text>
+                <text x="853" y="324" text-anchor="middle" font-size="10" fill="#D5F5E3">fast-routing   → GPT-4o-mini</text>
+                <text x="853" y="340" text-anchor="middle" font-size="10" fill="#D5F5E3">complex-routing → GPT-4o</text>
+                <text x="853" y="356" text-anchor="middle" font-size="10" fill="#D5F5E3">Semantic cache  ·  fallback</text>
+                <rect x="760" y="360" width="186" height="20" rx="3" fill="#0E4A3E"/>
+                <text x="853" y="374" text-anchor="middle" font-size="9" fill="#A9DFBF">Model tiering by env var</text>
+                <!-- Prompt Template block -->
+                <rect x="966" y="268" width="178" height="52" rx="6" fill="#0A5140" filter="url(#sh)"/>
+                <text x="1055" y="289" text-anchor="middle" font-size="11" font-weight="700" fill="#fff">Prompt Templates</text>
+                <text x="1055" y="305" text-anchor="middle" font-size="10" fill="#A9DFBF">Jinja2 · agents/*/prompts/</text>
+                <text x="1055" y="319" text-anchor="middle" font-size="9" fill="#7DC9AE">Versioned separately from code</text>
+                <!-- Context / Memory block -->
+                <rect x="966" y="330" width="178" height="54" rx="6" fill="#0A5140" filter="url(#sh)"/>
+                <text x="1055" y="351" text-anchor="middle" font-size="11" font-weight="700" fill="#fff">Context &amp; Memory</text>
+                <text x="1055" y="367" text-anchor="middle" font-size="10" fill="#A9DFBF">Checkpointer (mem / PG)</text>
+                <text x="1055" y="381" text-anchor="middle" font-size="9" fill="#7DC9AE">Compaction · token budget</text>
+                <!-- ═══════════════════════════════════════════════════
      LAYER 4 — PLATFORM SDK
 ═══════════════════════════════════════════════════ -->
-<!-- SDK module chips -->
-<!-- auth -->
-<rect x="126" y="422" width="126" height="56" rx="5" fill="#7D3C98" filter="url(#sh)"/>
-<text x="189" y="443" text-anchor="middle" font-size="11" font-weight="700" fill="#fff">Auth Context</text>
-<text x="189" y="458" text-anchor="middle" font-size="10" fill="#D2B4DE">AgentContext  ·  JWT</text>
-<text x="189" y="472" text-anchor="middle" font-size="9"  fill="#C39BD3">auth.py</text>
-
-<!-- security -->
-<rect x="264" y="422" width="126" height="56" rx="5" fill="#6C3483" filter="url(#sh)"/>
-<text x="327" y="443" text-anchor="middle" font-size="11" font-weight="700" fill="#fff">Security</text>
-<text x="327" y="458" text-anchor="middle" font-size="10" fill="#D2B4DE">OpaClient  ·  API key</text>
-<text x="327" y="472" text-anchor="middle" font-size="9"  fill="#C39BD3">security.py</text>
-
-<!-- cache -->
-<rect x="402" y="422" width="126" height="56" rx="5" fill="#5B2C6F" filter="url(#sh)"/>
-<text x="465" y="443" text-anchor="middle" font-size="11" font-weight="700" fill="#fff">Cache</text>
-<text x="465" y="458" text-anchor="middle" font-size="10" fill="#D2B4DE">@cached_tool  ·  Redis</text>
-<text x="465" y="472" text-anchor="middle" font-size="9"  fill="#C39BD3">cache.py</text>
-
-<!-- config -->
-<rect x="540" y="422" width="126" height="56" rx="5" fill="#4A235A" filter="url(#sh)"/>
-<text x="603" y="443" text-anchor="middle" font-size="11" font-weight="700" fill="#fff">Config</text>
-<text x="603" y="458" text-anchor="middle" font-size="10" fill="#D2B4DE">AgentConfig  ·  MCPConfig</text>
-<text x="603" y="472" text-anchor="middle" font-size="9"  fill="#C39BD3">config.py</text>
-
-<!-- telemetry -->
-<rect x="678" y="422" width="126" height="56" rx="5" fill="#6C3483" filter="url(#sh)"/>
-<text x="741" y="443" text-anchor="middle" font-size="11" font-weight="700" fill="#fff">Telemetry</text>
-<text x="741" y="458" text-anchor="middle" font-size="10" fill="#D2B4DE">OTel setup  ·  Spans</text>
-<text x="741" y="472" text-anchor="middle" font-size="9"  fill="#C39BD3">telemetry.py</text>
-
-<!-- logging -->
-<rect x="816" y="422" width="126" height="56" rx="5" fill="#7D3C98" filter="url(#sh)"/>
-<text x="879" y="443" text-anchor="middle" font-size="11" font-weight="700" fill="#fff">Logging</text>
-<text x="879" y="458" text-anchor="middle" font-size="10" fill="#D2B4DE">structlog  ·  JSON</text>
-<text x="879" y="472" text-anchor="middle" font-size="9"  fill="#C39BD3">logging.py</text>
-
-<!-- compaction -->
-<rect x="954" y="422" width="130" height="56" rx="5" fill="#5B2C6F" filter="url(#sh)"/>
-<text x="1019" y="443" text-anchor="middle" font-size="11" font-weight="700" fill="#fff">Compaction</text>
-<text x="1019" y="458" text-anchor="middle" font-size="10" fill="#D2B4DE">Token trimming  ·  6K limit</text>
-<text x="1019" y="472" text-anchor="middle" font-size="9"  fill="#C39BD3">compaction.py  ·  llm_client.py</text>
-
-<!-- ═══════════════════════════════════════════════════
+                <!-- SDK module chips -->
+                <!-- auth -->
+                <rect x="126" y="422" width="126" height="56" rx="5" fill="#7D3C98" filter="url(#sh)"/>
+                <text x="189" y="443" text-anchor="middle" font-size="11" font-weight="700" fill="#fff">Auth Context</text>
+                <text x="189" y="458" text-anchor="middle" font-size="10" fill="#D2B4DE">AgentContext  ·  JWT</text>
+                <text x="189" y="472" text-anchor="middle" font-size="9" fill="#C39BD3">auth.py</text>
+                <!-- security -->
+                <rect x="264" y="422" width="126" height="56" rx="5" fill="#6C3483" filter="url(#sh)"/>
+                <text x="327" y="443" text-anchor="middle" font-size="11" font-weight="700" fill="#fff">Security</text>
+                <text x="327" y="458" text-anchor="middle" font-size="10" fill="#D2B4DE">OpaClient  ·  API key</text>
+                <text x="327" y="472" text-anchor="middle" font-size="9" fill="#C39BD3">security.py</text>
+                <!-- cache -->
+                <rect x="402" y="422" width="126" height="56" rx="5" fill="#5B2C6F" filter="url(#sh)"/>
+                <text x="465" y="443" text-anchor="middle" font-size="11" font-weight="700" fill="#fff">Cache</text>
+                <text x="465" y="458" text-anchor="middle" font-size="10" fill="#D2B4DE">@cached_tool  ·  Redis</text>
+                <text x="465" y="472" text-anchor="middle" font-size="9" fill="#C39BD3">cache.py</text>
+                <!-- config -->
+                <rect x="540" y="422" width="126" height="56" rx="5" fill="#4A235A" filter="url(#sh)"/>
+                <text x="603" y="443" text-anchor="middle" font-size="11" font-weight="700" fill="#fff">Config</text>
+                <text x="603" y="458" text-anchor="middle" font-size="10" fill="#D2B4DE">AgentConfig  ·  MCPConfig</text>
+                <text x="603" y="472" text-anchor="middle" font-size="9" fill="#C39BD3">config.py</text>
+                <!-- telemetry -->
+                <rect x="678" y="422" width="126" height="56" rx="5" fill="#6C3483" filter="url(#sh)"/>
+                <text x="741" y="443" text-anchor="middle" font-size="11" font-weight="700" fill="#fff">Telemetry</text>
+                <text x="741" y="458" text-anchor="middle" font-size="10" fill="#D2B4DE">OTel setup  ·  Spans</text>
+                <text x="741" y="472" text-anchor="middle" font-size="9" fill="#C39BD3">telemetry.py</text>
+                <!-- logging -->
+                <rect x="816" y="422" width="126" height="56" rx="5" fill="#7D3C98" filter="url(#sh)"/>
+                <text x="879" y="443" text-anchor="middle" font-size="11" font-weight="700" fill="#fff">Logging</text>
+                <text x="879" y="458" text-anchor="middle" font-size="10" fill="#D2B4DE">structlog  ·  JSON</text>
+                <text x="879" y="472" text-anchor="middle" font-size="9" fill="#C39BD3">logging.py</text>
+                <!-- compaction -->
+                <rect x="954" y="422" width="130" height="56" rx="5" fill="#5B2C6F" filter="url(#sh)"/>
+                <text x="1019" y="443" text-anchor="middle" font-size="11" font-weight="700" fill="#fff">Compaction</text>
+                <text x="1019" y="458" text-anchor="middle" font-size="10" fill="#D2B4DE">Token trimming  ·  6K limit</text>
+                <text x="1019" y="472" text-anchor="middle" font-size="9" fill="#C39BD3">compaction.py  ·  llm_client.py</text>
+                <!-- ═══════════════════════════════════════════════════
      LAYER 5 — MCP TOOL SERVERS
 ═══════════════════════════════════════════════════ -->
-<!-- OPA policy check bar -->
-<rect x="126" y="518" width="1018" height="22" rx="4" fill="#E67E22"/>
-<text x="635" y="533" text-anchor="middle" font-size="10" font-weight="700" fill="#fff">
-  POLICY ENFORCEMENT POINT  ·  OPA check on every tool call  ·  Fail-closed default deny  ·  tool_auth.rego  +  rm_prep_authz.rego
+                <!-- OPA policy check bar -->
+                <rect x="126" y="518" width="1018" height="22" rx="4" fill="#E67E22"/>
+                <text x="635" y="533" text-anchor="middle" font-size="10" font-weight="700" fill="#fff">
+                    POLICY ENFORCEMENT POINT  ·  OPA check on every tool call  ·  Fail-closed default deny  ·  tool_auth.rego  +  rm_prep_authz.rego
 </text>
-
-<!-- Skills strip -->
-<rect x="126" y="542" width="1018" height="10" rx="3" fill="#27AE60" opacity="0.85"/>
-<text x="635" y="550" text-anchor="middle" font-size="8.5" font-weight="700" fill="#fff">
-  AGENT SKILLS &amp; WORKFLOWS  ·  Callable Python functions registered as LangGraph tools  ·  Composable across agents  ·  Invoked alongside MCP servers
+                <!-- Skills strip -->
+                <rect x="126" y="542" width="1018" height="10" rx="3" fill="#27AE60" opacity="0.85"/>
+                <text x="635" y="550" text-anchor="middle" font-size="8.5" font-weight="700" fill="#fff">
+                    AGENT SKILLS &amp; WORKFLOWS  ·  Callable Python functions registered as LangGraph tools  ·  Composable across agents  ·  Invoked alongside MCP servers
 </text>
-
-<!-- data-mcp -->
-<rect x="126" y="566" width="230" height="120" rx="6" fill="#F0B429" filter="url(#sh)"/>
-<text x="241" y="589" text-anchor="middle" font-size="12" font-weight="700" fill="#1A0A00">SQL Database MCP</text>
-<text x="241" y="606" text-anchor="middle" font-size="10" fill="#5D4037">data-mcp  ·  :8080/sse</text>
-<text x="241" y="622" text-anchor="middle" font-size="10" fill="#5D4037">execute_read_query(sql)</text>
-<text x="241" y="638" text-anchor="middle" font-size="10" fill="#5D4037">asyncpg pool  ·  read-only</text>
-<text x="241" y="654" text-anchor="middle" font-size="10" fill="#5D4037">Row filter · Col mask applied</text>
-<rect x="130" y="658" width="222" height="24" rx="3" fill="#D4A017"/>
-<text x="241" y="674" text-anchor="middle" font-size="9" fill="#1A0A00">FastMCP / SSE  ·  15KB result cap</text>
-
-<!-- CRM MCP -->
-<rect x="370" y="566" width="228" height="120" rx="6" fill="#E6A817" filter="url(#sh)"/>
-<text x="484" y="589" text-anchor="middle" font-size="12" font-weight="700" fill="#1A0A00">CRM MCP</text>
-<text x="484" y="606" text-anchor="middle" font-size="10" fill="#5D4037">salesforce-mcp  ·  :8081/sse</text>
-<text x="484" y="622" text-anchor="middle" font-size="10" fill="#5D4037">get_salesforce_summary()</text>
-<text x="484" y="638" text-anchor="middle" font-size="10" fill="#5D4037">Fuzzy name match  ·  PII mask</text>
-<text x="484" y="654" text-anchor="middle" font-size="10" fill="#5D4037">Contacts / Opportunities / Tasks</text>
-<rect x="374" y="658" width="220" height="24" rx="3" fill="#C49010"/>
-<text x="484" y="674" text-anchor="middle" font-size="9" fill="#1A0A00">TTL cache 30 min  ·  @cached_tool</text>
-
-<!-- Payments MCP -->
-<rect x="612" y="566" width="228" height="120" rx="6" fill="#D4981A" filter="url(#sh)"/>
-<text x="726" y="589" text-anchor="middle" font-size="12" font-weight="700" fill="#1A0A00">Payments MCP</text>
-<text x="726" y="606" text-anchor="middle" font-size="10" fill="#5D4037">payments-mcp  ·  :8082/sse</text>
-<text x="726" y="622" text-anchor="middle" font-size="10" fill="#5D4037">get_payment_summary()</text>
-<text x="726" y="638" text-anchor="middle" font-size="10" fill="#5D4037">TX volumes  ·  corridors</text>
-<text x="726" y="654" text-anchor="middle" font-size="10" fill="#5D4037">Counterparty analysis</text>
-<rect x="616" y="658" width="220" height="24" rx="3" fill="#B8830A"/>
-<text x="726" y="674" text-anchor="middle" font-size="9" fill="#1A0A00">Row-filtered SQL  ·  AML cols masked</text>
-
-<!-- News MCP -->
-<rect x="854" y="566" width="290" height="120" rx="6" fill="#C48910" filter="url(#sh)"/>
-<text x="999" y="589" text-anchor="middle" font-size="12" font-weight="700" fill="#1A0A00">Web Intelligence MCP</text>
-<text x="999" y="606" text-anchor="middle" font-size="10" fill="#5D4037">news-search-mcp  ·  :8083/sse</text>
-<text x="999" y="622" text-anchor="middle" font-size="10" fill="#5D4037">search_company_news()</text>
-<text x="999" y="638" text-anchor="middle" font-size="10" fill="#5D4037">Tavily API (prod)  ·  Mock (dev)</text>
-<text x="999" y="654" text-anchor="middle" font-size="10" fill="#5D4037">httpx async  ·  retry + timeout</text>
-<rect x="858" y="658" width="282" height="24" rx="3" fill="#A87800"/>
-<text x="999" y="674" text-anchor="middle" font-size="9" fill="#1A0A00">Extensible: add new MCP servers here</text>
-
-<!-- ═══════════════════════════════════════════════════
+                <!-- data-mcp -->
+                <rect x="126" y="566" width="192" height="120" rx="6" fill="#F0B429" filter="url(#sh)"/>
+                <text x="222" y="589" text-anchor="middle" font-size="11.5" font-weight="700" fill="#1A0A00">SQL Database MCP</text>
+                <text x="222" y="606" text-anchor="middle" font-size="9.5" fill="#5D4037">data-mcp  ·  :8080/sse</text>
+                <text x="222" y="622" text-anchor="middle" font-size="9.5" fill="#5D4037">execute_read_query(sql)</text>
+                <text x="222" y="638" text-anchor="middle" font-size="9.5" fill="#5D4037">asyncpg pool  ·  read-only</text>
+                <text x="222" y="654" text-anchor="middle" font-size="9.5" fill="#5D4037">Row filter · Col mask applied</text>
+                <rect x="130" y="658" width="184" height="24" rx="3" fill="#D4A017"/>
+                <text x="222" y="674" text-anchor="middle" font-size="8.5" fill="#1A0A00">FastMCP / SSE  ·  15KB result cap</text>
+                <!-- CRM MCP -->
+                <rect x="328" y="566" width="192" height="120" rx="6" fill="#E6A817" filter="url(#sh)"/>
+                <text x="424" y="589" text-anchor="middle" font-size="11.5" font-weight="700" fill="#1A0A00">CRM MCP</text>
+                <text x="424" y="606" text-anchor="middle" font-size="9.5" fill="#5D4037">salesforce-mcp  ·  :8081/sse</text>
+                <text x="424" y="622" text-anchor="middle" font-size="9.5" fill="#5D4037">get_salesforce_summary()</text>
+                <text x="424" y="638" text-anchor="middle" font-size="9.5" fill="#5D4037">Fuzzy name match  ·  PII mask</text>
+                <text x="424" y="654" text-anchor="middle" font-size="9.5" fill="#5D4037">Contacts / Opps / Tasks</text>
+                <rect x="332" y="658" width="184" height="24" rx="3" fill="#C49010"/>
+                <text x="424" y="674" text-anchor="middle" font-size="8.5" fill="#1A0A00">TTL cache 30 min  ·  @cached_tool</text>
+                <!-- Payments MCP -->
+                <rect x="530" y="566" width="192" height="120" rx="6" fill="#D4981A" filter="url(#sh)"/>
+                <text x="626" y="589" text-anchor="middle" font-size="11.5" font-weight="700" fill="#1A0A00">Payments MCP</text>
+                <text x="626" y="606" text-anchor="middle" font-size="9.5" fill="#5D4037">payments-mcp  ·  :8082/sse</text>
+                <text x="626" y="622" text-anchor="middle" font-size="9.5" fill="#5D4037">get_payment_summary()</text>
+                <text x="626" y="638" text-anchor="middle" font-size="9.5" fill="#5D4037">TX volumes  ·  corridors</text>
+                <text x="626" y="654" text-anchor="middle" font-size="9.5" fill="#5D4037">Counterparty analysis</text>
+                <rect x="534" y="658" width="184" height="24" rx="3" fill="#B8830A"/>
+                <text x="626" y="674" text-anchor="middle" font-size="8.5" fill="#1A0A00">Row-filtered SQL  ·  AML cols masked</text>
+                <!-- Knowledge MCP (RAG) — NEW -->
+                <rect x="732" y="566" width="192" height="120" rx="6" fill="#B8860B" filter="url(#sh)"/>
+                <text x="828" y="589" text-anchor="middle" font-size="11.5" font-weight="700" fill="#fff">Knowledge MCP</text>
+                <text x="828" y="606" text-anchor="middle" font-size="9.5" fill="#FFF8DC">knowledge-mcp  ·  :8084/sse</text>
+                <text x="828" y="622" text-anchor="middle" font-size="9.5" fill="#FFF8DC">search_knowledge(query)</text>
+                <text x="828" y="638" text-anchor="middle" font-size="9.5" fill="#FFF8DC">pgvector cosine similarity</text>
+                <text x="828" y="654" text-anchor="middle" font-size="9.5" fill="#FFF8DC">Docs · Notes · Transcripts</text>
+                <rect x="736" y="658" width="184" height="24" rx="3" fill="#8B6914"/>
+                <text x="828" y="674" text-anchor="middle" font-size="8.5" fill="#FFF8DC">RAG  ·  chunk + embed + retrieve</text>
+                <!-- News MCP -->
+                <rect x="934" y="566" width="210" height="120" rx="6" fill="#C48910" filter="url(#sh)"/>
+                <text x="1039" y="589" text-anchor="middle" font-size="11.5" font-weight="700" fill="#1A0A00">Web Intelligence MCP</text>
+                <text x="1039" y="606" text-anchor="middle" font-size="9.5" fill="#5D4037">news-search-mcp  ·  :8083/sse</text>
+                <text x="1039" y="622" text-anchor="middle" font-size="9.5" fill="#5D4037">search_company_news()</text>
+                <text x="1039" y="638" text-anchor="middle" font-size="9.5" fill="#5D4037">Tavily API (prod)  ·  Mock (dev)</text>
+                <text x="1039" y="654" text-anchor="middle" font-size="9.5" fill="#5D4037">httpx async  ·  retry + timeout</text>
+                <rect x="938" y="658" width="202" height="24" rx="3" fill="#A87800"/>
+                <text x="1039" y="674" text-anchor="middle" font-size="8.5" fill="#1A0A00">Extensible: add new MCP servers here</text>
+                <!-- ═══════════════════════════════════════════════════
      LAYER 6 — DATA
 ═══════════════════════════════════════════════════ -->
-<!-- Postgres -->
-<rect x="126" y="726" width="240" height="72" rx="6" fill="#1F618D" filter="url(#sh)"/>
-<text x="246" y="750" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">Vector Database</text>
-<text x="246" y="767" text-anchor="middle" font-size="10" fill="#AED6F1">PostgreSQL 16 + pgvector</text>
-<text x="246" y="782" text-anchor="middle" font-size="10" fill="#AED6F1">CRM · Payments · Sessions · Vectors</text>
-
-<!-- Redis -->
-<rect x="382" y="726" width="220" height="72" rx="6" fill="#1A5276" filter="url(#sh)"/>
-<text x="492" y="750" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">Semantic Cache</text>
-<text x="492" y="767" text-anchor="middle" font-size="10" fill="#AED6F1">Redis 7.2  ·  AUTH required</text>
-<text x="492" y="782" text-anchor="middle" font-size="10" fill="#AED6F1">Tool results · LiteLLM semantic</text>
-
-<!-- Object / Doc Store -->
-<rect x="618" y="726" width="220" height="72" rx="6" fill="#154360" filter="url(#sh)"/>
-<text x="728" y="750" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">Object Storage</text>
-<text x="728" y="767" text-anchor="middle" font-size="10" fill="#AED6F1">OPA Policy Bundles  ·  S3</text>
-<text x="728" y="782" text-anchor="middle" font-size="10" fill="#AED6F1">Prompt templates  ·  Artifacts</text>
-
-<!-- Secrets -->
-<rect x="854" y="726" width="290" height="72" rx="6" fill="#0E3554" filter="url(#sh)"/>
-<text x="999" y="750" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">Secrets &amp; Config Store</text>
-<text x="999" y="767" text-anchor="middle" font-size="10" fill="#AED6F1">K8s Secrets  ·  Vault / AWS SSM</text>
-<text x="999" y="782" text-anchor="middle" font-size="10" fill="#AED6F1">API keys · JWT_SECRET · HMAC secret</text>
-
-<!-- ═══════════════════════════════════════════════════
+                <!-- Postgres -->
+                <rect x="126" y="726" width="240" height="72" rx="6" fill="#1F618D" filter="url(#sh)"/>
+                <text x="246" y="750" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">Vector Database</text>
+                <text x="246" y="767" text-anchor="middle" font-size="10" fill="#AED6F1">PostgreSQL 16 + pgvector</text>
+                <text x="246" y="782" text-anchor="middle" font-size="10" fill="#AED6F1">CRM · Payments · Sessions · Embeddings</text>
+                <!-- Redis -->
+                <rect x="382" y="726" width="220" height="72" rx="6" fill="#1A5276" filter="url(#sh)"/>
+                <text x="492" y="750" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">Semantic Cache</text>
+                <text x="492" y="767" text-anchor="middle" font-size="10" fill="#AED6F1">Redis 7.2  ·  AUTH required</text>
+                <text x="492" y="782" text-anchor="middle" font-size="10" fill="#AED6F1">Tool results · LiteLLM semantic</text>
+                <!-- Object / Doc Store -->
+                <rect x="618" y="726" width="220" height="72" rx="6" fill="#154360" filter="url(#sh)"/>
+                <text x="728" y="750" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">Object Storage</text>
+                <text x="728" y="767" text-anchor="middle" font-size="10" fill="#AED6F1">OPA Policy Bundles  ·  S3</text>
+                <text x="728" y="782" text-anchor="middle" font-size="10" fill="#AED6F1">Prompt templates  ·  Artifacts</text>
+                <!-- Secrets -->
+                <rect x="854" y="726" width="290" height="72" rx="6" fill="#0E3554" filter="url(#sh)"/>
+                <text x="999" y="750" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">Secrets &amp; Config Store</text>
+                <text x="999" y="767" text-anchor="middle" font-size="10" fill="#AED6F1">K8s Secrets  ·  Vault / AWS SSM</text>
+                <text x="999" y="782" text-anchor="middle" font-size="10" fill="#AED6F1">API keys · JWT_SECRET · HMAC secret</text>
+                <!-- ═══════════════════════════════════════════════════
      LAYER 7 — INFRASTRUCTURE
 ═══════════════════════════════════════════════════ -->
-<!-- Container Orch -->
-<rect x="126" y="838" width="196" height="120" rx="6" fill="#616A6B" filter="url(#sh)"/>
-<text x="224" y="860" text-anchor="middle" font-size="11" font-weight="700" fill="#fff">Container Orchestration</text>
-<text x="224" y="877" text-anchor="middle" font-size="10" fill="#D5D8DC">Kubernetes  ·  Helm charts</text>
-<text x="224" y="893" text-anchor="middle" font-size="10" fill="#D5D8DC">infra/helm/  ·  3 environments</text>
-<text x="224" y="909" text-anchor="middle" font-size="10" fill="#D5D8DC">values-dev / values-prod</text>
-<text x="224" y="925" text-anchor="middle" font-size="10" fill="#D5D8DC">HPA  ·  resource limits</text>
-<rect x="130" y="929" width="188" height="24" rx="3" fill="#4D5656"/>
-<text x="224" y="945" text-anchor="middle" font-size="9" fill="#E8EAEB">Docker Compose (local dev)</text>
-
-<!-- CI/CD -->
-<rect x="336" y="838" width="196" height="120" rx="6" fill="#566573" filter="url(#sh)"/>
-<text x="434" y="860" text-anchor="middle" font-size="11" font-weight="700" fill="#fff">CI / CD Pipeline</text>
-<text x="434" y="877" text-anchor="middle" font-size="10" fill="#D5D8DC">Skaffold  ·  skaffold.yaml</text>
-<text x="434" y="893" text-anchor="middle" font-size="10" fill="#D5D8DC">Profiles: local → dev → prod</text>
-<text x="434" y="909" text-anchor="middle" font-size="10" fill="#D5D8DC">Build → Render → Deploy</text>
-<text x="434" y="925" text-anchor="middle" font-size="10" fill="#D5D8DC">Image registry push on merge</text>
-<rect x="340" y="929" width="188" height="24" rx="3" fill="#4D5656"/>
-<text x="434" y="945" text-anchor="middle" font-size="9" fill="#E8EAEB">GitHub Actions / GitOps</text>
-
-<!-- IaC -->
-<rect x="546" y="838" width="196" height="120" rx="6" fill="#4D5656" filter="url(#sh)"/>
-<text x="644" y="860" text-anchor="middle" font-size="11" font-weight="700" fill="#fff">Infrastructure as Code</text>
-<text x="644" y="877" text-anchor="middle" font-size="10" fill="#D5D8DC">Terraform  ·  infra/terraform/</text>
-<text x="644" y="893" text-anchor="middle" font-size="10" fill="#D5D8DC">RDS PostgreSQL  ·  pgvector</text>
-<text x="644" y="909" text-anchor="middle" font-size="10" fill="#D5D8DC">S3 state  ·  DynamoDB lock</text>
-<text x="644" y="925" text-anchor="middle" font-size="10" fill="#D5D8DC">Per-env .tfvars</text>
-<rect x="550" y="929" width="188" height="24" rx="3" fill="#3D4849"/>
-<text x="644" y="945" text-anchor="middle" font-size="9" fill="#E8EAEB">AWS EKS / RDS / ElastiCache</text>
-
-<!-- Networking -->
-<rect x="756" y="838" width="196" height="120" rx="6" fill="#424949" filter="url(#sh)"/>
-<text x="854" y="860" text-anchor="middle" font-size="11" font-weight="700" fill="#fff">Networking &amp; Mesh</text>
-<text x="854" y="877" text-anchor="middle" font-size="10" fill="#D5D8DC">VPC  ·  Private subnets</text>
-<text x="854" y="893" text-anchor="middle" font-size="10" fill="#D5D8DC">Service mesh (mTLS optional)</text>
-<text x="854" y="909" text-anchor="middle" font-size="10" fill="#D5D8DC">ai-network bridge (local)</text>
-<text x="854" y="925" text-anchor="middle" font-size="10" fill="#D5D8DC">DB on 127.0.0.1 loopback</text>
-<rect x="760" y="929" width="188" height="24" rx="3" fill="#363B3B"/>
-<text x="854" y="945" text-anchor="middle" font-size="9" fill="#E8EAEB">No direct egress from data layer</text>
-
-<!-- Policy Engine -->
-<rect x="966" y="838" width="178" height="120" rx="6" fill="#E74C3C" filter="url(#sh)"/>
-<text x="1055" y="860" text-anchor="middle" font-size="11" font-weight="700" fill="#fff">Policy Engine</text>
-<text x="1055" y="877" text-anchor="middle" font-size="10" fill="#FADBD8">OPA v0.65  ·  :8181</text>
-<text x="1055" y="893" text-anchor="middle" font-size="10" fill="#FADBD8">tool_auth.rego</text>
-<text x="1055" y="909" text-anchor="middle" font-size="10" fill="#FADBD8">rm_prep_authz.rego</text>
-<text x="1055" y="925" text-anchor="middle" font-size="10" fill="#FADBD8">Rego unit tests</text>
-<rect x="970" y="929" width="170" height="24" rx="3" fill="#C0392B"/>
-<text x="1055" y="945" text-anchor="middle" font-size="9" fill="#FADBD8">Bundle server (prod OPA data)</text>
-
-<!-- ═══════════════════════════════════════════════════
+                <!-- Container Orch -->
+                <rect x="126" y="838" width="196" height="120" rx="6" fill="#616A6B" filter="url(#sh)"/>
+                <text x="224" y="860" text-anchor="middle" font-size="11" font-weight="700" fill="#fff">Container Orchestration</text>
+                <text x="224" y="877" text-anchor="middle" font-size="10" fill="#D5D8DC">Kubernetes  ·  Helm charts</text>
+                <text x="224" y="893" text-anchor="middle" font-size="10" fill="#D5D8DC">infra/helm/  ·  3 environments</text>
+                <text x="224" y="909" text-anchor="middle" font-size="10" fill="#D5D8DC">values-dev / values-prod</text>
+                <text x="224" y="925" text-anchor="middle" font-size="10" fill="#D5D8DC">HPA  ·  resource limits</text>
+                <rect x="130" y="929" width="188" height="24" rx="3" fill="#4D5656"/>
+                <text x="224" y="945" text-anchor="middle" font-size="9" fill="#E8EAEB">Docker Compose (local dev)</text>
+                <!-- CI/CD -->
+                <rect x="336" y="838" width="196" height="120" rx="6" fill="#566573" filter="url(#sh)"/>
+                <text x="434" y="860" text-anchor="middle" font-size="11" font-weight="700" fill="#fff">CI / CD Pipeline</text>
+                <text x="434" y="877" text-anchor="middle" font-size="10" fill="#D5D8DC">Skaffold  ·  skaffold.yaml</text>
+                <text x="434" y="893" text-anchor="middle" font-size="10" fill="#D5D8DC">Profiles: local → dev → prod</text>
+                <text x="434" y="909" text-anchor="middle" font-size="10" fill="#D5D8DC">Build → Render → Deploy</text>
+                <text x="434" y="925" text-anchor="middle" font-size="10" fill="#D5D8DC">Image registry push on merge</text>
+                <rect x="340" y="929" width="188" height="24" rx="3" fill="#4D5656"/>
+                <text x="434" y="945" text-anchor="middle" font-size="9" fill="#E8EAEB">GitHub Actions / GitOps</text>
+                <!-- IaC -->
+                <rect x="546" y="838" width="196" height="120" rx="6" fill="#4D5656" filter="url(#sh)"/>
+                <text x="644" y="860" text-anchor="middle" font-size="11" font-weight="700" fill="#fff">Infrastructure as Code</text>
+                <text x="644" y="877" text-anchor="middle" font-size="10" fill="#D5D8DC">Terraform  ·  infra/terraform/</text>
+                <text x="644" y="893" text-anchor="middle" font-size="10" fill="#D5D8DC">RDS PostgreSQL  ·  pgvector</text>
+                <text x="644" y="909" text-anchor="middle" font-size="10" fill="#D5D8DC">S3 state  ·  DynamoDB lock</text>
+                <text x="644" y="925" text-anchor="middle" font-size="10" fill="#D5D8DC">Per-env .tfvars</text>
+                <rect x="550" y="929" width="188" height="24" rx="3" fill="#3D4849"/>
+                <text x="644" y="945" text-anchor="middle" font-size="9" fill="#E8EAEB">AWS EKS / RDS / ElastiCache</text>
+                <!-- Networking -->
+                <rect x="756" y="838" width="196" height="120" rx="6" fill="#424949" filter="url(#sh)"/>
+                <text x="854" y="860" text-anchor="middle" font-size="11" font-weight="700" fill="#fff">Networking &amp; Mesh</text>
+                <text x="854" y="877" text-anchor="middle" font-size="10" fill="#D5D8DC">VPC  ·  Private subnets</text>
+                <text x="854" y="893" text-anchor="middle" font-size="10" fill="#D5D8DC">Service mesh (mTLS optional)</text>
+                <text x="854" y="909" text-anchor="middle" font-size="10" fill="#D5D8DC">ai-network bridge (local)</text>
+                <text x="854" y="925" text-anchor="middle" font-size="10" fill="#D5D8DC">DB on 127.0.0.1 loopback</text>
+                <rect x="760" y="929" width="188" height="24" rx="3" fill="#363B3B"/>
+                <text x="854" y="945" text-anchor="middle" font-size="9" fill="#E8EAEB">No direct egress from data layer</text>
+                <!-- Policy Engine -->
+                <rect x="966" y="838" width="178" height="120" rx="6" fill="#E74C3C" filter="url(#sh)"/>
+                <text x="1055" y="860" text-anchor="middle" font-size="11" font-weight="700" fill="#fff">Policy Engine</text>
+                <text x="1055" y="877" text-anchor="middle" font-size="10" fill="#FADBD8">OPA v0.65  ·  :8181</text>
+                <text x="1055" y="893" text-anchor="middle" font-size="10" fill="#FADBD8">tool_auth.rego</text>
+                <text x="1055" y="909" text-anchor="middle" font-size="10" fill="#FADBD8">rm_prep_authz.rego</text>
+                <text x="1055" y="925" text-anchor="middle" font-size="10" fill="#FADBD8">Rego unit tests</text>
+                <rect x="970" y="929" width="170" height="24" rx="3" fill="#C0392B"/>
+                <text x="1055" y="945" text-anchor="middle" font-size="9" fill="#FADBD8">Bundle server (prod OPA data)</text>
+                <!-- ═══════════════════════════════════════════════════
      SECURITY CROSS-CUT COMPONENTS (left column)
 ═══════════════════════════════════════════════════ -->
-<rect x="18" y="50"  width="76" height="44" rx="4" fill="#E74C3C"/>
-<text x="59" y="68"  text-anchor="middle" font-size="9" font-weight="700" fill="#fff">OAuth 2.0</text>
-<text x="59" y="82"  text-anchor="middle" font-size="8" fill="#FADBD8">RS256 / PKCE</text>
-
-<rect x="18" y="162" width="76" height="44" rx="4" fill="#C0392B"/>
-<text x="59" y="180" text-anchor="middle" font-size="9" font-weight="700" fill="#fff">JWT Claims</text>
-<text x="59" y="194" text-anchor="middle" font-size="8" fill="#FADBD8">role · accounts</text>
-
-<rect x="18" y="297" width="76" height="44" rx="4" fill="#A93226"/>
-<text x="59" y="315" text-anchor="middle" font-size="9" font-weight="700" fill="#fff">HMAC-SHA256</text>
-<text x="59" y="329" text-anchor="middle" font-size="8" fill="#FADBD8">X-Agent-Context</text>
-
-<rect x="18" y="429" width="76" height="36" rx="4" fill="#922B21"/>
-<text x="59" y="444" text-anchor="middle" font-size="9" font-weight="700" fill="#fff">AgentContext</text>
-<text x="59" y="458" text-anchor="middle" font-size="8" fill="#FADBD8">immutable / frozen</text>
-
-<rect x="18" y="576" width="76" height="44" rx="4" fill="#7B241C"/>
-<text x="59" y="593" text-anchor="middle" font-size="9" font-weight="700" fill="#fff">Row Filter</text>
-<text x="59" y="607" text-anchor="middle" font-size="8" fill="#FADBD8">+ Col Mask</text>
-
-<rect x="18" y="738" width="76" height="36" rx="4" fill="#641E16"/>
-<text x="57" y="753" text-anchor="middle" font-size="9" font-weight="700" fill="#fff">Encrypted</text>
-<text x="57" y="767" text-anchor="middle" font-size="8" fill="#FADBD8">at rest + transit</text>
-
-<rect x="18" y="870" width="76" height="44" rx="4" fill="#4D0E09"/>
-<text x="57" y="888" text-anchor="middle" font-size="9" font-weight="700" fill="#fff">Secrets Mgmt</text>
-<text x="57" y="902" text-anchor="middle" font-size="8" fill="#FADBD8">K8s / Vault</text>
-
-<!-- ═══════════════════════════════════════════════════
+                <rect x="18" y="50" width="76" height="44" rx="4" fill="#E74C3C"/>
+                <text x="59" y="68" text-anchor="middle" font-size="9" font-weight="700" fill="#fff">OAuth 2.0</text>
+                <text x="59" y="82" text-anchor="middle" font-size="8" fill="#FADBD8">RS256 / PKCE</text>
+                <rect x="18" y="162" width="76" height="44" rx="4" fill="#C0392B"/>
+                <text x="59" y="180" text-anchor="middle" font-size="9" font-weight="700" fill="#fff">JWT Claims</text>
+                <text x="59" y="194" text-anchor="middle" font-size="8" fill="#FADBD8">role · accounts</text>
+                <rect x="18" y="297" width="76" height="44" rx="4" fill="#A93226"/>
+                <text x="59" y="315" text-anchor="middle" font-size="9" font-weight="700" fill="#fff">HMAC-SHA256</text>
+                <text x="59" y="329" text-anchor="middle" font-size="8" fill="#FADBD8">X-Agent-Context</text>
+                <rect x="18" y="429" width="76" height="36" rx="4" fill="#922B21"/>
+                <text x="59" y="444" text-anchor="middle" font-size="9" font-weight="700" fill="#fff">AgentContext</text>
+                <text x="59" y="458" text-anchor="middle" font-size="8" fill="#FADBD8">immutable / frozen</text>
+                <rect x="18" y="576" width="76" height="44" rx="4" fill="#7B241C"/>
+                <text x="59" y="593" text-anchor="middle" font-size="9" font-weight="700" fill="#fff">Row Filter</text>
+                <text x="59" y="607" text-anchor="middle" font-size="8" fill="#FADBD8">+ Col Mask</text>
+                <rect x="18" y="738" width="76" height="36" rx="4" fill="#641E16"/>
+                <text x="57" y="753" text-anchor="middle" font-size="9" font-weight="700" fill="#fff">Encrypted</text>
+                <text x="57" y="767" text-anchor="middle" font-size="8" fill="#FADBD8">at rest + transit</text>
+                <rect x="18" y="870" width="76" height="44" rx="4" fill="#4D0E09"/>
+                <text x="57" y="888" text-anchor="middle" font-size="9" font-weight="700" fill="#fff">Secrets Mgmt</text>
+                <text x="57" y="902" text-anchor="middle" font-size="8" fill="#FADBD8">K8s / Vault</text>
+                <!-- ═══════════════════════════════════════════════════
      OBSERVABILITY CROSS-CUT COMPONENTS (right column)
 ═══════════════════════════════════════════════════ -->
-<rect x="1166" y="50"  width="76" height="44" rx="4" fill="#6C5CE7"/>
-<text x="1207" y="68"  text-anchor="middle" font-size="9" font-weight="700" fill="#fff">Auth Events</text>
-<text x="1207" y="82"  text-anchor="middle" font-size="8" fill="#E8DAEF">login · token</text>
-
-<rect x="1166" y="164" width="76" height="40" rx="4" fill="#5A4BD4"/>
-<text x="1207" y="181" text-anchor="middle" font-size="9" font-weight="700" fill="#fff">Access Audit</text>
-<text x="1207" y="195" text-anchor="middle" font-size="8" fill="#E8DAEF">deny / allow log</text>
-
-<rect x="1166" y="297" width="76" height="44" rx="4" fill="#4A3BB8"/>
-<text x="1207" y="314" text-anchor="middle" font-size="9" font-weight="700" fill="#fff">OTel Traces</text>
-<text x="1207" y="328" text-anchor="middle" font-size="8" fill="#E8DAEF">per-request IDs</text>
-
-<rect x="1166" y="429" width="76" height="36" rx="4" fill="#5A4BD4"/>
-<text x="1207" y="444" text-anchor="middle" font-size="9" font-weight="700" fill="#fff">structlog JSON</text>
-<text x="1207" y="458" text-anchor="middle" font-size="8" fill="#E8DAEF">all layers</text>
-
-<rect x="1166" y="576" width="76" height="44" rx="4" fill="#6C5CE7"/>
-<text x="1207" y="593" text-anchor="middle" font-size="9" font-weight="700" fill="#fff">Cache Metrics</text>
-<text x="1207" y="607" text-anchor="middle" font-size="8" fill="#E8DAEF">hit / miss / TTL</text>
-
-<rect x="1166" y="738" width="76" height="36" rx="4" fill="#4A3BB8"/>
-<text x="1205" y="753" text-anchor="middle" font-size="9" font-weight="700" fill="#fff">Query Latency</text>
-<text x="1205" y="767" text-anchor="middle" font-size="8" fill="#E8DAEF">DB + Redis</text>
-
-<rect x="1166" y="870" width="76" height="44" rx="4" fill="#5A4BD4"/>
-<text x="1205" y="888" text-anchor="middle" font-size="9" font-weight="700" fill="#fff">LLM Evals</text>
-<text x="1205" y="902" text-anchor="middle" font-size="8" fill="#E8DAEF">Dynatrace / judge</text>
-
-<!-- ═══════════════════════════════════════════════════
+                <rect x="1166" y="50" width="76" height="44" rx="4" fill="#6C5CE7"/>
+                <text x="1207" y="68" text-anchor="middle" font-size="9" font-weight="700" fill="#fff">Auth Events</text>
+                <text x="1207" y="82" text-anchor="middle" font-size="8" fill="#E8DAEF">login · token</text>
+                <rect x="1166" y="164" width="76" height="40" rx="4" fill="#5A4BD4"/>
+                <text x="1207" y="181" text-anchor="middle" font-size="9" font-weight="700" fill="#fff">Access Audit</text>
+                <text x="1207" y="195" text-anchor="middle" font-size="8" fill="#E8DAEF">deny / allow log</text>
+                <rect x="1166" y="297" width="76" height="44" rx="4" fill="#4A3BB8"/>
+                <text x="1207" y="314" text-anchor="middle" font-size="9" font-weight="700" fill="#fff">OTel Traces</text>
+                <text x="1207" y="328" text-anchor="middle" font-size="8" fill="#E8DAEF">per-request IDs</text>
+                <rect x="1166" y="429" width="76" height="36" rx="4" fill="#5A4BD4"/>
+                <text x="1207" y="444" text-anchor="middle" font-size="9" font-weight="700" fill="#fff">structlog JSON</text>
+                <text x="1207" y="458" text-anchor="middle" font-size="8" fill="#E8DAEF">all layers</text>
+                <rect x="1166" y="576" width="76" height="44" rx="4" fill="#6C5CE7"/>
+                <text x="1207" y="593" text-anchor="middle" font-size="9" font-weight="700" fill="#fff">Cache Metrics</text>
+                <text x="1207" y="607" text-anchor="middle" font-size="8" fill="#E8DAEF">hit / miss / TTL</text>
+                <rect x="1166" y="738" width="76" height="36" rx="4" fill="#4A3BB8"/>
+                <text x="1205" y="753" text-anchor="middle" font-size="9" font-weight="700" fill="#fff">Query Latency</text>
+                <text x="1205" y="767" text-anchor="middle" font-size="8" fill="#E8DAEF">DB + Redis</text>
+                <rect x="1166" y="870" width="76" height="44" rx="4" fill="#5A4BD4"/>
+                <text x="1205" y="888" text-anchor="middle" font-size="9" font-weight="700" fill="#fff">LLM Evals</text>
+                <text x="1205" y="902" text-anchor="middle" font-size="8" fill="#E8DAEF">Dynatrace / judge</text>
+                <!-- ═══════════════════════════════════════════════════
      EXTERNAL SYSTEMS BANNER (bottom external row)
 ═══════════════════════════════════════════════════ -->
-<rect x="108" y="1198" width="1044" height="0" rx="0" fill="none"/>
-
-<!-- ═══════════════════════════════════════════════════
+                <rect x="108" y="1198" width="1044" height="0" rx="0" fill="none"/>
+                <!-- ═══════════════════════════════════════════════════
      VERTICAL FLOW ARROWS (layer-to-layer)
 ═══════════════════════════════════════════════════ -->
-<!-- L1 → L2 -->
-
-<!-- L2 → L3 -->
-
-<!-- L3 → L4 (SDK) -->
-
-<!-- L4 → L5 (MCP) -->
-
-<!-- L5 → L6 (Data) -->
-
-<!-- L6 → L7 (Infra) -->
-
-<!-- Security column flow arrows -->
-
-<!-- Observability column flow arrows -->
-
-<!-- Horizontal security arrows from left col into layers -->
-
-<!-- Horizontal observability arrows from layers into right col -->
-
-<!-- ═══════════════════════════════════════════════════
+                <!-- L1 → L2 -->
+                <!-- L2 → L3 -->
+                <!-- L3 → L4 (SDK) -->
+                <!-- L4 → L5 (MCP) -->
+                <!-- L5 → L6 (Data) -->
+                <!-- L6 → L7 (Infra) -->
+                <!-- Security column flow arrows -->
+                <!-- Observability column flow arrows -->
+                <!-- Horizontal security arrows from left col into layers -->
+                <!-- Horizontal observability arrows from layers into right col -->
+                <!-- ═══════════════════════════════════════════════════
      LAYER 8 — MODEL LAYER
 ═══════════════════════════════════════════════════ -->
-<rect x="108" y="980"  width="1044" height="210" rx="5" fill="url(#g-model)" stroke="#E67E22" stroke-width="1.5"/>
-<text x="118" y="996"  font-size="10" font-weight="700" fill="#784212" letter-spacing="0.8">L8  ·  MODEL LAYER  (LLM Routing  ·  Guardrails  ·  Evaluation)</text>
-
-<!-- Guardrail enforcement bar -->
-<rect x="126" y="1004" width="1018" height="22" rx="4" fill="#C0392B"/>
-<text x="635" y="1019" text-anchor="middle" font-size="10" font-weight="700" fill="#fff">
-  GUARDRAIL ENFORCEMENT  ·  All LLM calls pass through validators  ·  Constitutional AI + PII filter + injection detection  ·  Fail-closed default
+                <rect x="108" y="980" width="1044" height="210" rx="5" fill="url(#g-model)" stroke="#E67E22" stroke-width="1.5"/>
+                <text x="118" y="996" font-size="10" font-weight="700" fill="#784212" letter-spacing="0.8">L8  ·  MODEL LAYER  (LLM Routing  ·  Guardrails  ·  Evaluation)</text>
+                <!-- Guardrail enforcement bar -->
+                <rect x="126" y="1004" width="1018" height="22" rx="4" fill="#C0392B"/>
+                <text x="635" y="1019" text-anchor="middle" font-size="10" font-weight="700" fill="#fff">
+                    GUARDRAIL ENFORCEMENT  ·  All LLM calls pass through validators  ·  Constitutional AI + PII filter + injection detection  ·  Fail-closed default
 </text>
-
-<!-- Anthropic Claude models -->
-<rect x="126" y="1034" width="228" height="140" rx="6" fill="#4A235A" filter="url(#sh)"/>
-<text x="240" y="1057" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">Anthropic Claude</text>
-<text x="240" y="1073" text-anchor="middle" font-size="10" fill="#D2B4DE">Haiku 3.5  ·  fast  ·  &lt;100ms  ·  cost-efficient</text>
-<text x="240" y="1088" text-anchor="middle" font-size="10" fill="#D2B4DE">Sonnet 4.6  ·  balanced  ·  default agent LLM</text>
-<text x="240" y="1103" text-anchor="middle" font-size="10" fill="#D2B4DE">Opus 4  ·  advanced reasoning  ·  vision</text>
-<rect x="130" y="1142" width="220" height="22" rx="3" fill="#3B1A4A"/>
-<text x="240" y="1157" text-anchor="middle" font-size="9" fill="#E8DAEF">claude.ai API  ·  AWS Bedrock  ·  via LiteLLM</text>
-
-<!-- OpenAI models -->
-<rect x="366" y="1034" width="228" height="140" rx="6" fill="#0B5E6D" filter="url(#sh)"/>
-<text x="480" y="1057" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">OpenAI GPT</text>
-<text x="480" y="1073" text-anchor="middle" font-size="10" fill="#A2D9CE">GPT-4o-mini  ·  lightweight  ·  embeddings</text>
-<text x="480" y="1088" text-anchor="middle" font-size="10" fill="#A2D9CE">GPT-4o  ·  multimodal  ·  tool use  ·  ~1s</text>
-<text x="480" y="1103" text-anchor="middle" font-size="10" fill="#A2D9CE">o1 / o3  ·  deep reasoning  ·  planning</text>
-<rect x="370" y="1142" width="220" height="22" rx="3" fill="#084E5B"/>
-<text x="480" y="1157" text-anchor="middle" font-size="9" fill="#A2D9CE">OpenAI API  ·  Azure OpenAI Service  ·  via LiteLLM</text>
-
-<!-- Open-Source / Ollama models -->
-<rect x="606" y="1034" width="228" height="140" rx="6" fill="#7E5109" filter="url(#sh)"/>
-<text x="720" y="1057" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">Open-Source (Ollama / vLLM)</text>
-<text x="720" y="1073" text-anchor="middle" font-size="10" fill="#FAD7A0">Phi-3.5-mini 3B  ·  edge  ·  sub-50ms</text>
-<text x="720" y="1088" text-anchor="middle" font-size="10" fill="#FAD7A0">Llama 3.3 70B  ·  balanced  ·  self-hosted</text>
-<text x="720" y="1103" text-anchor="middle" font-size="10" fill="#FAD7A0">Llama 3.1 405B  ·  Mixtral 8x22B  ·  large</text>
-<rect x="610" y="1142" width="220" height="22" rx="3" fill="#6E4506"/>
-<text x="720" y="1157" text-anchor="middle" font-size="9" fill="#FAD7A0">Ollama  ·  vLLM  ·  HuggingFace Hub  ·  local</text>
-
-<!-- Guardrails & Safety box -->
-<rect x="846" y="1034" width="298" height="140" rx="6" fill="#7B241C" filter="url(#sh)"/>
-<text x="995" y="1057" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">Guardrails &amp; Safety</text>
-<text x="995" y="1073" text-anchor="middle" font-size="10" fill="#FADBD8">LlamaGuard  ·  NeMo Guardrails</text>
-<text x="995" y="1088" text-anchor="middle" font-size="10" fill="#FADBD8">Prompt injection  ·  jailbreak detection</text>
-<text x="995" y="1103" text-anchor="middle" font-size="10" fill="#FADBD8">Output validation  ·  PII  ·  toxicity filter</text>
-<rect x="850" y="1142" width="290" height="22" rx="3" fill="#641E16"/>
-<text x="995" y="1157" text-anchor="middle" font-size="9" fill="#FADBD8">Constitutional AI  ·  confidence scoring  ·  audit log</text>
-
-<!-- ═══════════════════════════════════════════════════
+                <!-- Anthropic Claude models -->
+                <rect x="126" y="1034" width="228" height="140" rx="6" fill="#4A235A" filter="url(#sh)"/>
+                <text x="240" y="1057" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">Anthropic Claude</text>
+                <text x="240" y="1073" text-anchor="middle" font-size="10" fill="#D2B4DE">Haiku 3.5  ·  fast  ·  &lt;100ms  ·  cost-efficient</text>
+                <text x="240" y="1088" text-anchor="middle" font-size="10" fill="#D2B4DE">Sonnet 4.6  ·  balanced  ·  default agent LLM</text>
+                <text x="240" y="1103" text-anchor="middle" font-size="10" fill="#D2B4DE">Opus 4  ·  advanced reasoning  ·  vision</text>
+                <rect x="130" y="1142" width="220" height="22" rx="3" fill="#3B1A4A"/>
+                <text x="240" y="1157" text-anchor="middle" font-size="9" fill="#E8DAEF">claude.ai API  ·  AWS Bedrock  ·  via LiteLLM</text>
+                <!-- OpenAI models -->
+                <rect x="366" y="1034" width="228" height="140" rx="6" fill="#0B5E6D" filter="url(#sh)"/>
+                <text x="480" y="1057" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">OpenAI GPT</text>
+                <text x="480" y="1073" text-anchor="middle" font-size="10" fill="#A2D9CE">GPT-4o-mini  ·  lightweight  ·  embeddings</text>
+                <text x="480" y="1088" text-anchor="middle" font-size="10" fill="#A2D9CE">GPT-4o  ·  multimodal  ·  tool use  ·  ~1s</text>
+                <text x="480" y="1103" text-anchor="middle" font-size="10" fill="#A2D9CE">o1 / o3  ·  deep reasoning  ·  planning</text>
+                <rect x="370" y="1142" width="220" height="22" rx="3" fill="#084E5B"/>
+                <text x="480" y="1157" text-anchor="middle" font-size="9" fill="#A2D9CE">OpenAI API  ·  Azure OpenAI Service  ·  via LiteLLM</text>
+                <!-- Open-Source / Ollama models -->
+                <rect x="606" y="1034" width="228" height="140" rx="6" fill="#7E5109" filter="url(#sh)"/>
+                <text x="720" y="1057" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">Open-Source (Ollama / vLLM)</text>
+                <text x="720" y="1073" text-anchor="middle" font-size="10" fill="#FAD7A0">Phi-3.5-mini 3B  ·  edge  ·  sub-50ms</text>
+                <text x="720" y="1088" text-anchor="middle" font-size="10" fill="#FAD7A0">Llama 3.3 70B  ·  balanced  ·  self-hosted</text>
+                <text x="720" y="1103" text-anchor="middle" font-size="10" fill="#FAD7A0">Llama 3.1 405B  ·  Mixtral 8x22B  ·  large</text>
+                <rect x="610" y="1142" width="220" height="22" rx="3" fill="#6E4506"/>
+                <text x="720" y="1157" text-anchor="middle" font-size="9" fill="#FAD7A0">Ollama  ·  vLLM  ·  HuggingFace Hub  ·  local</text>
+                <!-- Guardrails & Safety box -->
+                <rect x="846" y="1034" width="298" height="140" rx="6" fill="#7B241C" filter="url(#sh)"/>
+                <text x="995" y="1057" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">Guardrails &amp; Safety</text>
+                <text x="995" y="1073" text-anchor="middle" font-size="10" fill="#FADBD8">LlamaGuard  ·  NeMo Guardrails</text>
+                <text x="995" y="1088" text-anchor="middle" font-size="10" fill="#FADBD8">Prompt injection  ·  jailbreak detection</text>
+                <text x="995" y="1103" text-anchor="middle" font-size="10" fill="#FADBD8">Output validation  ·  PII  ·  toxicity filter</text>
+                <rect x="850" y="1142" width="290" height="22" rx="3" fill="#641E16"/>
+                <text x="995" y="1157" text-anchor="middle" font-size="9" fill="#FADBD8">Constitutional AI  ·  confidence scoring  ·  audit log</text>
+                <!-- ═══════════════════════════════════════════════════
      SECURITY CROSS-CUT — L8 box
 ═══════════════════════════════════════════════════ -->
-<rect x="18" y="1063" width="76" height="44" rx="4" fill="#3D0A06"/>
-<text x="57" y="1081"  text-anchor="middle" font-size="9" font-weight="700" fill="#fff">Model Auth</text>
-<text x="57" y="1095"  text-anchor="middle" font-size="8" fill="#FADBD8">API keys · quotas</text>
-
-<!-- ═══════════════════════════════════════════════════
+                <rect x="18" y="1063" width="76" height="44" rx="4" fill="#3D0A06"/>
+                <text x="57" y="1081" text-anchor="middle" font-size="9" font-weight="700" fill="#fff">Model Auth</text>
+                <text x="57" y="1095" text-anchor="middle" font-size="8" fill="#FADBD8">API keys · quotas</text>
+                <!-- ═══════════════════════════════════════════════════
      OBSERVABILITY CROSS-CUT — L8 box
 ═══════════════════════════════════════════════════ -->
-<rect x="1166" y="1063" width="76" height="44" rx="4" fill="#3A2FA8"/>
-<text x="1205" y="1081"  text-anchor="middle" font-size="9" font-weight="700" fill="#fff">LLM Metrics</text>
-<text x="1205" y="1095"  text-anchor="middle" font-size="8" fill="#E8DAEF">latency · cost · tokens</text>
-
-<!-- ═══════════════════════════════════════════════════
+                <rect x="1166" y="1063" width="76" height="44" rx="4" fill="#3A2FA8"/>
+                <text x="1205" y="1081" text-anchor="middle" font-size="9" font-weight="700" fill="#fff">LLM Metrics</text>
+                <text x="1205" y="1095" text-anchor="middle" font-size="8" fill="#E8DAEF">latency · cost · tokens</text>
+                <!-- ═══════════════════════════════════════════════════
      L7 → L8 ARROWS
 ═══════════════════════════════════════════════════ -->
-
-<!-- Security column L7→L8 flow arrow -->
-<!-- Observability column L7→L8 flow arrow -->
-
-<!-- Horizontal security arrow into L8 -->
-<!-- Horizontal observability arrow from L8 -->
-
-</svg>
-</div>
-
-<!-- Legend -->
-<div class="legend-row">
-  <span style="font-size:11px;font-weight:700;color:#1B2A47;margin-right:4px;">LAYERS:</span>
-  <div class="legend-item"><div class="ls" style="background:#D6EAF8;border:1.5px solid #2E86C1"></div>L1 Client</div>
-  <div class="legend-item"><div class="ls" style="background:#FADBD8;border:1.5px solid #C0392B"></div>L2 Gateway &amp; Identity</div>
-  <div class="legend-item"><div class="ls" style="background:#D5F5E3;border:1.5px solid #1ABC9C"></div>L3 Agent Orchestration</div>
-  <div class="legend-item"><div class="ls" style="background:#E8DAEF;border:1.5px solid #8E44AD"></div>L4 Platform SDK</div>
-  <div class="legend-item"><div class="ls" style="background:#FCF3CF;border:1.5px solid #D4AC0D"></div>L5 MCP Tool Servers</div>
-  <div class="legend-item"><div class="ls" style="background:#D6E8FF;border:1.5px solid #2980B9"></div>L6 Data &amp; Cache</div>
-  <div class="legend-item"><div class="ls" style="background:#E5E8EB;border:1.5px solid #7F8C8D"></div>L7 Infrastructure</div>
-  <div class="legend-item"><div class="ls" style="background:#FDECEA;border:1.5px solid #E67E22"></div>L8 Model &amp; Guardrails</div>
-  <span style="font-size:11px;font-weight:700;color:#1B2A47;margin-left:12px;margin-right:4px;">CROSS-CUTTING:</span>
-  <div class="legend-item"><div class="ls" style="background:#FADBD8;border:1.5px solid #E74C3C"></div>Security &amp; Zero-Trust (left)</div>
-  <div class="legend-item"><div class="ls" style="background:#F3EFFD;border:1.5px solid #6C5CE7"></div>Observability &amp; Eval (right)</div>
-  <div class="legend-item">
-    <svg width="28" height="12"><polygon points="20,3 26,6 20,9" fill="#8295AE"/></svg>
-    Data / control flow
-  </div>
-</div>
-</body>
+                <!-- Security column L7→L8 flow arrow -->
+                <!-- Observability column L7→L8 flow arrow -->
+                <!-- Horizontal security arrow into L8 -->
+                <!-- Horizontal observability arrow from L8 -->
+            </svg>
+        </div>
+        <!-- Legend -->
+        <div class="legend-row">
+            <span style="font-size:11px;font-weight:700;color:#1B2A47;margin-right:4px;">LAYERS:</span>
+            <div class="legend-item">
+                <div class="ls" style="background:#D6EAF8;border:1.5px solid #2E86C1"></div>                L1 Client
+            </div>
+            <div class="legend-item">
+                <div class="ls" style="background:#FADBD8;border:1.5px solid #C0392B"></div>                L2 Gateway &amp; Identity
+            </div>
+            <div class="legend-item">
+                <div class="ls" style="background:#D5F5E3;border:1.5px solid #1ABC9C"></div>                L3 Agent Orchestration
+            </div>
+            <div class="legend-item">
+                <div class="ls" style="background:#E8DAEF;border:1.5px solid #8E44AD"></div>                L4 Platform SDK
+            </div>
+            <div class="legend-item">
+                <div class="ls" style="background:#FCF3CF;border:1.5px solid #D4AC0D"></div>                L5 MCP Tool Servers
+            </div>
+            <div class="legend-item">
+                <div class="ls" style="background:#D6E8FF;border:1.5px solid #2980B9"></div>                L6 Data &amp; Cache
+            </div>
+            <div class="legend-item">
+                <div class="ls" style="background:#E5E8EB;border:1.5px solid #7F8C8D"></div>                L7 Infrastructure
+            </div>
+            <div class="legend-item">
+                <div class="ls" style="background:#FDECEA;border:1.5px solid #E67E22"></div>                L8 Model &amp; Guardrails
+            </div>
+            <span style="font-size:11px;font-weight:700;color:#1B2A47;margin-left:12px;margin-right:4px;">CROSS-CUTTING:</span>
+            <div class="legend-item">
+                <div class="ls" style="background:#FADBD8;border:1.5px solid #E74C3C"></div>                Security &amp; Zero-Trust (left)
+            </div>
+            <div class="legend-item">
+                <div class="ls" style="background:#F3EFFD;border:1.5px solid #6C5CE7"></div>                Observability &amp; Eval (right)
+            </div>
+            <div class="legend-item">
+                <svg width="28" height="12">
+                    <polygon points="20,3 26,6 20,9" fill="#8295AE"/>
+                </svg>
+                Data / control flow
+            </div>
+        </div>
+    </body>
 </html>

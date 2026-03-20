@@ -20,7 +20,6 @@ Security fixes applied:
 """
 import json
 import os
-import sys
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Optional
@@ -29,6 +28,7 @@ import asyncpg
 from mcp.server.fastmcp import FastMCP
 
 from platform_sdk import MCPConfig, OpaClient, ToolResultCache, configure_logging, get_logger
+from platform_sdk.auth import assert_secrets_configured
 
 configure_logging()
 log = get_logger(__name__)
@@ -47,17 +47,7 @@ PORT = int(os.environ.get("PORT", 8081))
 _PII_ALLOWED_ROLES = {"rm", "senior_rm", "manager", "compliance_officer"}
 
 
-# ---- Startup secret assertion -----------------------------------------------
-
-def _assert_secrets() -> None:
-    env = os.environ.get("ENVIRONMENT", "prod")
-    secret = os.environ.get("JWT_SECRET", "dev-secret-change-in-prod")
-    if env == "prod" and secret == "dev-secret-change-in-prod":
-        log.error(
-            "startup_blocked",
-            reason="JWT_SECRET has not been rotated from the default value in a prod environment",
-        )
-        sys.exit(1)
+# ---- Startup secret assertion (delegated to SDK) ----------------------------
 
 
 # ---- Lifespan ---------------------------------------------------------------
@@ -66,7 +56,7 @@ def _assert_secrets() -> None:
 async def _lifespan(server: FastMCP):
     global _opa, _cache, _pool
 
-    _assert_secrets()
+    assert_secrets_configured()
 
     _opa = OpaClient(_config)
     log.info("opa_client_ready", url=_config.opa_url)
@@ -83,6 +73,7 @@ async def _lifespan(server: FastMCP):
         database=os.environ.get("DB_NAME", "ai_memory"),
         min_size=2,
         max_size=10,
+        statement_cache_size=_config.statement_cache_size,
     )
     log.info("salesforce_mcp_ready")
     yield
