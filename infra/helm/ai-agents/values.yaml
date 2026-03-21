@@ -1,6 +1,9 @@
 image:
   repository: enterprise-ai/ai-agents
-  tag: "latest"
+  # tag must always be overridden by CI with the git SHA, e.g.:
+  #   helm upgrade ... --set image.tag=$(git rev-parse --short HEAD)
+  # Never deploy with "latest" — use a specific SHA so rollbacks are reliable.
+  tag: "REPLACE_ME"
   pullPolicy: IfNotPresent
 
 replicaCount: 2

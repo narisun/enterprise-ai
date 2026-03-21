@@ -56,7 +56,7 @@ def jwt_secret() -> str:
 
 # ── Database pool (session-scoped — one pool for the entire test run) ──────────
 
-@pytest_asyncio.fixture(scope="session")
+@pytest_asyncio.fixture(scope="session", loop_scope="session")
 async def db_pool(db_dsn):
     pool = await asyncpg.create_pool(**db_dsn, min_size=1, max_size=5)
     yield pool
@@ -65,13 +65,13 @@ async def db_pool(db_dsn):
 
 # ── HTTP clients ───────────────────────────────────────────────────────────────
 
-@pytest_asyncio.fixture(scope="session")
+@pytest_asyncio.fixture(scope="session", loop_scope="session")
 async def opa_client(opa_url):
     async with httpx.AsyncClient(base_url=opa_url, timeout=10.0) as client:
         yield client
 
 
-@pytest_asyncio.fixture(scope="session")
+@pytest_asyncio.fixture(scope="session", loop_scope="session")
 async def rm_prep_client(rm_prep_url, api_key):
     headers = {"Authorization": f"Bearer {api_key}"}
     async with httpx.AsyncClient(base_url=rm_prep_url, headers=headers, timeout=120.0) as client:

@@ -150,11 +150,11 @@ class TestRenderBrief:
         md = render_brief(brief)
         assert "Upcoming" in md
 
-    def test_empty_sources_fallback(self):
-        brief = _full_brief(sources=[])
-        md = render_brief(brief)
-        # Should fall back to "CRM · Payments · News" or similar
-        assert "CRM" in md and "Payments" in md
+    def test_empty_sources_rejected_by_model(self):
+        """RMBrief requires at least one source citation."""
+        from pydantic import ValidationError
+        with pytest.raises(ValidationError, match="too_short"):
+            _full_brief(sources=[])
 
     def test_executive_summary_in_output(self):
         assert "strategic client" in self.md  # from fixture text

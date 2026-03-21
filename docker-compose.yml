@@ -136,6 +136,8 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    ports:
+      - "127.0.0.1:8181:8181"    # L4: loopback only — needed by integration test runner
     networks:
       - ai-network
 

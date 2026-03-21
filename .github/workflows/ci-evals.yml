@@ -65,10 +65,11 @@ env:
   LITELLM_BASE_URL:     "http://localhost:4000"
   EVAL_JUDGE_MODEL:     "gpt-4o-mini"
 
-  # Azure OpenAI credentials for LiteLLM proxy
+  # Azure OpenAI credentials for LiteLLM proxy.
+  # AZURE_API_VERSION is sourced from .env.example (canonical value: 2024-10-21).
   AZURE_API_KEY:        ${{ secrets.AZURE_API_KEY }}
   AZURE_API_BASE:       ${{ secrets.AZURE_API_BASE }}
-  AZURE_API_VERSION:    "2024-02-01"
+  AZURE_API_VERSION:    "2024-10-21"
 
 jobs:
   # Only run evals if triggered by push-to-main, manual dispatch,
@@ -118,7 +119,7 @@ jobs:
           AGENT_ROLE=rm_prep_agent
           AZURE_API_KEY=${{ secrets.AZURE_API_KEY }}
           AZURE_API_BASE=${{ secrets.AZURE_API_BASE }}
-          AZURE_API_VERSION=2024-02-01
+          AZURE_API_VERSION=2024-10-21
           EOF
 
       - name: Start full stack
@@ -131,22 +132,28 @@ jobs:
 
       - name: Wait for all services
         run: |
-          # PostgreSQL
+          wait_for_service() {
+            local url=$1
+            local retries=${2:-30}
+            for i in $(seq 1 "$retries"); do
+              curl -sf "$url" && return 0
+              echo "Waiting for $url... ($i/$retries)"
+              sleep 3
+            done
+            echo "ERROR: $url never became healthy" >&2
+            return 1
+          }
+
+          # PostgreSQL (use exec since no HTTP endpoint)
           for i in $(seq 1 30); do
             docker compose exec -T pgvector pg_isready -U admin -d ai_memory && break
             sleep 2
           done
-          # LiteLLM
-          for i in $(seq 1 30); do
-            curl -sf http://localhost:4000/health && break || true
-            sleep 3
-          done
-          # rm-prep
-          for i in $(seq 1 40); do
-            curl -sf http://localhost:8003/health && break
-            echo "Waiting for rm-prep-agent... ($i/40)"
-            sleep 4
-          done
+          docker compose exec -T pgvector pg_isready -U admin -d ai_memory \
+            || { echo "ERROR: PostgreSQL never became ready"; exit 1; }
+
+          wait_for_service "http://localhost:4000/health" 30
+          wait_for_service "http://localhost:8003/health" 40
 
       # ── Python setup ──────────────────────────────────────────────────────
       - name: Set up Python
@@ -158,27 +165,30 @@ jobs:
       - name: Install dependencies
         run: |
           pip install -e platform-sdk/ --quiet
-          pip install -r agents/rm-prep/requirements.txt --quiet
+          pip install -r agents/rm-prep/requirements.txt \
+                      -r agents/rm-prep/requirements-test.txt --quiet
           pip install -r tests/requirements.txt --quiet
 
       # ── Run specialist fidelity evals ─────────────────────────────────────
       - name: Run specialist fidelity evals
         if: ${{ github.event.inputs.run_specialist_fidelity != 'false' }}
         run: |
+          mkdir -p test-results
           python -m pytest tests/evals/test_specialist_fidelity.py \
             -m "eval and slow" \
             -v --tb=short --timeout=120 --color=yes \
-            --junit-xml=eval-specialist-results.xml
+            --junit-xml=test-results/eval-specialist.xml
         continue-on-error: ${{ github.event_name == 'pull_request' }}
 
       # ── Run synthesis quality evals ───────────────────────────────────────
       - name: Run synthesis quality evals — Case 001 (Microsoft Manager)
         if: ${{ github.event.inputs.run_synthesis_quality != 'false' }}
         run: |
+          mkdir -p test-results
           python -m pytest tests/evals/test_synthesis_quality.py::TestMicrosoftManagerBrief \
             -m "eval and slow" \
             -v --tb=short --timeout=180 --color=yes \
-            --junit-xml=eval-synthesis-001.xml
+            --junit-xml=test-results/eval-synthesis-001.xml
         continue-on-error: ${{ github.event_name == 'pull_request' }}
 
       - name: Run synthesis quality evals — Case 002 (Ford RM restricted)
@@ -187,7 +197,7 @@ jobs:
           python -m pytest tests/evals/test_synthesis_quality.py::TestFordRMBrief \
             -m "eval and slow" \
             -v --tb=short --timeout=180 --color=yes \
-            --junit-xml=eval-synthesis-002.xml
+            --junit-xml=test-results/eval-synthesis-002.xml
         continue-on-error: ${{ github.event_name == 'pull_request' }}
 
       - name: Run synthesis quality evals — Case 003 (Unknown client)
@@ -196,7 +206,7 @@ jobs:
           python -m pytest tests/evals/test_synthesis_quality.py::TestUnknownClientBrief \
             -m "eval and slow" \
             -v --tb=short --timeout=180 --color=yes \
-            --junit-xml=eval-synthesis-003.xml
+            --junit-xml=test-results/eval-synthesis-003.xml
         continue-on-error: ${{ github.event_name == 'pull_request' }}
 
       - name: Run synthesis quality evals — Case 004 (Readonly denied)
@@ -205,20 +215,17 @@ jobs:
           python -m pytest tests/evals/test_synthesis_quality.py::TestReadonlyDeniedBrief \
             -m "eval and slow" \
             -v --tb=short --timeout=180 --color=yes \
-            --junit-xml=eval-synthesis-004.xml
+            --junit-xml=test-results/eval-synthesis-004.xml
         continue-on-error: ${{ github.event_name == 'pull_request' }}
 
       # ── Run RAGAS faithfulness evals ───────────────────────────────────────
-      # Faithfulness measures hallucination risk: fraction of claims in each
-      # brief that are grounded in the retrieved specialist outputs.
-      # These run after synthesis quality so they can reuse cached briefs.
       - name: Run RAGAS faithfulness evals — Case 001 (Microsoft Manager)
         if: ${{ github.event.inputs.run_faithfulness != 'false' }}
         run: |
           python -m pytest tests/evals/test_faithfulness.py::TestFaithfulnessMicrosoftManager \
             -m "eval and slow" \
             -v --tb=short --timeout=180 --color=yes \
-            --junit-xml=eval-faithfulness-001.xml
+            --junit-xml=test-results/eval-faithfulness-001.xml
         continue-on-error: ${{ github.event_name == 'pull_request' }}
 
       - name: Run RAGAS faithfulness evals — Case 002 (Ford RM restricted)
@@ -227,7 +234,7 @@ jobs:
           python -m pytest tests/evals/test_faithfulness.py::TestFaithfulnessFordRM \
             -m "eval and slow" \
             -v --tb=short --timeout=180 --color=yes \
-            --junit-xml=eval-faithfulness-002.xml
+            --junit-xml=test-results/eval-faithfulness-002.xml
         continue-on-error: ${{ github.event_name == 'pull_request' }}
 
       - name: Run RAGAS faithfulness evals — Case 003 (Unknown client)
@@ -236,7 +243,7 @@ jobs:
           python -m pytest tests/evals/test_faithfulness.py::TestFaithfulnessUnknownClient \
             -m "eval and slow" \
             -v --tb=short --timeout=180 --color=yes \
-            --junit-xml=eval-faithfulness-003.xml
+            --junit-xml=test-results/eval-faithfulness-003.xml
         continue-on-error: ${{ github.event_name == 'pull_request' }}
 
       - name: Run RAGAS faithfulness evals — Case 004 (Readonly denied)
@@ -245,7 +252,7 @@ jobs:
           python -m pytest tests/evals/test_faithfulness.py::TestFaithfulnessReadonlyDenied \
             -m "eval and slow" \
             -v --tb=short --timeout=180 --color=yes \
-            --junit-xml=eval-faithfulness-004.xml
+            --junit-xml=test-results/eval-faithfulness-004.xml
         continue-on-error: ${{ github.event_name == 'pull_request' }}
 
       # ── Upload results ────────────────────────────────────────────────────
@@ -254,20 +261,22 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: eval-results-${{ github.run_id }}
-          path: eval-*.xml
+          path: test-results/
           retention-days: 30
 
-      # ── Post summary to PR ────────────────────────────────────────────────
+      # ── Post summary to job summary ───────────────────────────────────────
       - name: Generate eval summary
         if: always()
         run: |
           echo "## Eval Results Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          for xml in eval-*.xml; do
+          echo "| Test file | Passed | Failed |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|---|" >> $GITHUB_STEP_SUMMARY
+          for xml in test-results/eval-*.xml; do
             [ -f "$xml" ] || continue
             passed=$(grep -o 'tests="[0-9]*"' "$xml" | grep -o '[0-9]*' | head -1)
             failed=$(grep -o 'failures="[0-9]*"' "$xml" | grep -o '[0-9]*' | head -1)
-            echo "| $xml | $passed passed | $failed failed |" >> $GITHUB_STEP_SUMMARY
+            echo "| $(basename $xml) | ${passed:-0} passed | ${failed:-0} failed |" >> $GITHUB_STEP_SUMMARY
           done
 
       - name: Collect service logs on failure

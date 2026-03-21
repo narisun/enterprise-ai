@@ -25,15 +25,8 @@ test_authorized_select_query_is_allowed if {
     }
 }
 
-test_local_environment_bypasses_role_check if {
-    allow with input as {
-        "tool": "execute_read_query",
-        "session_id": "123e4567-e89b-12d3-a456-426614174000",
-        "query": "SELECT 1",
-        "agent_role": "unknown_role",
-        "environment": "local",
-    }
-}
+# Local-env bypass was removed (security hardening) — unknown roles
+# are now denied in ALL environments.  See test_unknown_role_in_prod_is_denied.
 
 test_case_insensitive_select_allowed if {
     allow with input as {
@@ -47,25 +40,10 @@ test_case_insensitive_select_allowed if {
 
 # ---- execute_read_query: Deny Cases -----------------------------------------
 
-test_mutating_query_is_denied if {
-    not allow with input as {
-        "tool": "execute_read_query",
-        "session_id": "123e4567-e89b-12d3-a456-426614174000",
-        "query": "DROP TABLE accounts",
-        "agent_role": "commercial_banking_agent",
-        "environment": "prod",
-    }
-}
-
-test_insert_is_denied if {
-    not allow with input as {
-        "tool": "execute_read_query",
-        "session_id": "123e4567-e89b-12d3-a456-426614174000",
-        "query": "INSERT INTO accounts VALUES (1, 'hacker')",
-        "agent_role": "commercial_banking_agent",
-        "environment": "prod",
-    }
-}
+# Mutating-query checks (DROP, INSERT, UPDATE, DELETE) were moved out of
+# the OPA policy into the MCP server itself (defence-in-depth layer 2).
+# The policy trusts the tool name "execute_read_query" to mean read-only;
+# the server enforces the SQL-level constraint.
 
 test_empty_session_id_is_denied if {
     not allow with input as {

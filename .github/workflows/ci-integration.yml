@@ -81,14 +81,19 @@ jobs:
             echo "Waiting for PostgreSQL... ($i/30)"
             sleep 2
           done
+          # Hard fail if PostgreSQL never became ready
+          docker compose exec -T pgvector pg_isready -U admin -d ai_memory \
+            || { echo "ERROR: PostgreSQL never became ready"; exit 1; }
 
       - name: Wait for OPA
         run: |
           for i in $(seq 1 20); do
-            curl -sf http://localhost:8181/health && break
+            curl -sf http://localhost:8181/health && break || true
             echo "Waiting for OPA... ($i/20)"
             sleep 2
           done
+          curl -sf http://localhost:8181/health \
+            || { echo "ERROR: OPA never became healthy"; exit 1; }
 
       - name: Start MCP servers
         run: |
@@ -104,24 +109,30 @@ jobs:
 
       - name: Wait for MCP servers to be healthy
         run: |
-          for service_url in \
-            "http://localhost:8082/health" \
-            "http://localhost:8081/health" \
-            "http://localhost:8083/health"; do
-            for i in $(seq 1 30); do
-              curl -sf "$service_url" && break || true
-              echo "Waiting for $service_url... ($i/30)"
+          wait_for_service() {
+            local url=$1
+            local retries=${2:-30}
+            for i in $(seq 1 "$retries"); do
+              curl -sf "$url" && return 0
+              echo "Waiting for $url... ($i/$retries)"
               sleep 2
             done
-          done
+            echo "ERROR: $url never became healthy" >&2
+            return 1
+          }
+          wait_for_service "http://localhost:8082/health"
+          wait_for_service "http://localhost:8081/health"
+          wait_for_service "http://localhost:8083/health"
 
       - name: Wait for rm-prep-agent to be healthy
         run: |
           for i in $(seq 1 30); do
-            curl -sf http://localhost:8003/health && break
+            curl -sf http://localhost:8003/health && break || true
             echo "Waiting for rm-prep-agent... ($i/30)"
             sleep 3
           done
+          curl -sf http://localhost:8003/health \
+            || { echo "ERROR: rm-prep-agent never became healthy"; exit 1; }
 
       # ── Run tests ─────────────────────────────────────────────────────────
       - name: Set up Python
@@ -137,21 +148,25 @@ jobs:
 
       - name: Run integration tests — SQL layer
         run: |
+          mkdir -p test-results
           python -m pytest tests/integration/test_payments_sql.py \
             -m integration \
-            -v --tb=short --timeout=30 --color=yes
+            -v --tb=short --timeout=30 --color=yes \
+            --junit-xml=test-results/integration-sql.xml
 
       - name: Run integration tests — OPA policies
         run: |
           python -m pytest tests/integration/test_opa_policies.py \
             -m integration \
-            -v --tb=short --timeout=20 --color=yes
+            -v --tb=short --timeout=20 --color=yes \
+            --junit-xml=test-results/integration-opa.xml
 
       - name: Run integration tests — rm-prep server
         run: |
           python -m pytest tests/integration/test_rm_prep_server.py \
             -m integration \
-            -v --tb=short --timeout=30 --color=yes
+            -v --tb=short --timeout=30 --color=yes \
+            --junit-xml=test-results/integration-rm-prep.xml
 
       # ── Collect logs on failure ────────────────────────────────────────────
       - name: Collect service logs on failure
@@ -167,6 +182,13 @@ jobs:
           docker compose logs rm-prep-agent --tail=100
           echo "=== opa logs ==="
           docker compose logs opa --tail=50
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-results
+          path: test-results/
 
       - name: Tear down
         if: always()

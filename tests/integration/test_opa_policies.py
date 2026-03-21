@@ -10,7 +10,7 @@ Requires: OPA container running (docker-compose.test.yml).
 import pytest
 import pytest_asyncio
 
-pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
+pytestmark = [pytest.mark.integration, pytest.mark.asyncio(loop_scope="session")]
 
 _OPA_PATH = "/v1/data/mcp/tools/allow"
 

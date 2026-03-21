@@ -1,6 +1,7 @@
 image:
   repository: enterprise-ai/data-mcp
-  tag: "latest"
+  # tag must always be overridden by CI with the git SHA — never deploy "latest".
+  tag: "REPLACE_ME"
   pullPolicy: IfNotPresent
 
 replicaCount: 2

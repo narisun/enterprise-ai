@@ -13,7 +13,7 @@ a 'status' key (lowercase alias), not the unaliased 'Status' column.
 import pytest
 import pytest_asyncio
 
-pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
+pytestmark = [pytest.mark.integration, pytest.mark.asyncio(loop_scope="session")]
 
 # Known client from 31_test_bankdw_seed.sql
 CLIENT_MICROSOFT = "Microsoft Corp."

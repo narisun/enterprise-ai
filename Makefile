@@ -2,8 +2,10 @@
 # enterprise-ai — Developer Commands
 # ============================================================
 .PHONY: help dev-up dev-test-up dev-down dev-reset dev-restart dev-logs dev-status \
-        test test-agents test-mcp test-policies \
-        lint format build sdk-install \
+        test test-unit test-agents test-mcp test-policies \
+        test-integration test-evals test-evals-fidelity test-evals-synthesis \
+        test-evals-faithfulness test-all test-all-unit \
+        lint lint-fix format build sdk-install install-all-deps \
         k8s-dev k8s-prod k8s-down clean
 
 REPO_ROOT := $(shell pwd)
@@ -24,14 +26,14 @@ $(VENV)/bin/python3:
 
 help:  ## Show available commands
 	@grep -E '^[a-zA-Z_-]+:.*##' $(MAKEFILE_LIST) | \
-	  awk 'BEGIN {FS = ":.*##"}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
+	  awk 'BEGIN {FS = ":.*##"}; {printf "  \033[36m%-22s\033[0m %s\n", $$1, $$2}'
 
 # ---- Local Development (Docker Compose) --------------------
 
-# Base compose files used by every dev target.
-# dev-test-up adds the test overlay which seeds salesforce + bankdw schemas.
+# Both compose files used consistently everywhere — prevents partial stack
+# scenarios where services defined in the test overlay are missed.
 COMPOSE_BASE := docker compose -f docker-compose.yml
-COMPOSE_TEST := $(COMPOSE_BASE) -f docker-compose.test.yml
+COMPOSE_TEST := docker compose -f docker-compose.yml -f docker-compose.test.yml
 
 dev-up: ## Start the stack without test fixtures (prod-schema only)
 	@echo "→ Checking for .env file..."
@@ -85,14 +87,44 @@ dev-reset: ## Wipe the pgdata volume and restart with test fixtures (required af
 dev-restart: ## Restart all containers
 	$(COMPOSE_TEST) restart
 
+# Explicitly specify compose files so test-overlay service logs are always included.
 dev-logs: ## Follow logs from all services
-	docker compose logs -f
+	$(COMPOSE_TEST) logs -f
 
 ui-logs: ## Follow logs from the Chat UI only
-	docker compose logs -f chat-ui
+	$(COMPOSE_TEST) logs -f chat-ui
 
 dev-status: ## Show container health status
-	docker compose ps
+	$(COMPOSE_TEST) ps
+
+# ---- Dependency Installation ----------------------------------------
+
+sdk-install: $(VENV)/bin/python3 ## Create venv (if needed) and install platform-sdk
+	$(PIP) install -e platform-sdk/ --quiet
+	@echo "✅ SDK installed. Activate manually with: source .venv/bin/activate"
+
+install-all-deps: sdk-install ## Install ALL service + test dependencies (needed for test-all-unit)
+	@echo "→ Installing test framework + root test deps..."
+	$(PIP) install -r tests/requirements.txt --quiet
+	@echo "→ Installing agents deps..."
+	$(PIP) install -r agents/requirements.txt \
+	               -r agents/requirements-test.txt --quiet
+	@echo "→ Installing agents/rm-prep deps..."
+	$(PIP) install -r agents/rm-prep/requirements.txt \
+	               -r agents/rm-prep/requirements-test.txt --quiet
+	@echo "→ Installing data-mcp deps..."
+	$(PIP) install -r tools/data-mcp/requirements.txt \
+	               -r tools/data-mcp/requirements-test.txt --quiet
+	@echo "→ Installing salesforce-mcp deps..."
+	$(PIP) install -r tools/salesforce-mcp/requirements.txt \
+	               -r tools/salesforce-mcp/requirements-test.txt --quiet 2>/dev/null || true
+	@echo "→ Installing payments-mcp deps..."
+	$(PIP) install -r tools/payments-mcp/requirements.txt \
+	               -r tools/payments-mcp/requirements-test.txt --quiet 2>/dev/null || true
+	@echo "→ Installing news-search-mcp deps..."
+	$(PIP) install -r tools/news-search-mcp/requirements.txt \
+	               -r tools/news-search-mcp/requirements-test.txt --quiet 2>/dev/null || true
+	@echo "✅ All deps installed."
 
 # ---- Testing -----------------------------------------------
 
@@ -100,63 +132,103 @@ test: test-unit test-policies ## Run fast tests (unit + OPA) — no Docker requi
 
 test-all: test-unit test-policies test-integration ## Run all non-eval tests (requires Docker stack)
 
-test-agents: sdk-install ## Run legacy agent service unit tests
-	@echo "→ Installing agent dependencies..."
-	$(PIP) install -r agents/requirements.txt --quiet
-	@echo "→ Running agent tests..."
-	cd agents && $(REPO_ROOT)/$(PYTEST) tests/ -v --tb=short
-
-test-mcp: sdk-install ## Run all MCP server unit tests
-	@echo "→ Installing MCP dependencies..."
-	$(PIP) install -r tools/data-mcp/requirements.txt --quiet
-	$(PIP) install -r tools/salesforce-mcp/requirements.txt --quiet 2>/dev/null || true
-	$(PIP) install -r tools/payments-mcp/requirements.txt --quiet 2>/dev/null || true
-	$(PIP) install -r tools/news-search-mcp/requirements.txt --quiet 2>/dev/null || true
-	@echo "→ Running data-mcp tests..."
-	cd tools/data-mcp && $(REPO_ROOT)/$(PYTEST) tests/ -v --tb=short
-	@echo "→ Running salesforce-mcp tests..."
-	cd tools/salesforce-mcp && $(REPO_ROOT)/$(PYTEST) tests/ -v --tb=short
-	@echo "→ Running payments-mcp tests..."
-	cd tools/payments-mcp && $(REPO_ROOT)/$(PYTEST) tests/ -v --tb=short
-	@echo "→ Running news-search-mcp tests..."
-	cd tools/news-search-mcp && $(REPO_ROOT)/$(PYTEST) tests/ -v --tb=short
+# Single pytest invocation from the repo root covering every service.
+# pyproject.toml testpaths = [tests, agents/tests, tools/*/tests]
+test-all-unit: install-all-deps ## Run ALL unit tests across every service in one shot (no Docker needed)
+	@echo "→ Running all monorepo unit tests..."
+	@mkdir -p test-results
+	$(PYTEST) -m "not integration and not eval" \
+	  -v --tb=short --color=yes \
+	  --junit-xml=test-results/all-unit.xml \
+	  --cov=platform_sdk \
+	  --cov=agents/src \
+	  --cov=agents/rm-prep/src \
+	  --cov=tools/data-mcp/src \
+	  --cov=tools/payments-mcp/src \
+	  --cov=tools/salesforce-mcp/src \
+	  --cov=tools/news-search-mcp/src \
+	  --cov-report=term-missing \
+	  --cov-report=xml:test-results/coverage.xml
 
 test-unit: sdk-install ## Run Layer 1 unit tests (auth, cache, brief rendering — no Docker)
 	@echo "→ Installing test + agent dependencies..."
 	$(PIP) install -r tests/requirements.txt --quiet
-	$(PIP) install -r agents/rm-prep/requirements.txt --quiet
+	$(PIP) install -r agents/rm-prep/requirements.txt \
+	               -r agents/rm-prep/requirements-test.txt --quiet
 	@echo "→ Running unit tests..."
-	$(PYTEST) tests/unit/ -m unit -v --tb=short --color=yes
+	@mkdir -p test-results
+	$(PYTEST) tests/unit/ -m unit -v --tb=short --color=yes \
+	  --junit-xml=test-results/unit.xml
+
+test-agents: sdk-install ## Run agent service unit tests
+	@echo "→ Installing agent dependencies..."
+	$(PIP) install -r agents/requirements.txt \
+	               -r agents/requirements-test.txt --quiet
+	@echo "→ Running agent tests..."
+	@mkdir -p test-results
+	$(PYTEST) agents/tests/ -v --tb=short --color=yes \
+	  --junit-xml=test-results/agents.xml
+
+test-mcp: sdk-install ## Run all MCP server unit tests
+	@echo "→ Installing MCP dependencies..."
+	$(PIP) install -r tools/data-mcp/requirements.txt \
+	               -r tools/data-mcp/requirements-test.txt --quiet
+	$(PIP) install -r tools/salesforce-mcp/requirements.txt \
+	               -r tools/salesforce-mcp/requirements-test.txt --quiet 2>/dev/null || true
+	$(PIP) install -r tools/payments-mcp/requirements.txt \
+	               -r tools/payments-mcp/requirements-test.txt --quiet 2>/dev/null || true
+	$(PIP) install -r tools/news-search-mcp/requirements.txt \
+	               -r tools/news-search-mcp/requirements-test.txt --quiet 2>/dev/null || true
+	@echo "→ Running all MCP server tests..."
+	@mkdir -p test-results
+	$(PYTEST) tools/data-mcp/tests/ \
+	          tools/salesforce-mcp/tests/ \
+	          tools/payments-mcp/tests/ \
+	          tools/news-search-mcp/tests/ \
+	  -v --tb=short --color=yes \
+	  --junit-xml=test-results/mcp.xml
 
 test-integration: sdk-install ## Run Layer 2 integration tests (requires dev-test-up stack)
 	@echo "→ Installing test dependencies..."
 	$(PIP) install -r tests/requirements.txt --quiet
 	@echo "→ Running integration tests..."
 	@echo "   (requires 'make dev-test-up' first)"
+	@mkdir -p test-results
 	$(PYTEST) tests/integration/ -m integration -v --tb=short --color=yes \
-	  --timeout=60
+	  --timeout=60 \
+	  --junit-xml=test-results/integration.xml
 
 test-evals: sdk-install ## Run Layer 3 LLM-in-the-loop evals (requires full stack + LLM creds)
 	@echo "→ Installing test dependencies..."
 	$(PIP) install -r tests/requirements.txt --quiet
-	$(PIP) install -r agents/rm-prep/requirements.txt --quiet
+	$(PIP) install -r agents/rm-prep/requirements.txt \
+	               -r agents/rm-prep/requirements-test.txt --quiet
 	@echo "→ Running eval tests..."
 	@echo "   (requires 'make dev-test-up' + LLM credentials)"
+	@mkdir -p test-results
 	$(PYTEST) tests/evals/ -m "eval and slow" -v --tb=short --color=yes \
-	  --timeout=300
+	  --timeout=300 \
+	  --junit-xml=test-results/evals.xml
 
 test-evals-fidelity: sdk-install ## Run specialist fidelity evals only (faster)
 	$(PIP) install -r tests/requirements.txt --quiet
-	$(PIP) install -r agents/rm-prep/requirements.txt --quiet
-	$(PYTEST) tests/evals/test_specialist_fidelity.py -m eval -v --tb=short --timeout=120
+	$(PIP) install -r agents/rm-prep/requirements.txt \
+	               -r agents/rm-prep/requirements-test.txt --quiet
+	@mkdir -p test-results
+	$(PYTEST) tests/evals/test_specialist_fidelity.py -m eval -v --tb=short --timeout=120 \
+	  --junit-xml=test-results/evals-fidelity.xml
 
 test-evals-synthesis: sdk-install ## Run synthesis quality evals only
 	$(PIP) install -r tests/requirements.txt --quiet
-	$(PYTEST) tests/evals/test_synthesis_quality.py -m eval -v --tb=short --timeout=300
+	@mkdir -p test-results
+	$(PYTEST) tests/evals/test_synthesis_quality.py -m eval -v --tb=short --timeout=300 \
+	  --junit-xml=test-results/evals-synthesis.xml
 
 test-evals-faithfulness: sdk-install ## Run RAGAS faithfulness evals only (hallucination detection)
 	$(PIP) install -r tests/requirements.txt --quiet
-	$(PYTEST) tests/evals/test_faithfulness.py -m "eval and slow" -v --tb=short --timeout=300
+	@mkdir -p test-results
+	$(PYTEST) tests/evals/test_faithfulness.py -m "eval and slow" -v --tb=short --timeout=300 \
+	  --junit-xml=test-results/evals-faithfulness.xml
 
 test-policies: ## Run OPA policy unit tests
 	@echo "→ Running OPA policy tests..."
@@ -164,22 +236,22 @@ test-policies: ## Run OPA policy unit tests
 
 # ---- Code Quality ------------------------------------------
 
-lint: sdk-install ## Run ruff linter across all Python services
-	$(PYTHON) -m ruff check agents/src/ tools/data-mcp/src/ platform-sdk/platform_sdk/
+# Both lint and format target `.` — pyproject.toml [tool.ruff] defines what
+# to check/exclude, so Makefile and CI always scan identical code.
+lint: sdk-install ## Run ruff linter across the entire monorepo
+	$(PYTHON) -m ruff check .
+
+lint-fix: sdk-install ## Auto-fix ruff lint issues
+	$(PYTHON) -m ruff check . --fix
 
 format: sdk-install ## Auto-format all Python source
-	$(PYTHON) -m ruff format agents/src/ tools/data-mcp/src/ platform-sdk/platform_sdk/
-
-# ---- SDK ---------------------------------------------------
-
-sdk-install: $(VENV)/bin/python3 ## Create venv (if needed) and install platform-sdk
-	$(PIP) install -e platform-sdk/ --quiet
-	@echo "✅ SDK installed. Activate manually with: source .venv/bin/activate"
+	$(PYTHON) -m ruff format .
 
 # ---- Docker Builds (from monorepo root) --------------------
 
 build: ## Build all Docker images
 	docker build -f agents/Dockerfile -t enterprise-ai/ai-agents:local .
+	docker build -f agents/rm-prep/Dockerfile -t enterprise-ai/rm-prep-agent:local .
 	docker build -f tools/data-mcp/Dockerfile -t enterprise-ai/data-mcp:local .
 
 # ---- Kubernetes (Skaffold) ---------------------------------
@@ -195,11 +267,13 @@ k8s-down: ## Delete Kubernetes deployments
 
 # ---- Cleanup -----------------------------------------------
 
-clean: ## Remove Python caches, build artifacts, and the venv
+clean: ## Remove Python caches, build artifacts, venv, and test-results
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 	find . -type f -name "*.pyc" -delete
 	find . -type d -name ".pytest_cache" -exec rm -rf {} + 2>/dev/null || true
 	find . -type d -name "*.egg-info" -exec rm -rf {} + 2>/dev/null || true
 	find . -type d -name "dist" -exec rm -rf {} + 2>/dev/null || true
+	find . -type d -name ".ruff_cache" -exec rm -rf {} + 2>/dev/null || true
 	rm -rf $(VENV)
+	rm -rf test-results/
 	@echo "✅ Cleaned (run 'make sdk-install' to recreate the venv)"

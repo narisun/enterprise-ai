@@ -9,7 +9,7 @@ Requires: rm-prep-agent container running (docker-compose.test.yml).
 """
 import pytest
 
-pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
+pytestmark = [pytest.mark.integration, pytest.mark.asyncio(loop_scope="session")]
 
 
 # ─────────────────────────────────────────────────────────────────────────────

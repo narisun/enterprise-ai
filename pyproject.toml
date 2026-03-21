@@ -1,0 +1,81 @@
+# ============================================================
+# enterprise-ai — root project configuration
+#
+# Single source of truth for:
+#   - pytest   (replaces root pytest.ini and all per-tool pytest.ini files)
+#   - ruff     (replaces the fragmented per-invocation flags in Makefile + CI)
+# ============================================================
+
+# ── Build system (only needed because platform-sdk is a sub-package) ─────────
+# Do NOT add a [project] table here — this is a monorepo root, not a
+# package itself.  Only platform-sdk/pyproject.toml defines a package.
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+# ── pytest ────────────────────────────────────────────────────────────────────
+[tool.pytest.ini_options]
+# All test directories across the monorepo — single `pytest` invocation
+# from the repo root collects everything.
+testpaths = [
+    "tests",
+    "agents/tests",
+    "tools/data-mcp/tests",
+    "tools/payments-mcp/tests",
+    "tools/salesforce-mcp/tests",
+    "tools/news-search-mcp/tests",
+]
+
+asyncio_mode              = "auto"
+# Share one event loop for the whole session so session-scoped async fixtures
+# (db_pool, opa_client, rm_prep_client) don't hit "RuntimeError: Event loop is
+# closed" when subsequent tests try to reuse them.
+asyncio_event_loop_scope  = "session"
+log_cli                   = true
+log_cli_level             = "WARNING"
+timeout                   = 60
+
+# pytest-dotenv: load .env before tests run so integration tests can reach the
+# Docker Compose stack with the correct credentials (DB_PASS, INTERNAL_API_KEY,
+# etc.).  Variables already set in the environment (e.g. by the CI workflow) are
+# NOT overridden — safe for both local dev and GitHub Actions.
+env_files = [".env"]
+
+markers = [
+    "unit: Pure Python tests — no network, no database, no LLM",
+    "integration: Tests requiring Docker Compose services (DB, OPA, MCP servers)",
+    "eval: LLM-in-the-loop evaluation tests (requires LITELLM_BASE_URL or OPENAI_API_KEY)",
+    "slow: Tests that take more than 30 seconds",
+]
+
+# Targeted suppression — broad DeprecationWarning blanket kept for now;
+# narrow these per-package as the dependency set matures.
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning",
+]
+
+# ── ruff ─────────────────────────────────────────────────────────────────────
+# Single ruff config covers the entire monorepo.  Run `ruff check .` or
+# `ruff format .` from the repo root — Makefile and CI both use `.` so
+# they always check the same code.
+[tool.ruff]
+line-length    = 100
+target-version = "py311"
+
+# Exclude generated / vendored / virtual-env paths
+exclude = [
+    ".venv",
+    "**/__pycache__",
+    "**/*.egg-info",
+    ".git",
+    "infra",        # Helm/Terraform — not Python
+    "frontends",    # JS/TS — not Python
+]
+
+[tool.ruff.lint]
+# E/F/W = pycodestyle errors + pyflakes + warnings; I = isort
+select = ["E", "F", "W", "I"]
+ignore = [
+    "E501",   # line too long — handled by formatter
+]

@@ -9,20 +9,28 @@ setEnv*.bat
 setEnvAWS*.bat
 
 # Python
-__pycache__/
+# Use ** prefixes so nested directories (e.g. tools/data-mcp/__pycache__) are
+# excluded regardless of depth — prevents accidentally committing cache dirs
+# that were already present in git history.
+**/__pycache__/
 *.py[cod]
 *$py.class
 .venv/
 venv/
 env/
-*.egg-info/
+**/*.egg-info/
 dist/
 build/
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
 .coverage
+**/.coverage
 htmlcov/
+
+# Test output
+test-results/
+*.xml
 
 # Node
 node_modules/

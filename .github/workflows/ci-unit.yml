@@ -4,7 +4,7 @@
 # Runs on every push and pull request.
 # No Docker, no network, no LLM — must pass in under 2 minutes.
 #
-# Gate: blocks merge if any unit test fails.
+# Gate: blocks merge if any unit test, OPA test, or lint check fails.
 # ============================================================
 name: CI Unit Tests
 
@@ -38,31 +38,37 @@ jobs:
         run: pip install -e platform-sdk/ --quiet
 
       - name: Install test dependencies
-        run: pip install -r tests/requirements.txt --quiet
-
-      - name: Install rm-prep agent dependencies (for brief.py import)
-        run: pip install -r agents/rm-prep/requirements.txt --quiet
+        run: |
+          pip install -r tests/requirements.txt --quiet
+          pip install -r agents/rm-prep/requirements.txt \
+                      -r agents/rm-prep/requirements-test.txt --quiet
 
       - name: Run unit tests
         env:
           JWT_SECRET: "ci-unit-test-jwt-secret"
           CONTEXT_HMAC_SECRET: "ci-unit-test-hmac-secret"
         run: |
+          mkdir -p test-results
           python -m pytest tests/unit/ \
             -m unit \
             -v \
             --tb=short \
             --timeout=30 \
-            --color=yes
+            --color=yes \
+            --junit-xml=test-results/unit-py${{ matrix.python-version }}.xml \
+            --cov=platform_sdk \
+            --cov=agents/rm-prep/src \
+            --cov-report=xml:test-results/coverage-py${{ matrix.python-version }}.xml \
+            --cov-report=term-missing
 
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: unit-test-results-py${{ matrix.python-version }}
-          path: .pytest_cache/
+          path: test-results/
 
-  # OPA policy tests run here alongside unit tests — no Docker needed
+  # OPA policy tests run alongside unit tests — no Docker needed
   # because the OPA CLI is available on GitHub-hosted runners.
   opa-policy-tests:
     name: OPA Policy Tests
@@ -72,11 +78,18 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # Read OPA_VERSION from the single source of truth in .github/versions.env
+      # so this workflow and docker-compose.yml always stay in sync.
+      - name: Load shared tool versions
+        run: cat .github/versions.env >> $GITHUB_ENV
+
       - name: Install OPA CLI
         run: |
-          curl -L -o opa https://openpolicyagent.org/downloads/v0.65.0/opa_linux_amd64_static
+          curl -L -o opa \
+            https://openpolicyagent.org/downloads/v${OPA_VERSION}/opa_linux_amd64_static
           chmod +x opa
           sudo mv opa /usr/local/bin/opa
+          opa version
 
       - name: Run OPA unit tests
         run: opa test tools/policies/opa/ -v
@@ -101,14 +114,11 @@ jobs:
       - name: Install ruff
         run: pip install ruff --quiet
 
-      - name: Run ruff
-        run: |
-          ruff check \
-            agents/rm-prep/src/ \
-            tools/payments-mcp/src/ \
-            tools/salesforce-mcp/src/ \
-            platform-sdk/platform_sdk/ \
-            tests/ \
-            --select=E,F,W \
-            --ignore=E501 \
-            --quiet
+      # Target `.` — pyproject.toml [tool.ruff] defines what to check and
+      # what to exclude. `make lint` uses the same invocation so local and
+      # CI always check identical code.
+      - name: Run ruff linter
+        run: ruff check .
+
+      - name: Check formatting
+        run: ruff format --check .
