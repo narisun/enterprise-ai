@@ -27,16 +27,17 @@ spec:
             - secretRef:
                 name: {{ .Values.secretName }}
           # ---- Health Probes ------------------------------------------------
+          # /health requires master_key auth; /health/liveliness is unauthenticated
           readinessProbe:
             httpGet:
-              path: /health
+              path: /health/liveliness
               port: 4000
             initialDelaySeconds: 15
             periodSeconds: 10
             failureThreshold: 3
           livenessProbe:
             httpGet:
-              path: /health
+              path: /health/liveliness
               port: 4000
             initialDelaySeconds: 30
             periodSeconds: 20

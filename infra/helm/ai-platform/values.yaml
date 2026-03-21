@@ -2,10 +2,18 @@
 
 litellm:
   image:
-    repository: ghcr.io/berriai/litellm
-    tag: "v1.43.0"          # Always pin — never use main-latest
+    # Mirrored to ECR so EKS nodes don't need internet access to ghcr.io.
+    # To update: docker pull ghcr.io/berriai/litellm:main-stable && push to ECR.
+    repository: "REPLACE_WITH_ECR_REGISTRY/enterprise-ai/litellm"
+    tag: "main-stable"
     pullPolicy: IfNotPresent
   replicaCount: 2
+  # IRSA role ARN for Bedrock access — set in values-dev.yaml / values-prod.yaml
+  irsaRoleArn: ""
+  # ElastiCache Redis endpoint — set via --set litellm.redisHost=<endpoint> at deploy time
+  redisHost: "localhost"
+  # Set to true when ElastiCache has transit_encryption_enabled = true
+  redisSsl: false
   resources:
     requests:
       cpu: "250m"
@@ -36,5 +44,20 @@ otelCollector:
       memory: "512Mi"
 
 # Secret name containing INTERNAL_API_KEY, AZURE_API_KEY, DYNATRACE_API_TOKEN
-# Create with: kubectl create secret generic ai-platform-secrets --from-env-file=.env
+# Created by External Secrets Operator from AWS Secrets Manager (see infra/k8s/secrets/)
 secretName: ai-platform-secrets
+
+opa:
+  enabled: true
+  image:
+    repository: openpolicyagent/opa
+    tag: "0.65.0"
+    pullPolicy: IfNotPresent
+  replicaCount: 2
+  resources:
+    requests:
+      cpu: "50m"
+      memory: "128Mi"
+    limits:
+      cpu: "200m"
+      memory: "256Mi"

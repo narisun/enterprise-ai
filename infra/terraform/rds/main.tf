@@ -46,14 +46,18 @@ resource "aws_security_group" "rds_sg" {
   tags = local.common_tags
 }
 
-# ---- Parameter group (pgvector) --------------------------------------------
+# ---- Parameter group -------------------------------------------------------
+# pgvector on RDS PostgreSQL 16 is a built-in managed extension —
+# it does NOT need shared_preload_libraries. Enable it after first deploy with:
+#   psql -h <RDS_ENDPOINT> -U dbadmin -d ai_memory -c "CREATE EXTENSION IF NOT EXISTS vector;"
+# pg_stat_statements is safe to preload and useful for query performance monitoring.
 resource "aws_db_parameter_group" "pgvector" {
   name   = "ai-memory-pg16-${var.environment}"
   family = "postgres16"
 
   parameter {
     name         = "shared_preload_libraries"
-    value        = "vector"
+    value        = "pg_stat_statements"
     apply_method = "pending-reboot"
   }
 
@@ -80,12 +84,9 @@ resource "aws_db_instance" "ai_memory" {
 
   db_name  = "ai_memory"
   username = "dbadmin"
-  # M10: If the secret is stored as a JSON object (e.g. {"password":"..."})
-  # use jsondecode to extract just the password value:
-  #   password = jsondecode(data.aws_secretsmanager_secret_version.db_password.secret_string)["password"]
-  # If the secret is a plain string, use secret_string directly as below.
-  # Document the expected format in variables.tf so future engineers don't guess.
-  password = data.aws_secretsmanager_secret_version.db_password.secret_string
+  # Secret is stored as JSON {"username":"dbadmin","password":"..."} in Secrets Manager.
+  # jsondecode extracts just the password string — RDS does not accept raw JSON here.
+  password = jsondecode(data.aws_secretsmanager_secret_version.db_password.secret_string)["password"]
 
   db_subnet_group_name   = aws_db_subnet_group.ai_memory.name
   vpc_security_group_ids = [aws_security_group.rds_sg.id]

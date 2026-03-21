@@ -28,18 +28,20 @@ spec:
           envFrom:
             - secretRef:
                 name: {{ .Values.secretName }}
+          # FastMCP SSE transport does not expose a /health HTTP route.
+          # Use a TCP socket check to verify the port is open.
           readinessProbe:
-            httpGet:
-              path: /health
+            tcpSocket:
               port: {{ .Values.service.port }}
             initialDelaySeconds: 10
             periodSeconds: 10
+            failureThreshold: 3
           livenessProbe:
-            httpGet:
-              path: /health
+            tcpSocket:
               port: {{ .Values.service.port }}
             initialDelaySeconds: 20
             periodSeconds: 20
+            failureThreshold: 3
           resources:
             requests:
               cpu: {{ .Values.resources.requests.cpu }}

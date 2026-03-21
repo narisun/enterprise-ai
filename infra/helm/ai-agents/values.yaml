@@ -1,8 +1,7 @@
 image:
-  repository: enterprise-ai/ai-agents
-  # tag must always be overridden by CI with the git SHA, e.g.:
-  #   helm upgrade ... --set image.tag=$(git rev-parse --short HEAD)
-  # Never deploy with "latest" — use a specific SHA so rollbacks are reliable.
+  # Full ECR URI is set by CI: <account>.dkr.ecr.<region>.amazonaws.com/enterprise-ai/ai-agents
+  # CI override: --set image.repository=$ECR_REGISTRY/enterprise-ai/ai-agents --set image.tag=$GIT_SHA
+  repository: "REPLACE_WITH_ECR_URI"
   tag: "REPLACE_ME"
   pullPolicy: IfNotPresent
 
@@ -34,4 +33,13 @@ env:
   MCP_SSE_URL: http://data-mcp.ai-platform.svc.cluster.local:8080/sse
 
 # Secret containing INTERNAL_API_KEY, OTEL creds
+# Created by External Secrets Operator from AWS Secrets Manager (see infra/k8s/secrets/)
 secretName: ai-agents-secrets
+
+ingress:
+  enabled: false          # Set true in values-dev.yaml / values-prod.yaml
+  scheme: internet-facing # or internal for VPN-only access
+  host: ""                # e.g. api.enterprise-ai.example.com — set in values-prod.yaml
+  certificateArn: ""      # ACM cert ARN — set in values-prod.yaml
+  accessLogsBucket: ""    # S3 bucket for ALB access logs — set in values-prod.yaml
+  wafAclArn: ""           # WAFv2 ACL ARN — optional, set in values-prod.yaml

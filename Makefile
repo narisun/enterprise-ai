@@ -6,7 +6,10 @@
         test-integration test-evals test-evals-fidelity test-evals-synthesis \
         test-evals-faithfulness test-all test-all-unit \
         lint lint-fix format build sdk-install install-all-deps \
-        k8s-dev k8s-prod k8s-down clean
+        k8s-dev k8s-prod k8s-down \
+        tf-bootstrap tf-vpc tf-ecr tf-iam tf-eks tf-elasticache tf-rds \
+        tf-plan-all aws-secrets aws-connect aws-status \
+        clean
 
 REPO_ROOT := $(shell pwd)
 
@@ -264,6 +267,112 @@ k8s-prod: ## Deploy to production Kubernetes cluster
 
 k8s-down: ## Delete Kubernetes deployments
 	skaffold delete --profile=dev-cluster
+
+# ---- AWS Infrastructure (Terraform) -------------------------
+# ENV controls which .tfvars file is used: make tf-vpc ENV=prod
+ENV ?= dev
+
+tf-bootstrap: ## (Run ONCE) Create S3 state bucket + DynamoDB lock table, then patch all backend.tf files
+	@echo "→ Bootstrapping Terraform remote state..."
+	cd infra/terraform/bootstrap && \
+	  terraform init && \
+	  terraform apply
+	@echo "→ Patching all backend.tf files with the actual bucket name..."
+	bash infra/terraform/configure-backends.sh
+	@echo ""
+	@echo "✅ Bootstrap complete. Bucket name patched into all backend.tf files."
+	@echo "   Next step: make tf-vpc ENV=$(ENV)"
+
+tf-vpc: ## Apply VPC module (creates subnets, NAT, VPC endpoints)
+	@echo "→ Applying VPC for ENV=$(ENV)..."
+	cd infra/terraform/vpc && \
+	  terraform init && \
+	  terraform apply -var-file="environments/$(ENV).tfvars"
+	@echo "✅ VPC ready. Outputs:"
+	@cd infra/terraform/vpc && terraform output
+
+tf-ecr: ## Apply ECR module (creates container registries — global, run once)
+	@echo "→ Applying ECR repositories..."
+	cd infra/terraform/ecr && \
+	  terraform init && \
+	  terraform apply
+	@echo "✅ ECR repos ready:"
+	@cd infra/terraform/ecr && terraform output repository_urls
+
+tf-iam: ## Apply IAM module (GitHub OIDC + deploy role). Set GITHUB_ORG and GITHUB_REPO.
+	@echo "→ Applying IAM for GitHub OIDC..."
+	@test -n "$(GITHUB_ORG)"  || (echo "ERROR: set GITHUB_ORG=your-org" && exit 1)
+	@test -n "$(GITHUB_REPO)" || (echo "ERROR: set GITHUB_REPO=your-repo" && exit 1)
+	cd infra/terraform/iam && \
+	  terraform init && \
+	  terraform apply \
+	    -var="github_org=$(GITHUB_ORG)" \
+	    -var="github_repo=$(GITHUB_REPO)"
+	@echo "✅ IAM ready. Copy this to GitHub repo variables:"
+	@cd infra/terraform/iam && terraform output github_deploy_role_arn
+
+tf-eks: ## Apply EKS module (cluster + nodes + AWS Load Balancer Controller)
+	@echo "→ Applying EKS cluster for ENV=$(ENV)..."
+	@echo "   ⚠️  This takes 12-15 minutes on first apply."
+	cd infra/terraform/eks && \
+	  terraform init && \
+	  terraform apply -var-file="environments/$(ENV).tfvars"
+	@echo "✅ EKS ready. Configuring kubectl..."
+	@cd infra/terraform/eks && eval $$(terraform output -raw configure_kubectl)
+	@kubectl get nodes
+
+tf-elasticache: ## Apply ElastiCache (Redis) module
+	@test -n "$(REDIS_SECRET_ARN)" || (echo "ERROR: set REDIS_SECRET_ARN" && exit 1)
+	@echo "→ Applying ElastiCache for ENV=$(ENV)..."
+	cd infra/terraform/elasticache && \
+	  terraform init && \
+	  terraform apply \
+	    -var-file="environments/$(ENV).tfvars" \
+	    -var="redis_password_secret_arn=$(REDIS_SECRET_ARN)"
+	@cd infra/terraform/elasticache && terraform output
+
+tf-rds: ## Apply RDS (PostgreSQL + pgvector) module
+	@test -n "$(DB_SECRET_ARN)" || (echo "ERROR: set DB_SECRET_ARN" && exit 1)
+	@echo "→ Applying RDS for ENV=$(ENV)..."
+	cd infra/terraform/rds && \
+	  terraform init && \
+	  terraform apply \
+	    -var-file="environments/$(ENV).tfvars" \
+	    -var="db_password_secret_arn=$(DB_SECRET_ARN)" \
+	    -var="vpc_id=$(shell cd infra/terraform/vpc && terraform output -raw vpc_id)" \
+	    -var='private_subnet_ids=$(shell cd infra/terraform/vpc && terraform output -json private_subnet_ids)' \
+	    -var='allowed_cidr_blocks=$(shell cd infra/terraform/vpc && terraform output -json private_subnet_cidr_blocks)'
+
+tf-plan-all: ## Show plan for all modules without applying (ENV=dev|prod)
+	@echo "=== VPC ===" && cd infra/terraform/vpc && terraform init -backend=false -reconfigure 2>/dev/null && terraform plan -var-file="environments/$(ENV).tfvars" -compact-warnings 2>/dev/null || true
+	@echo "=== EKS ===" && cd infra/terraform/eks && terraform init -backend=false -reconfigure 2>/dev/null && terraform plan -var-file="environments/$(ENV).tfvars" -compact-warnings 2>/dev/null || true
+
+# ---- AWS Operational Commands ------------------------------
+
+aws-connect: ## Configure kubectl for the EKS cluster (ENV=dev|prod)
+	@echo "→ Connecting kubectl to enterprise-ai-$(ENV)..."
+	aws eks update-kubeconfig \
+	  --name "enterprise-ai-$(ENV)" \
+	  --region "$$(cd infra/terraform/eks && terraform output -raw cluster_endpoint 2>/dev/null | cut -d. -f4 || echo us-east-1)"
+	@kubectl get nodes
+
+aws-status: ## Show pod and service status in the ai-platform namespace
+	@echo "=== Pods ==="
+	kubectl get pods -n ai-platform -o wide
+	@echo ""
+	@echo "=== Services ==="
+	kubectl get svc -n ai-platform
+	@echo ""
+	@echo "=== Ingress ==="
+	kubectl get ingress -n ai-platform
+	@echo ""
+	@echo "=== HPA ==="
+	kubectl get hpa -n ai-platform
+
+aws-secrets: ## Create all Secrets Manager entries (interactive — prompts for values)
+	@echo "→ Creating AWS Secrets Manager entries for ENV=$(ENV)..."
+	@echo "   (You will be prompted for each secret value)"
+	@bash infra/k8s/secrets/create-secrets.sh "$(ENV)"
 
 # ---- Cleanup -----------------------------------------------
 

@@ -49,6 +49,8 @@ DB_PORT = int(os.environ.get("DB_PORT", "5432"))
 DB_USER = os.environ.get("DB_USER", "admin")
 DB_PASS = os.environ.get("DB_PASS", "")
 DB_NAME = os.environ.get("DB_NAME", "ai_memory")
+# DB_REQUIRE_SSL=true for RDS/managed Postgres; leave unset for local dev
+DB_REQUIRE_SSL = os.environ.get("DB_REQUIRE_SSL", "false").lower() == "true"
 TRANSPORT = os.environ.get("MCP_TRANSPORT", "stdio")
 
 # ---- Module-level singletons (set inside lifespan) --------------------------
@@ -97,6 +99,7 @@ async def _lifespan(server: FastMCP) -> AsyncIterator[None]:
         min_size=1,
         max_size=10,
         statement_cache_size=_config.statement_cache_size,
+        ssl="require" if DB_REQUIRE_SSL else None,
     )
     log.info("db_pool_ready", host=DB_HOST, db=DB_NAME)
     log.info("startup_complete", transport=TRANSPORT)

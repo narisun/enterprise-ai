@@ -1,0 +1,260 @@
+# ============================================================
+# CI — Deploy to EKS
+#
+# Triggers:
+#   • Automatically after ci-integration passes on main
+#   • Manual dispatch (for hotfixes or re-deploys without a code change)
+#
+# GitHub repository variables required (Settings → Variables → Actions):
+#   AWS_REGION          us-east-1
+#   AWS_ACCOUNT_ID      123456789012
+#   AWS_DEPLOY_ROLE_ARN arn:aws:iam::123456789012:role/enterprise-ai-github-deploy
+#   EKS_CLUSTER_NAME    enterprise-ai-prod
+#   DEPLOY_ENV          prod   (controls which Helm values overlay is used)
+#
+# No AWS_ACCESS_KEY_ID or AWS_SECRET_ACCESS_KEY — authentication is via OIDC.
+# The deploy role is created by infra/terraform/iam/main.tf.
+# ============================================================
+name: Deploy to EKS
+
+on:
+  workflow_run:
+    workflows: ["Integration Tests"]
+    branches: [main]
+    types: [completed]
+
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment (dev | prod)"
+        required: true
+        default: "prod"
+        type: choice
+        options: [dev, prod]
+      image_tag:
+        description: "Image tag to deploy (default: latest main SHA)"
+        required: false
+        default: ""
+
+env:
+  AWS_REGION:       ${{ vars.AWS_REGION }}
+  AWS_ACCOUNT_ID:   ${{ vars.AWS_ACCOUNT_ID }}
+  EKS_CLUSTER_NAME: ${{ vars.EKS_CLUSTER_NAME }}
+  DEPLOY_ENV:       ${{ inputs.environment || vars.DEPLOY_ENV || 'prod' }}
+
+jobs:
+  # ---- Guard — only deploy when integration tests passed ----------------
+  check-trigger:
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
+    steps:
+      - name: Integration tests passed
+        run: echo "Integration tests passed — proceeding with deploy"
+
+  # ---- Build and push Docker images to ECR ------------------------------
+  build-and-push:
+    needs: check-trigger
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write   # Required for OIDC
+      contents: read
+    outputs:
+      image_tag: ${{ steps.meta.outputs.image_tag }}
+      ecr_registry: ${{ steps.ecr-login.outputs.registry }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set image tag
+        id: meta
+        run: |
+          # Use manually specified tag, or the triggering workflow's SHA, or current SHA
+          if [[ -n "${{ inputs.image_tag }}" ]]; then
+            TAG="${{ inputs.image_tag }}"
+          elif [[ -n "${{ github.event.workflow_run.head_sha }}" ]]; then
+            TAG="${{ github.event.workflow_run.head_sha }}"
+          else
+            TAG="${{ github.sha }}"
+          fi
+          SHORT_TAG="${TAG:0:12}"
+          echo "image_tag=sha-${SHORT_TAG}" >> "$GITHUB_OUTPUT"
+          echo "Deploying image tag: sha-${SHORT_TAG}"
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push — ai-agents
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: agents/Dockerfile
+          push: true
+          tags: ${{ steps.ecr-login.outputs.registry }}/enterprise-ai/ai-agents:${{ steps.meta.outputs.image_tag }}
+          cache-from: type=registry,ref=${{ steps.ecr-login.outputs.registry }}/enterprise-ai/ai-agents:cache
+          cache-to:   type=registry,ref=${{ steps.ecr-login.outputs.registry }}/enterprise-ai/ai-agents:cache,mode=max
+
+      - name: Build and push — rm-prep-agent
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: agents/rm-prep/Dockerfile
+          push: true
+          tags: ${{ steps.ecr-login.outputs.registry }}/enterprise-ai/rm-prep-agent:${{ steps.meta.outputs.image_tag }}
+          cache-from: type=registry,ref=${{ steps.ecr-login.outputs.registry }}/enterprise-ai/rm-prep-agent:cache
+          cache-to:   type=registry,ref=${{ steps.ecr-login.outputs.registry }}/enterprise-ai/rm-prep-agent:cache,mode=max
+
+      - name: Build and push — data-mcp
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: tools/data-mcp/Dockerfile
+          push: true
+          tags: ${{ steps.ecr-login.outputs.registry }}/enterprise-ai/data-mcp:${{ steps.meta.outputs.image_tag }}
+          cache-from: type=registry,ref=${{ steps.ecr-login.outputs.registry }}/enterprise-ai/data-mcp:cache
+          cache-to:   type=registry,ref=${{ steps.ecr-login.outputs.registry }}/enterprise-ai/data-mcp:cache,mode=max
+
+  # ---- Deploy Helm releases to EKS -------------------------------------
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    environment:
+      name: ${{ inputs.environment || vars.DEPLOY_ENV || 'prod' }}
+      url: ${{ steps.ingress.outputs.url }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Install kubectl and helm
+        run: |
+          curl -sL https://dl.k8s.io/release/v1.30.0/bin/linux/amd64/kubectl -o kubectl
+          chmod +x kubectl && sudo mv kubectl /usr/local/bin/
+          curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
+      - name: Configure kubectl for EKS
+        run: |
+          aws eks update-kubeconfig \
+            --name "${{ env.EKS_CLUSTER_NAME }}" \
+            --region "${{ env.AWS_REGION }}"
+
+      - name: Verify cluster connectivity
+        run: |
+          kubectl get nodes
+          kubectl get pods -n kube-system | grep -E "aws-load-balancer|coredns" || true
+
+      - name: Deploy ai-platform (LiteLLM + OPA + OTEL)
+        run: |
+          helm upgrade --install ai-platform infra/helm/ai-platform \
+            --namespace ai-platform \
+            --create-namespace \
+            --values infra/helm/ai-platform/values.yaml \
+            --values infra/helm/ai-platform/values-${{ env.DEPLOY_ENV }}.yaml \
+            --timeout 5m \
+            --wait \
+            --atomic   # Roll back automatically if deploy fails
+
+      - name: Deploy data-mcp
+        env:
+          ECR_REGISTRY: ${{ needs.build-and-push.outputs.ecr_registry }}
+          IMAGE_TAG:    ${{ needs.build-and-push.outputs.image_tag }}
+        run: |
+          helm upgrade --install data-mcp infra/helm/data-mcp \
+            --namespace ai-platform \
+            --values infra/helm/data-mcp/values.yaml \
+            --values infra/helm/data-mcp/values-${{ env.DEPLOY_ENV }}.yaml \
+            --set image.repository="${ECR_REGISTRY}/enterprise-ai/data-mcp" \
+            --set image.tag="${IMAGE_TAG}" \
+            --timeout 5m \
+            --wait \
+            --atomic
+
+      - name: Deploy ai-agents
+        env:
+          ECR_REGISTRY: ${{ needs.build-and-push.outputs.ecr_registry }}
+          IMAGE_TAG:    ${{ needs.build-and-push.outputs.image_tag }}
+        run: |
+          helm upgrade --install ai-agents infra/helm/ai-agents \
+            --namespace ai-platform \
+            --values infra/helm/ai-agents/values.yaml \
+            --values infra/helm/ai-agents/values-${{ env.DEPLOY_ENV }}.yaml \
+            --set image.repository="${ECR_REGISTRY}/enterprise-ai/ai-agents" \
+            --set image.tag="${IMAGE_TAG}" \
+            --timeout 5m \
+            --wait \
+            --atomic
+
+      # ---- Post-deploy smoke tests ------------------------------------
+      - name: Wait for all pods to be ready
+        run: |
+          kubectl wait --for=condition=Ready pods \
+            --all \
+            --namespace ai-platform \
+            --timeout=300s
+
+      - name: Get ALB ingress URL
+        id: ingress
+        run: |
+          echo "Waiting for ALB DNS to be assigned..."
+          for i in $(seq 1 20); do
+            ALB_DNS=$(kubectl get ingress ai-agents -n ai-platform \
+              -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)
+            if [[ -n "$ALB_DNS" ]]; then
+              echo "ALB DNS: $ALB_DNS"
+              echo "url=https://${ALB_DNS}" >> "$GITHUB_OUTPUT"
+              break
+            fi
+            echo "  attempt $i/20 — waiting 15s..."
+            sleep 15
+          done
+
+      - name: Smoke test — /health endpoints
+        run: |
+          # Give ALB 60s to become healthy after pods are ready
+          sleep 60
+
+          BASE_URL="https://$(kubectl get ingress ai-agents -n ai-platform \
+            -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')"
+
+          echo "Testing ${BASE_URL}/health ..."
+          HTTP_STATUS=$(curl -sf -o /dev/null -w "%{http_code}" \
+            --max-time 30 --retry 5 --retry-delay 10 \
+            "${BASE_URL}/health" || echo "000")
+
+          if [[ "$HTTP_STATUS" != "200" ]]; then
+            echo "❌ Health check failed — HTTP ${HTTP_STATUS}"
+            kubectl get pods -n ai-platform
+            kubectl logs -n ai-platform -l app=ai-agents --tail=50
+            exit 1
+          fi
+          echo "✅ Health check passed (HTTP ${HTTP_STATUS})"
+
+      - name: Record deployment
+        if: success()
+        run: |
+          echo "✅ Deploy complete"
+          echo "  Environment: ${{ env.DEPLOY_ENV }}"
+          echo "  Image tag:   ${{ needs.build-and-push.outputs.image_tag }}"
+          echo "  Cluster:     ${{ env.EKS_CLUSTER_NAME }}"
+          kubectl get pods -n ai-platform
