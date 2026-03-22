@@ -56,6 +56,31 @@ CREATE TABLE IF NOT EXISTS agent_audit_log (
 CREATE INDEX IF NOT EXISTS idx_audit_session ON agent_audit_log(session_id);
 CREATE INDEX IF NOT EXISTS idx_audit_created ON agent_audit_log(created_at DESC);
 
+-- Composite index for compliance query patterns (SEC-05)
+CREATE INDEX IF NOT EXISTS idx_audit_role_created
+    ON agent_audit_log (agent_role, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_audit_trace
+    ON agent_audit_log (trace_id);
+
+-- Retention policy: Partition by month for efficient archival.
+-- In production, use pg_partman or a cron job to:
+--   1. Archive partitions older than 90 days to S3 (via pg_dump)
+--   2. Drop partitions older than 365 days
+-- COMMENT: Review and implement partition strategy before production launch.
+
+-- Schema version tracking (ROB-04 / SEC-05)
+CREATE TABLE IF NOT EXISTS schema_version (
+    id              SERIAL PRIMARY KEY,
+    version         INTEGER NOT NULL,
+    description     TEXT NOT NULL,
+    applied_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+INSERT INTO schema_version (version, description) VALUES
+    (1, 'Initial schema: checkpoints, checkpoint_writes, agent_audit_log, workspace')
+ON CONFLICT DO NOTHING;
+
 -- ============================================================
 -- Example workspace schema (created per-session by the agent)
 -- In production, workspace schemas are created dynamically by the

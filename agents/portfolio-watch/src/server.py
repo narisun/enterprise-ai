@@ -38,6 +38,14 @@ _PROGRESS_LABELS = {
 # When the generator loops (iteration ≥ 2), show a more specific label
 _REVISE_LABEL = "Revising draft based on fact-check findings…"
 
+# Nodes whose LLM streaming tokens should be forwarded to the UI.
+# Portfolio Watch nodes call LLMs directly (not through nested sub-graphs),
+# so all their events already have the correct langgraph_node metadata.
+_STREAMABLE_NODES = {"gather_portfolio", "gather_signals", "generate_narrative", "evaluate_narrative"}
+
+# Nodes that use structured output (emit JSON tokens, not useful for UI).
+_STRUCTURED_OUTPUT_NODES = set()
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -130,6 +138,52 @@ async def watch_streaming(
                     yield {
                         "event": "progress",
                         "data":  json.dumps({"message": label, "phase": phase}),
+                    }
+
+                # ── LLM streaming tokens (thinking / reasoning) ──────────────
+                elif event_type == "on_chat_model_stream" and node_name in _STREAMABLE_NODES:
+                    chunk = event.get("data", {}).get("chunk")
+                    if chunk:
+                        content = getattr(chunk, "content", "")
+                        if isinstance(content, str) and content:
+                            yield {
+                                "event": "llm_token",
+                                "data": json.dumps({
+                                    "text": content,
+                                    "node": node_name,
+                                }),
+                            }
+
+                # ── Tool invocations (MCP calls) ─────────────────────────────
+                elif event_type == "on_tool_start" and node_name in _STREAMABLE_NODES:
+                    tool_name = event.get("name", "unknown_tool")
+                    tool_input = event.get("data", {}).get("input", {})
+                    input_str = json.dumps(tool_input) if isinstance(tool_input, dict) else str(tool_input)
+                    if len(input_str) > 200:
+                        input_str = input_str[:200] + "…"
+                    yield {
+                        "event": "tool_activity",
+                        "data": json.dumps({
+                            "action": "start",
+                            "tool": tool_name,
+                            "node": node_name,
+                            "input_preview": input_str,
+                        }),
+                    }
+
+                elif event_type == "on_tool_end" and node_name in _STREAMABLE_NODES:
+                    tool_name = event.get("name", "unknown_tool")
+                    output_str = str(event.get("data", {}).get("output", ""))
+                    if len(output_str) > 300:
+                        output_str = output_str[:300] + "…"
+                    yield {
+                        "event": "tool_activity",
+                        "data": json.dumps({
+                            "action": "end",
+                            "tool": tool_name,
+                            "node": node_name,
+                            "output_preview": output_str,
+                        }),
                     }
 
                 elif event_type == "on_chain_end" and node_name == "evaluate_narrative":

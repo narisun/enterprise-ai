@@ -79,3 +79,19 @@ select = ["E", "F", "W", "I"]
 ignore = [
     "E501",   # line too long — handled by formatter
 ]
+
+# ── coverage ──────────────────────────────────────────────────────────────────────
+[tool.coverage.run]
+branch = true
+source = ["platform_sdk", "agents", "tools"]
+omit = ["*/tests/*", "*/testdata/*", "*/__pycache__/*"]
+
+[tool.coverage.report]
+fail_under = 80
+show_missing = true
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+]

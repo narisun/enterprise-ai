@@ -12,6 +12,10 @@ from typing import Annotated, Optional
 from typing_extensions import TypedDict
 from langgraph.graph.message import add_messages
 
+# Bump this when making breaking changes to RMPrepState.
+# The migration layer uses this to detect and upgrade old checkpoints.
+RM_PREP_STATE_VERSION = 1
+
 
 def _merge_errors(left: dict, right: dict) -> dict:
     """Merge error dicts from parallel nodes — last write wins per key."""
@@ -47,3 +51,6 @@ class RMPrepState(TypedDict):
 
     # ---- Session (maps to LangGraph thread_id for checkpointing) ----
     session_id: str
+
+    # ---- Schema versioning (for checkpoint migration safety) ----
+    schema_version: int  # Current version: 1. Bump on breaking state changes.

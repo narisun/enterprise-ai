@@ -1,0 +1,92 @@
+# ============================================================
+# platform/grafana/promtail-local.yaml
+#
+# Promtail log shipper — scrapes Docker container stdout/stderr
+# and forwards structured JSON logs to Loki.
+#
+# Container discovery: uses the Docker socket to find all containers
+# in the "enterprise-ai" compose project and auto-label them by
+# service name, container name, and compose project.
+#
+# JSON parsing: our services emit structlog JSON on stdout, so the
+# pipeline extracts "event", "level", "logger", and any other fields
+# as indexed labels for fast querying in Grafana.
+# ============================================================
+
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+  log_level: warn
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+    # Back-off on Loki unavailability — important if Loki restarts
+    backoff_config:
+      min_period: 500ms
+      max_period: 30s
+      max_retries: 10
+
+scrape_configs:
+  - job_name: docker
+
+    # Discover all running containers via the Docker daemon socket
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 5s
+        filters:
+          # Only scrape containers in our compose project
+          - name: label
+            values: ["com.docker.compose.project=enterprise-ai"]
+
+    # Relabelling: map Docker metadata → Loki stream labels
+    relabel_configs:
+      # Strip leading "/" from container name  (e.g. /ai-rm-prep-agent → ai-rm-prep-agent)
+      - source_labels: [__meta_docker_container_name]
+        regex: '/?(.*)'
+        target_label: container
+
+      # Use the compose service name as the primary "service" label
+      - source_labels: [__meta_docker_container_label_com_docker_compose_service]
+        target_label: service
+
+      # Carry the compose project name so multi-project Grafana installs stay clean
+      - source_labels: [__meta_docker_container_label_com_docker_compose_project]
+        target_label: project
+
+    # Pipeline: parse each log line as JSON and promote key fields to labels
+    pipeline_stages:
+      # Parse the raw log line as JSON (structlog format)
+      - json:
+          expressions:
+            level:   level        # "info" | "warning" | "error" | "debug"
+            event:   event        # short log event name, e.g. "mcp_connected"
+            logger:  logger       # Python logger name, e.g. "platform_sdk.mcp_bridge"
+            # Carry extra context fields into the log line body (not indexed as labels)
+            # so they are searchable in Grafana Explore with | json
+            url:     url
+            server:  server
+            tool:    tool
+            error:   error
+
+      # Promote level and logger to Loki stream labels for fast filtering
+      # Keep cardinality low — only stable, low-cardinality fields as labels
+      - labels:
+          level:
+          logger:
+
+      # Normalise log level to lowercase so filters are consistent
+      - template:
+          source: level
+          template: '{{ ToLower .Value }}'
+
+      # Use the timestamp from the JSON payload (if present) as the log timestamp.
+      # Falls back to ingest time if the field is missing or malformed.
+      - timestamp:
+          source: timestamp
+          format: RFC3339Nano
+          fallback_formats:
+            - RFC3339
+          action_on_failure: skip

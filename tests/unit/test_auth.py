@@ -9,9 +9,11 @@ import time
 
 import pytest
 
-# Force deterministic secrets for all unit tests
-os.environ.setdefault("JWT_SECRET", "unit-test-jwt-secret")
-os.environ.setdefault("CONTEXT_HMAC_SECRET", "unit-test-hmac-secret")
+# Force deterministic secrets for all unit tests.
+# Use direct assignment (not setdefault) so that values from .env loaded by
+# pytest-dotenv are overridden — unit tests must not depend on .env contents.
+os.environ["JWT_SECRET"] = "unit-test-jwt-secret"
+os.environ["CONTEXT_HMAC_SECRET"] = "unit-test-hmac-secret"
 
 from platform_sdk.auth import (  # noqa: E402
     AgentContext,

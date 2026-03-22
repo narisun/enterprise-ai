@@ -116,3 +116,28 @@ PERSONA_MANAGER   = _persona_to_jwt_payload(TEST_PERSONAS["manager"])
 PERSONA_SENIOR_RM = _persona_to_jwt_payload(TEST_PERSONAS["senior_rm"])
 PERSONA_RM        = _persona_to_jwt_payload(TEST_PERSONAS["rm"])
 PERSONA_READONLY  = _persona_to_jwt_payload(TEST_PERSONAS["readonly"])
+
+
+# ── Transaction isolation ──────────────────────────────────────────────────────────
+
+@pytest_asyncio.fixture(scope="function")
+async def db_transaction(db_pool):
+    """
+    Function-scoped fixture that wraps each test in a database transaction.
+
+    The transaction is ROLLED BACK after each test, ensuring test isolation:
+    no test can leave behind data that affects subsequent tests.
+
+    Usage:
+        async def test_something(db_transaction):
+            await db_transaction.execute("INSERT INTO ...")
+            # Transaction is rolled back after test completes
+    """
+    conn = await db_pool.acquire()
+    tr = conn.transaction()
+    await tr.start()
+    try:
+        yield conn
+    finally:
+        await tr.rollback()
+        await db_pool.release(conn)

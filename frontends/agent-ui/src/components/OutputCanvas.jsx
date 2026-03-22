@@ -5,20 +5,21 @@
  *
  *  idle          Empty state with agent icon
  *
- *  streaming     ThinkingBlock (auto-expanded, shows current step label)
+ *  streaming     ThinkingBlock (collapsed, shows live activity preview)
  *  + no tokens   The agent is doing background work (data fetching, routing…)
  *
- *  streaming     ThinkingBlock (auto-collapsed to a single "Alex thought…" line)
- *  + tokens      Markdown building up word-by-word with a blinking cursor
+ *  streaming     ThinkingBlock (collapsed) + markdown building word-by-word
+ *  + tokens      with a blinking cursor
  *
  *  complete      ThinkingBlock (collapsed, user can expand) + full output
  *
  *  error         Error card
  *
  * ── ThinkingBlock behaviour ───────────────────────────────────────────────
- * Mirrors what users recognise from Claude, ChatGPT, and Gemini:
- *   • Expands automatically when the agent starts doing background work
- *   • Collapses automatically the moment output tokens start arriving
+ * Matches industry-standard UX from Claude, ChatGPT, and Gemini:
+ *   • COLLAPSED by default — never auto-expands
+ *   • Shows a one-line live preview of current activity on the header
+ *   • User clicks to expand and see the full activity timeline
  *   • After completion, stays collapsed — user can re-open to inspect steps
  *
  * ── Token streaming ───────────────────────────────────────────────────────
@@ -41,6 +42,9 @@
  *   steps        — [{id, message, ts}]
  *   activeStep   — string | null
  *   thoughts     — [{id, message, verdict, score, issues, missed_signals, ts}]
+ *   thinkingText — {node, text} | null — live LLM token buffer for current node
+ *   thinkingLog  — [{id, node, text, ts}] — completed LLM thinking segments
+ *   toolCalls    — [{id, action, tool, node, inputPreview?, outputPreview?, ts}]
  */
 
 import { useState, useRef, useEffect } from 'react'
@@ -98,11 +102,13 @@ const MD_COMPONENTS = {
   ),
 }
 
-// ── Merge steps + thoughts into a single time-ordered timeline ────────────────
-function buildTimeline(steps, thoughts) {
+// ── Merge steps + thoughts + thinking + tool calls into a time-ordered timeline
+function buildTimeline(steps, thoughts, thinkingLog = [], toolCalls = []) {
   return [
-    ...steps.map((s)  => ({ ...s,  _type: 'step'    })),
-    ...thoughts.map((t) => ({ ...t, _type: 'thought' })),
+    ...steps.map((s)       => ({ ...s,  _type: 'step'     })),
+    ...thoughts.map((t)    => ({ ...t,  _type: 'thought'  })),
+    ...thinkingLog.map((l) => ({ ...l,  _type: 'llm'      })),
+    ...toolCalls.map((tc)  => ({ ...tc, _type: 'tool'     })),
   ].sort((a, b) => (a.ts ?? 0) - (b.ts ?? 0))
 }
 
@@ -173,55 +179,212 @@ function ThoughtBubble({ thought }) {
   )
 }
 
+// ── Human-readable node labels ──────────────────────────────────────────────
+// Includes both outer orchestrator node names and inner ReAct agent node names
+// ("agent", "tools") which appear when specialist agents stream events.
+const _NODE_LABELS = {
+  // RM Prep outer orchestrator nodes
+  parse_intent:       'Parsing intent',
+  route:              'Routing',
+  gather_crm:         'CRM specialist',
+  gather_payments:    'Payments specialist',
+  gather_news:        'News specialist',
+  synthesize:         'Synthesizing brief',
+  format_brief:       'Formatting brief',
+  // Portfolio Watch nodes
+  gather_portfolio:   'Portfolio data',
+  gather_signals:     'Signal analysis',
+  generate_narrative: 'Generating narrative',
+  evaluate_narrative: 'Evaluating narrative',
+  format_report:      'Formatting report',
+  // Inner ReAct agent nodes (from build_specialist_agent)
+  agent:              'Agent reasoning',
+  tools:              'Running tools',
+}
+
+// ── LLMThinkingBubble — shows a completed or live LLM thinking segment ──────
+function LLMThinkingBubble({ node, text, isLive = false }) {
+  const [expanded, setExpanded] = useState(false)
+  const label  = _NODE_LABELS[node] ?? node
+  const maxLen = 120
+  const isLong  = text.length > maxLen
+  const preview = isLong ? text.slice(0, maxLen) + '\u2026' : text
+
+  return (
+    <div className={`rounded-lg border px-3 py-2 ${
+      isLive ? 'bg-blue-50 border-blue-200' : 'bg-slate-50 border-slate-200'
+    }`}>
+      <div className="flex items-start gap-2">
+        {isLive
+          ? <Loader2 className="w-3 h-3 text-blue-500 animate-spin shrink-0 mt-1" />
+          : <Zap className="w-3 h-3 text-amber-500 shrink-0 mt-1" />
+        }
+        <div className="flex-1 min-w-0">
+          <span className={`text-xs font-semibold ${isLive ? 'text-blue-700' : 'text-slate-600'}`}>
+            {label}
+            {isLive && <span className="ml-1.5 font-normal text-blue-500 animate-pulse">thinking\u2026</span>}
+          </span>
+          <p className="text-xs text-slate-500 mt-0.5 font-mono leading-relaxed whitespace-pre-wrap break-words">
+            {expanded ? text : preview}
+          </p>
+          {isLong && (
+            <button
+              onClick={() => setExpanded((v) => !v)}
+              className="text-xs text-blue-500 hover:text-blue-700 mt-1 font-medium"
+            >
+              {expanded ? 'Show less' : 'Show more'}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── ToolCallBubble — shows an MCP tool call (paired start→done) ────────────
+// Each tool call is a single entry that transitions from "calling" (amber) to
+// "done" (green).  The useAgentStream hook pairs on_tool_start with on_tool_end
+// events in-place so we never show duplicate bubbles for the same tool call.
+function ToolCallBubble({ action, tool, node, inputPreview, outputPreview }) {
+  const [expanded, setExpanded] = useState(false)
+  const isDone     = action === 'end'
+  const nodeLabel  = _NODE_LABELS[node] ?? node
+  // Show input args while calling; output result when done (fall back to input if no output)
+  const detail     = isDone ? (outputPreview || inputPreview) : inputPreview
+
+  return (
+    <div className={`rounded-lg border px-3 py-2 ${
+      isDone ? 'bg-emerald-50 border-emerald-200' : 'bg-amber-50 border-amber-200'
+    }`}>
+      <div className="flex items-start gap-2">
+        {isDone
+          ? <CheckCircle2 className="w-3 h-3 text-emerald-500 shrink-0 mt-0.5" />
+          : <Loader2 className="w-3 h-3 text-amber-500 animate-spin shrink-0 mt-0.5" />
+        }
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className={`text-xs font-bold font-mono px-1.5 py-px rounded ${
+              isDone ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
+            }`}>
+              {tool}
+            </span>
+            <span className="text-xs text-slate-400">{nodeLabel}</span>
+            {isDone
+              ? <span className="text-xs text-emerald-600 font-medium">done</span>
+              : <span className="text-xs text-amber-600 font-medium">calling\u2026</span>
+            }
+          </div>
+          {detail && (
+            <>
+              {detail.length > 100 ? (
+                <>
+                  <p className="text-xs text-slate-500 mt-1 font-mono leading-relaxed whitespace-pre-wrap break-words">
+                    {expanded ? detail : detail.slice(0, 100) + '\u2026'}
+                  </p>
+                  <button
+                    onClick={() => setExpanded((v) => !v)}
+                    className="text-xs text-blue-500 hover:text-blue-700 mt-0.5 font-medium"
+                  >
+                    {expanded ? 'Show less' : 'Show more'}
+                  </button>
+                </>
+              ) : (
+                <p className="text-xs text-slate-500 mt-1 font-mono leading-relaxed whitespace-pre-wrap break-words">
+                  {detail}
+                </p>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── ThinkingBlock ─────────────────────────────────────────────────────────────
 //
-// The single collapsible "thinking" indicator that replaces the separate
-// ExecutionRail panel.  Behaviour mirrors Claude / ChatGPT / Gemini:
+// Industry-standard collapsed-by-default thinking indicator, matching the
+// patterns used by Claude, ChatGPT, and Gemini:
 //
-//   • Auto-expands while the agent is doing background work (no tokens yet)
-//   • Auto-collapses the moment output tokens start arriving
-//   • Stays collapsed after completion — user can expand to inspect steps
+//   • COLLAPSED by default — never auto-expands
+//   • Shows a single-line summary of current activity on the header
+//   • User clicks to expand and see the full activity timeline
+//   • After completion, shows step count and verification badge
 //
-function ThinkingBlock({ steps, activeStep, thoughts, agent, status, hasTokens }) {
+// This keeps the user engaged (they see real-time status) without
+// overwhelming them with details they didn't ask for.
+//
+function ThinkingBlock({ steps, activeStep, thoughts, agent, status, hasTokens,
+                         thinkingText, thinkingLog, toolCalls }) {
   const isStreaming = status === 'streaming'
   const isDone      = status === 'complete' || status === 'error'
   const [open, setOpen] = useState(false)
 
-  // Auto-expand while thinking (no tokens), auto-collapse when output starts
-  useEffect(() => {
-    if (isStreaming && !hasTokens && (steps.length > 0 || !!activeStep)) {
-      setOpen(true)
-    }
-    if (hasTokens || isDone) {
-      setOpen(false)
-    }
-  }, [isStreaming, hasTokens, isDone, steps.length, activeStep])
+  // NO auto-expand/collapse.  The block is always collapsed by default.
+  // Users click to expand when they want to see details.
 
-  const timeline    = buildTimeline(steps, thoughts)
-  const hasContent  = timeline.length > 0 || !!activeStep
+  const timeline    = buildTimeline(steps, thoughts, thinkingLog ?? [], toolCalls ?? [])
+  const hasContent  = timeline.length > 0 || !!activeStep || !!thinkingText
   if (!hasContent) return null
 
-  // Collapsed header text
-  const headerText = (isStreaming && !hasTokens)
-    ? (activeStep ?? `${agent?.workerName ?? 'Agent'} is thinking…`)
-    : `${agent?.workerName ?? 'Agent'} thought for ${steps.length} step${steps.length !== 1 ? 's' : ''}`
+  const agentName = agent?.workerName ?? 'Agent'
+
+  // Compute a live activity preview for the collapsed header
+  const livePreview = (() => {
+    if (!isStreaming) return null
+    // Show the latest LLM thinking as a one-line preview
+    if (thinkingText?.text) {
+      const label = _NODE_LABELS[thinkingText.node] ?? thinkingText.node
+      const snippet = thinkingText.text.replace(/\n/g, ' ').slice(-60)
+      return `${label}: ${snippet}`
+    }
+    // Fall back to the active step label
+    if (activeStep) return activeStep
+    return 'starting up…'
+  })()
+
+  // Primary header text
+  const headerText = isStreaming
+    ? `${agentName} is working`
+    : `${agentName} worked through ${steps.length} step${steps.length !== 1 ? 's' : ''}`
 
   // Verification badge (Portfolio Watch evaluator)
   const lastPass = [...thoughts].reverse().find((t) => t.verdict === 'pass')
 
+  // Count of active tool calls (started but not yet ended)
+  const activeToolCount = (toolCalls ?? []).filter((tc) => tc.action === 'start').length
+    - (toolCalls ?? []).filter((tc) => tc.action === 'end').length
+
   return (
     <div className="mb-5 rounded-xl border border-slate-200 bg-slate-50 overflow-hidden">
+      {/* ── Collapsed header — always visible ──────────────────────────── */}
       <button
         onClick={() => setOpen((v) => !v)}
         className="w-full flex items-center gap-2.5 px-4 py-2.5 hover:bg-slate-100 transition-colors text-left"
       >
-        {/* Spinner while thinking, check when done */}
-        {isStreaming && !hasTokens
+        {/* Spinner while streaming, checkmark when done */}
+        {isStreaming
           ? <Loader2 className="w-3.5 h-3.5 text-blue-500 animate-spin shrink-0" />
           : <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
         }
 
-        <span className="flex-1 text-sm font-medium text-slate-700 truncate">{headerText}</span>
+        {/* Primary label */}
+        <span className="text-sm font-medium text-slate-700 shrink-0">{headerText}</span>
+
+        {/* Live activity preview — single line, truncated, fades out */}
+        {isStreaming && livePreview && (
+          <span className="flex-1 text-xs text-slate-400 truncate min-w-0 ml-1">
+            · {livePreview}
+          </span>
+        )}
+        {!isStreaming && <span className="flex-1" />}
+
+        {/* Active tool call indicator */}
+        {isStreaming && activeToolCount > 0 && (
+          <span className="text-xs px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-600 font-medium shrink-0 animate-pulse">
+            {activeToolCount} tool{activeToolCount !== 1 ? 's' : ''}
+          </span>
+        )}
 
         {/* Step count chip */}
         {steps.length > 0 && (
@@ -243,18 +406,48 @@ function ThinkingBlock({ steps, activeStep, thoughts, agent, status, hasTokens }
         }
       </button>
 
+      {/* ── Expanded timeline — shown only when user clicks ──────────── */}
       {open && (
-        <div className="border-t border-slate-200 px-4 py-3 space-y-2.5">
-          {timeline.map((item) =>
-            item._type === 'step' ? (
-              <div key={item.id} className="flex items-center gap-2.5">
-                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-                <span className="text-sm text-slate-600">{item.message}</span>
-              </div>
-            ) : (
-              <ThoughtBubble key={item.id} thought={item} />
-            )
+        <div className="border-t border-slate-200 px-4 py-3 space-y-2.5 max-h-96 overflow-y-auto">
+          {timeline.map((item) => {
+            if (item._type === 'step') {
+              return (
+                <div key={item.id} className="flex items-center gap-2.5">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                  <span className="text-sm text-slate-600">{item.message}</span>
+                </div>
+              )
+            }
+            if (item._type === 'thought') {
+              return <ThoughtBubble key={item.id} thought={item} />
+            }
+            if (item._type === 'llm') {
+              return <LLMThinkingBubble key={item.id} node={item.node} text={item.text} />
+            }
+            if (item._type === 'tool') {
+              return (
+                <ToolCallBubble
+                  key={item.id}
+                  action={item.action}
+                  tool={item.tool}
+                  node={item.node}
+                  inputPreview={item.inputPreview}
+                  outputPreview={item.outputPreview}
+                />
+              )
+            }
+            return null
+          })}
+
+          {/* Live LLM thinking — shown at the bottom when actively streaming */}
+          {thinkingText && (
+            <LLMThinkingBubble
+              node={thinkingText.node}
+              text={thinkingText.text}
+              isLive
+            />
           )}
+
           {activeStep && (
             <div className="flex items-center gap-2.5">
               <Loader2 className="w-3.5 h-3.5 text-blue-500 animate-spin shrink-0" />
@@ -353,6 +546,7 @@ function RefinementBar({ onSubmit, isRefining, suggestions }) {
 export default function OutputCanvas({
   output, streamingText = '', clientName, status, error, onRefine, agent,
   steps = [], activeStep = null, thoughts = [],
+  thinkingText = null, thinkingLog = [], toolCalls = [],
 }) {
   const canvasRef  = useRef(null)
   const hasOutput  = !!output
@@ -425,9 +619,9 @@ export default function OutputCanvas({
           </div>
         )}
 
-        {/* ── Thinking block (replaces ExecutionRail) ───────────────────── */}
-        {/*    Shown whenever there are steps, thoughts, or an activeStep.    */}
-        {/*    Auto-expands while thinking, auto-collapses when tokens start. */}
+        {/* ── Thinking block — collapsed by default, click to expand ──── */}
+        {/*    Shows real-time activity preview on the header line.            */}
+        {/*    User clicks to expand and see full timeline details.           */}
         <ThinkingBlock
           steps={steps}
           activeStep={activeStep}
@@ -435,6 +629,9 @@ export default function OutputCanvas({
           agent={agent}
           status={status}
           hasTokens={hasTokens || hasOutput}
+          thinkingText={thinkingText}
+          thinkingLog={thinkingLog}
+          toolCalls={toolCalls}
         />
 
         {/* ── Live token stream ─────────────────────────────────────────── */}

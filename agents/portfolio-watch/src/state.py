@@ -12,6 +12,9 @@ from typing import Annotated, Optional
 from typing_extensions import TypedDict
 from langgraph.graph.message import add_messages
 
+# Bump this when making breaking changes to PortfolioWatchState.
+PORTFOLIO_WATCH_STATE_VERSION = 1
+
 
 class PortfolioWatchState(TypedDict):
     # ── Conversation history ────────────────────────────────────────────────────
@@ -39,3 +42,6 @@ class PortfolioWatchState(TypedDict):
     # ── Final output ─────────────────────────────────────────────────────────────
     final_report: Optional[str]          # Verified markdown report
     report_meta: Optional[dict]          # {clients, flags, score, iterations}
+
+    # ---- Schema versioning (for checkpoint migration safety) ----
+    schema_version: int  # Current version: 1. Bump on breaking state changes.

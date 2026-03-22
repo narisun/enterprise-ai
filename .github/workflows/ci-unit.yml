@@ -59,7 +59,9 @@ jobs:
             --cov=platform_sdk \
             --cov=agents/rm-prep/src \
             --cov-report=xml:test-results/coverage-py${{ matrix.python-version }}.xml \
-            --cov-report=term-missing
+            --cov-report=term-missing \
+            --cov-fail-under=80 \
+            --cov-branch
 
       - name: Upload test results
         if: always()

@@ -1,0 +1,59 @@
+# ============================================================
+# platform/grafana/loki-local.yaml
+#
+# Loki log aggregation server — local development config.
+# Stores log chunks on the local filesystem inside the container.
+# No clustering, no S3 — single-process mode for simplicity.
+# ============================================================
+
+auth_enabled: false
+
+server:
+  http_listen_port: 3100
+  grpc_listen_port: 9096
+  log_level: warn              # Reduce Loki's own noise in docker logs
+
+common:
+  instance_addr: 127.0.0.1
+  path_prefix: /loki
+  storage:
+    filesystem:
+      chunks_directory: /loki/chunks
+      rules_directory: /loki/rules
+  replication_factor: 1
+  ring:
+    kvstore:
+      store: inmemory
+
+# Retention — keep 7 days of logs locally
+limits_config:
+  retention_period: 168h
+  # Allow Promtail to send structured metadata fields (event, logger, etc.)
+  allow_structured_metadata: true
+  # Reject logs older than 1h to avoid ordering issues on restart
+  reject_old_samples: true
+  reject_old_samples_max_age: 1h
+  # Per-stream rate limits — generous for local dev
+  ingestion_rate_mb: 32
+  ingestion_burst_size_mb: 64
+
+compactor:
+  working_directory: /loki/compactor
+  retention_enabled: true
+  delete_request_store: filesystem
+
+schema_config:
+  configs:
+    - from: 2024-01-01
+      store: tsdb
+      object_store: filesystem
+      schema: v13
+      index:
+        prefix: index_
+        period: 24h
+
+ruler:
+  alertmanager_url: http://localhost:9093
+
+analytics:
+  reporting_enabled: false

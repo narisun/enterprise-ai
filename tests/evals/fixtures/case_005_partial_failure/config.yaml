@@ -1,0 +1,13 @@
+# Eval fixture: Partial data failure
+# Tests: One specialist returns error while others succeed.
+# Expected: Brief should include available data with disclosure about missing section.
+persona: manager
+company_name: "Microsoft Corp."
+inject_errors:
+  payments_mcp: "SERVICE_UNAVAILABLE"
+expected_behavior:
+  - brief_generated: true
+  - crm_section_present: true
+  - payments_section_contains: "unavailable"
+  - news_section_present: true
+  - faithfulness_threshold: 0.70

@@ -1,0 +1,16 @@
+# ============================================================
+# Grafana dashboard provider — loads JSON dashboards from disk.
+# ============================================================
+
+apiVersion: 1
+
+providers:
+  - name: enterprise-ai
+    orgId: 1
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/provisioning/dashboards
+      foldersFromFilesStructure: false

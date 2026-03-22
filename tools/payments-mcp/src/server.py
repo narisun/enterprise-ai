@@ -80,6 +80,7 @@ async def _lifespan(server: FastMCP):
         user=os.environ.get("DB_USER", "admin"),
         password=os.environ.get("DB_PASS", ""),
         database=os.environ.get("DB_NAME", "ai_memory"),
+        ssl="require" if os.environ.get("DB_REQUIRE_SSL", "false").lower() == "true" else None,
         min_size=2,
         max_size=10,
         statement_cache_size=_config.statement_cache_size,

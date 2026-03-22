@@ -82,4 +82,10 @@ class AgentContextMiddleware:
                     return
                 except Exception as exc:
                     log.warning("invalid_agent_context_header", error=str(exc))
+        if scope["type"] in ("http",):
+            log.warning(
+                "auth_context_fallback_anonymous",
+                reason="missing_or_invalid_x_agent_context_header",
+                path=scope.get("path", "unknown"),
+            )
         await self.app(scope, receive, send)

@@ -41,6 +41,16 @@ _PROGRESS_LABELS = {
     "format_brief":     "Brief ready",
 }
 
+# Nodes that use with_structured_output (emit JSON tokens, not human-readable).
+# Their on_chat_model_stream events are excluded from the llm_token SSE stream.
+_STRUCTURED_OUTPUT_NODES = {"parse_intent", "synthesize"}
+
+# Nodes in the outer orchestrator graph whose on_chain_start we track for
+# progress labels.  Inner ReAct agent events (from build_specialist_agent)
+# have different langgraph_node metadata ("agent", "tools") — they are NOT
+# filtered out; all on_chat_model_stream and on_tool_* events outside of
+# _STRUCTURED_OUTPUT_NODES are forwarded to the UI.
+
 # ─── Test Persona Registry (centralised in platform_sdk.testing) ──────────────
 # Imported from the SDK so server, conftest, and integration tests share one source.
 _TEST_PERSONAS = TEST_PERSONAS
@@ -175,8 +185,20 @@ async def health():
 
 @app.get("/health/ready")
 async def health_ready(request: Request):
-    """Kubernetes readiness probe — checks orchestrator and MCP bridges."""
-    checks = {}
+    """Kubernetes readiness probe — checks orchestrator and live MCP bridge sessions.
+
+    Returns 200 only when:
+      - The orchestrator has been built (all MCPs were connected at startup)
+      - All MCP bridges currently have a live SSE session
+
+    Returns 503 (degraded) when any bridge is disconnected so Kubernetes
+    stops routing traffic until the auto-reconnect loop re-establishes all
+    sessions.  This prevents the agent from silently returning tool-error
+    strings on every request while it is reconnecting.
+    """
+    from fastapi.responses import JSONResponse
+
+    checks: dict[str, str] = {}
     healthy = True
 
     orchestrator_ok = hasattr(request.app.state, "orchestrator") and request.app.state.orchestrator is not None
@@ -184,9 +206,19 @@ async def health_ready(request: Request):
     if not orchestrator_ok:
         healthy = False
 
+    # Check each MCP bridge is holding a live session
+    bridges = getattr(request.app.state, "bridges", {})
+    for name, bridge in bridges.items():
+        bridge_ok = bridge.is_connected
+        checks[f"mcp_{name}"] = "ok" if bridge_ok else "reconnecting"
+        if not bridge_ok:
+            healthy = False
+
     status_code = 200 if healthy else 503
-    from fastapi.responses import JSONResponse
-    return JSONResponse({"status": "ok" if healthy else "degraded", "checks": checks}, status_code=status_code)
+    return JSONResponse(
+        {"status": "ok" if healthy else "degraded", "checks": checks},
+        status_code=status_code,
+    )
 
 
 @app.post("/brief")
@@ -232,6 +264,9 @@ async def get_brief_streaming(
         # client_name is extracted from the synthesize node's structured output
         # and forwarded in the final brief event (format_brief doesn't return it).
         _client_name = ""
+        # Track which outer orchestrator node is currently executing so we can
+        # label inner ReAct agent events with a meaningful phase name.
+        _current_phase = None
 
         try:
             if body.jwt_token:
@@ -258,9 +293,79 @@ async def get_brief_streaming(
                 node_name = event.get("metadata", {}).get("langgraph_node", "")
 
                 if event_type == "on_chain_start" and node_name in _PROGRESS_LABELS:
+                    _current_phase = node_name
                     yield {
                         "event": "progress",
                         "data": json.dumps({"message": _PROGRESS_LABELS[node_name]}),
+                    }
+
+                # ── LLM streaming tokens (thinking / planning / reasoning) ────
+                # Forward real-time LLM output so the UI can show what the
+                # agent is thinking.  Specialist gather nodes (gather_crm,
+                # gather_payments, gather_news) use nested ReAct agents built
+                # with build_specialist_agent().  Their inner events propagate
+                # through astream_events(v2) but with INNER node names
+                # ("agent", "tools") rather than the outer node name.
+                #
+                # We exclude only _STRUCTURED_OUTPUT_NODES (parse_intent,
+                # synthesize) which emit JSON tokens from with_structured_output.
+                # All other LLM token events are forwarded — including those
+                # from nested specialist agents.
+                elif event_type == "on_chat_model_stream" and node_name not in _STRUCTURED_OUTPUT_NODES:
+                    chunk = event.get("data", {}).get("chunk")
+                    if chunk:
+                        # LangChain BaseMessageChunk: content may be str or list
+                        content = getattr(chunk, "content", "")
+                        if isinstance(content, str) and content:
+                            # Use the current outer phase for labelling when the
+                            # node_name is an inner ReAct agent node.
+                            effective_node = node_name if node_name in _PROGRESS_LABELS else (_current_phase or node_name or "agent")
+                            yield {
+                                "event": "llm_token",
+                                "data": json.dumps({
+                                    "text": content,
+                                    "node": effective_node,
+                                }),
+                            }
+
+                # ── Tool invocations (MCP calls) ─────────────────────────────
+                # Show which MCP tools the specialist agents are calling and
+                # what they return — gives the user visibility into data fetching.
+                # No node_name filter: inner ReAct agents have different node
+                # names ("agent", "tools") than the outer orchestrator nodes.
+                elif event_type == "on_tool_start":
+                    tool_name = event.get("name", "unknown_tool")
+                    tool_input = event.get("data", {}).get("input", {})
+                    # Truncate large inputs to keep SSE payloads manageable
+                    input_str = json.dumps(tool_input) if isinstance(tool_input, dict) else str(tool_input)
+                    if len(input_str) > 200:
+                        input_str = input_str[:200] + "…"
+                    effective_node = node_name if node_name in _PROGRESS_LABELS else (_current_phase or node_name or "agent")
+                    yield {
+                        "event": "tool_activity",
+                        "data": json.dumps({
+                            "action": "start",
+                            "tool": tool_name,
+                            "node": effective_node,
+                            "input_preview": input_str,
+                        }),
+                    }
+
+                elif event_type == "on_tool_end":
+                    tool_name = event.get("name", "unknown_tool")
+                    output_raw = event.get("data", {}).get("output", "")
+                    output_str = str(output_raw)
+                    if len(output_str) > 300:
+                        output_str = output_str[:300] + "…"
+                    effective_node = node_name if node_name in _PROGRESS_LABELS else (_current_phase or node_name or "agent")
+                    yield {
+                        "event": "tool_activity",
+                        "data": json.dumps({
+                            "action": "end",
+                            "tool": tool_name,
+                            "node": effective_node,
+                            "output_preview": output_str,
+                        }),
                     }
 
                 elif event_type == "on_chain_end" and node_name == "synthesize":

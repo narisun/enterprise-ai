@@ -425,7 +425,13 @@ export default function App() {
   // so multi-turn flows survive Vite hot-reloads during development.
   const { sessionId, newSession } = useSession()
 
-  const { steps, activeStep, thoughts, streamingText, output, clientName, status, error, run, reset } = useAgentStream()
+  const {
+    steps, activeStep, thoughts,
+    streamingText, output, clientName,
+    thinkingText, thinkingLog, toolCalls,
+    status, error,
+    run, reset,
+  } = useAgentStream()
 
   // ── History API integration ──────────────────────────────────────────────────
   // Every phase transition pushes a history entry so the browser back/forward
@@ -751,6 +757,9 @@ export default function App() {
               steps={steps}
               activeStep={activeStep}
               thoughts={thoughts}
+              thinkingText={thinkingText}
+              thinkingLog={thinkingLog}
+              toolCalls={toolCalls}
             />
           )}
 

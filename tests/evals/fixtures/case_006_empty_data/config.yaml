@@ -1,0 +1,10 @@
+# Eval fixture: Empty data
+# Tests: All queries return zero rows (client exists but has no activity).
+# Expected: Brief should acknowledge no data found, not hallucinate content.
+persona: manager
+company_name: "Phantom Corp."
+expected_behavior:
+  - brief_generated: true
+  - no_fabricated_data: true
+  - acknowledges_empty_results: true
+  - faithfulness_threshold: 0.60

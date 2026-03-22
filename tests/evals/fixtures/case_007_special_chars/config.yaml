@@ -1,0 +1,9 @@
+# Eval fixture: Special characters in client name
+# Tests: SQL-sensitive characters are handled safely (no injection).
+# Expected: Brief should either find the client or report not found.
+persona: manager
+company_name: "O'Brien & Associates"
+expected_behavior:
+  - no_sql_error: true
+  - brief_generated: true
+  - faithfulness_threshold: 0.60

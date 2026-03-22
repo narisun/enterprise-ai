@@ -112,12 +112,3 @@ _agent_is_authorized if {
         "rm_prep_agent",
     }
 }
-
-# Bypass for local development — any role is accepted in the local environment.
-# H3: input.environment is ALWAYS stamped by the MCP server from its own
-# ENVIRONMENT env var — it is never supplied by the calling agent.
-# This makes the bypass safe: only a server configured with ENVIRONMENT=local
-# (i.e. a local-dev instance) can trigger this rule.
-#_agent_is_authorized if {
-#    input.environment == "local"
-#}

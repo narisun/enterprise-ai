@@ -16,6 +16,7 @@ Model tiering:
   synthesize:      complex-routing (Sonnet — coherent brief writing)
   format_brief:    no LLM        (Jinja2 template render)
 """
+import asyncio
 import json
 import os
 from contextlib import asynccontextmanager
@@ -341,15 +342,33 @@ async def build_rm_orchestrator_with_bridges(
     """
     from platform_sdk.mcp_bridge import MCPToolBridge
 
+    # MCP_STARTUP_TIMEOUT: seconds each bridge waits for its first connection.
+    # All three bridges connect concurrently (asyncio.gather), so total wait
+    # is at most one timeout — not three.  The reconnect loop keeps running in
+    # the background, so if a bridge doesn't connect in time the agent starts
+    # degraded and recovers automatically once the MCP comes up.
+    _startup_timeout = float(os.environ.get("MCP_STARTUP_TIMEOUT", "120"))
+
     bridges = {
         "salesforce": MCPToolBridge(sf_url,  agent_context=agent_context),
         "payments":   MCPToolBridge(pay_url, agent_context=agent_context),
         "news":       MCPToolBridge(news_url, agent_context=agent_context),
     }
 
+    # Connect all three bridges in parallel — removes sequential startup
+    # ordering dependency (previously 3 × sequential = 3× the wait time).
+    log.info("mcp_connecting_all", role=agent_context.role, timeout=_startup_timeout)
+    await asyncio.gather(
+        *[bridge.connect(startup_timeout=_startup_timeout) for bridge in bridges.values()],
+        return_exceptions=True,  # one bridge timeout must not cancel the others
+    )
     for name, bridge in bridges.items():
-        await bridge.connect()
-        log.info("mcp_connected", server=name, role=agent_context.role)
+        log.info(
+            "mcp_startup_status",
+            server=name,
+            connected=bridge.is_connected,
+            role=agent_context.role,
+        )
 
     sf_tools   = await bridges["salesforce"].get_langchain_tools()
     pay_tools  = await bridges["payments"].get_langchain_tools()
@@ -421,6 +440,8 @@ async def orchestrator_lifespan(app):
     app.state.orchestrator = orchestrator
     app.state.config = config
     app.state.mcp_urls = {"sf": sf_url, "pay": pay_url, "news": news_url}
+    # Store bridges so the /health/ready probe can check live connectivity
+    app.state.bridges = bridges
     log.info("rm_prep_orchestrator_ready")
 
     yield
