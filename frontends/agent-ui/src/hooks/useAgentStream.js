@@ -2,11 +2,16 @@
  * useAgentStream — React hook that drives the SSE streaming connection to
  * any registered agent backend.
  *
+ * ── Refactored Architecture ─────────────────────────────────────────────
+ * State is now managed via useReducer with a pure agentStreamReducer,
+ * making state transitions explicit, testable, and free of stale closures.
+ *
  * ── Responsibilities (this file only) ────────────────────────────────────
- *   • Manage React state: steps, activeStep, thoughts, streamingText,
- *     output, status, error
+ *   • Manage React state via reducer: steps, activeStep, thoughts,
+ *     streamingText, output, status, error, thinkingText, thinkingLog, toolCalls
  *   • Provide run() / abort() / reset() to callers
  *   • Dispatch typed SSE events from sseStream into state updates
+ *   • Clean up AbortController on unmount (no memory leaks)
  *
  * ── SSE event types handled ───────────────────────────────────────────────
  * See src/types/sseEvents.js for the full contract.
@@ -19,133 +24,285 @@
  *   report         → set final output (+ meta stored on data), status → 'complete'
  *   thinking       → append evaluator insight to thoughts[] (Portfolio Watch)
  *   error          → set error message, status → 'error'
- *
- * ── Token streaming flow ──────────────────────────────────────────────────
- * When RM Prep's `synthesize` node runs it emits `token` events. The UI
- * accumulates them into `streamingText` and renders the markdown live.
- * When the final `brief` event arrives, `output` is set to the authoritative
- * full-text and `streamingText` can be ignored (OutputCanvas transitions
- * smoothly because `output` takes precedence when set).
- *
- * Portfolio Watch does NOT emit `token` events (revision loop would produce
- * confusing intermediate drafts), so `streamingText` stays empty for that
- * agent and the `report` event delivers the output all at once.
- *
- * ── LLM thinking flow ──────────────────────────────────────────────────
- * Both agents now emit `llm_token` events from specialist nodes showing
- * the LLM's real-time reasoning (thinking, planning, tool selection).
- * These tokens accumulate into `thinkingText` keyed by node name and are
- * displayed inside the ThinkingBlock.  When the node changes, the previous
- * node's text is finalised and a new buffer starts.
- *
- * `tool_activity` events show MCP tool calls (start/end) with input/output
- * previews — giving users visibility into which data sources are being queried.
  */
 
-import { useState, useCallback, useRef } from 'react'
+import { useReducer, useCallback, useRef, useEffect } from 'react'
 import { sseStream } from '../lib/sseStream.js'
 import { buildHeaders } from '../api/apiClient.js'
+import { nextId } from '../lib/idFactory.js'
 
+// ── Action types ──────────────────────────────────────────────────────────
+export const ActionTypes = {
+  RESET:            'RESET',
+  START:            'START',
+  ADVANCE_STEP:     'ADVANCE_STEP',
+  FLUSH_ACTIVE:     'FLUSH_ACTIVE',
+  APPEND_TOKEN:     'APPEND_TOKEN',
+  APPEND_LLM_TOKEN: 'APPEND_LLM_TOKEN',
+  FLUSH_THINKING:   'FLUSH_THINKING',
+  TOOL_START:       'TOOL_START',
+  TOOL_END:         'TOOL_END',
+  SET_OUTPUT:       'SET_OUTPUT',
+  ADD_THOUGHT:      'ADD_THOUGHT',
+  SET_ERROR:        'SET_ERROR',
+  COMPLETE:         'COMPLETE',
+  ABORT:            'ABORT',
+}
+
+// ── Initial state ─────────────────────────────────────────────────────────
+export const initialState = {
+  steps:         [],
+  activeStep:    null,
+  thoughts:      [],
+  streamingText: '',
+  output:        null,
+  clientName:    null,
+  status:        'idle',   // idle | streaming | complete | error
+  error:         null,
+  thinkingText:  null,     // { node, text } | null
+  thinkingLog:   [],       // [{ id, node, text, ts }]
+  toolCalls:     [],       // [{ id, action, tool, node, inputPreview?, outputPreview?, ts }]
+  // Internal tracking (not rendered, but part of state for purity)
+  _seenSteps:    new Set(),
+  _thinkingNode: null,
+  _thinkingBuf:  '',
+}
+
+// ── Pure reducer ──────────────────────────────────────────────────────────
+// Every state transition is explicit and testable.
+export function agentStreamReducer(state, action) {
+  switch (action.type) {
+
+    case ActionTypes.RESET:
+      return { ...initialState, _seenSteps: new Set() }
+
+    case ActionTypes.START:
+      return {
+        ...initialState,
+        _seenSteps: new Set(),
+        status: 'streaming',
+      }
+
+    case ActionTypes.ADVANCE_STEP: {
+      const { message } = action.payload
+      if (!message || state._seenSteps.has(message)) return state
+
+      const newSeen = new Set(state._seenSteps)
+      newSeen.add(message)
+
+      const newSteps = state.activeStep
+        ? [...state.steps, { id: nextId('step'), message: state.activeStep, ts: Date.now() }]
+        : state.steps
+
+      return {
+        ...state,
+        steps:       newSteps,
+        activeStep:  message,
+        _seenSteps:  newSeen,
+      }
+    }
+
+    case ActionTypes.FLUSH_ACTIVE: {
+      if (!state.activeStep) return state
+      return {
+        ...state,
+        steps: [...state.steps, { id: nextId('step'), message: state.activeStep, ts: Date.now() }],
+        activeStep: null,
+      }
+    }
+
+    case ActionTypes.APPEND_TOKEN:
+      return {
+        ...state,
+        streamingText: state.streamingText + action.payload.text,
+      }
+
+    case ActionTypes.APPEND_LLM_TOKEN: {
+      const { node, text } = action.payload
+      // If node changed, flush old buffer to log
+      let log  = state.thinkingLog
+      let buf  = state._thinkingBuf
+      let prev = state._thinkingNode
+
+      if (prev && prev !== node) {
+        if (buf) {
+          log = [...log, { id: nextId('think'), node: prev, text: buf, ts: Date.now() }]
+        }
+        buf = ''
+      }
+
+      buf += text
+
+      return {
+        ...state,
+        thinkingLog:   log,
+        thinkingText:  { node, text: buf },
+        _thinkingNode: node,
+        _thinkingBuf:  buf,
+      }
+    }
+
+    case ActionTypes.FLUSH_THINKING: {
+      if (!state._thinkingNode || !state._thinkingBuf) {
+        return { ...state, thinkingText: null, _thinkingNode: null, _thinkingBuf: '' }
+      }
+      return {
+        ...state,
+        thinkingLog: [
+          ...state.thinkingLog,
+          { id: nextId('think'), node: state._thinkingNode, text: state._thinkingBuf, ts: Date.now() },
+        ],
+        thinkingText:  null,
+        _thinkingNode: null,
+        _thinkingBuf:  '',
+      }
+    }
+
+    case ActionTypes.TOOL_START:
+      return {
+        ...state,
+        toolCalls: [
+          ...state.toolCalls,
+          {
+            id:            nextId('tool'),
+            action:        'start',
+            tool:          action.payload.tool,
+            node:          action.payload.node,
+            inputPreview:  action.payload.input_preview ?? null,
+            outputPreview: null,
+            ts:            Date.now(),
+          },
+        ],
+      }
+
+    case ActionTypes.TOOL_END: {
+      const { tool, output_preview } = action.payload
+      const idx = state.toolCalls.findLastIndex(
+        (tc) => tc.tool === tool && tc.action === 'start'
+      )
+      if (idx >= 0) {
+        const updated = [...state.toolCalls]
+        updated[idx] = {
+          ...updated[idx],
+          action:        'end',
+          outputPreview: output_preview ?? null,
+          endTs:         Date.now(),
+        }
+        return { ...state, toolCalls: updated }
+      }
+      // No matching start — add standalone end
+      return {
+        ...state,
+        toolCalls: [
+          ...state.toolCalls,
+          {
+            id:            nextId('tool'),
+            action:        'end',
+            tool,
+            node:          action.payload.node,
+            inputPreview:  null,
+            outputPreview: output_preview ?? null,
+            ts:            Date.now(),
+          },
+        ],
+      }
+    }
+
+    case ActionTypes.SET_OUTPUT: {
+      // Force any in-flight tool calls to "done"
+      const closedTools = state.toolCalls.map((tc) =>
+        tc.action === 'start' ? { ...tc, action: 'end' } : tc
+      )
+      // Flush thinking + active step
+      let log = state.thinkingLog
+      if (state._thinkingNode && state._thinkingBuf) {
+        log = [...log, { id: nextId('think'), node: state._thinkingNode, text: state._thinkingBuf, ts: Date.now() }]
+      }
+      let steps = state.steps
+      if (state.activeStep) {
+        steps = [...steps, { id: nextId('step'), message: state.activeStep, ts: Date.now() }]
+      }
+
+      return {
+        ...state,
+        output:        action.payload.markdown ?? '',
+        clientName:    action.payload.client_name ?? null,
+        status:        'complete',
+        toolCalls:     closedTools,
+        thinkingLog:   log,
+        thinkingText:  null,
+        _thinkingNode: null,
+        _thinkingBuf:  '',
+        steps,
+        activeStep:    null,
+      }
+    }
+
+    case ActionTypes.ADD_THOUGHT:
+      return {
+        ...state,
+        thoughts: [
+          ...state.thoughts,
+          {
+            id:             nextId('thought'),
+            ts:             Date.now(),
+            message:        action.payload.message,
+            verdict:        action.payload.verdict,
+            score:          action.payload.score,
+            issues:         action.payload.issues         ?? [],
+            missed_signals: action.payload.missed_signals ?? [],
+            phase:          action.payload.phase,
+          },
+        ],
+      }
+
+    case ActionTypes.SET_ERROR: {
+      // Flush thinking + active step on error too
+      let log = state.thinkingLog
+      if (state._thinkingNode && state._thinkingBuf) {
+        log = [...log, { id: nextId('think'), node: state._thinkingNode, text: state._thinkingBuf, ts: Date.now() }]
+      }
+      let steps = state.steps
+      if (state.activeStep) {
+        steps = [...steps, { id: nextId('step'), message: state.activeStep, ts: Date.now() }]
+      }
+      return {
+        ...state,
+        error:         action.payload.message ?? 'Unknown error from agent',
+        status:        'error',
+        thinkingLog:   log,
+        thinkingText:  null,
+        _thinkingNode: null,
+        _thinkingBuf:  '',
+        steps,
+        activeStep:    null,
+      }
+    }
+
+    case ActionTypes.COMPLETE:
+      return { ...state, status: state.status === 'streaming' ? 'complete' : state.status }
+
+    case ActionTypes.ABORT:
+      return { ...state, status: 'idle', activeStep: null }
+
+    default:
+      return state
+  }
+}
+
+// ── Hook ──────────────────────────────────────────────────────────────────
 export function useAgentStream() {
-  const [steps,         setSteps]         = useState([])
-  const [activeStep,    setActiveStep]    = useState(null)
-  const [thoughts,      setThoughts]      = useState([])
-  const [streamingText, setStreamingText] = useState('')  // live token buffer
-  const [output,        setOutput]        = useState(null) // final markdown
-  const [clientName,    setClientName]    = useState(null)
-  const [status,        setStatus]        = useState('idle')
-  const [error,         setError]         = useState(null)
+  const [state, dispatch] = useReducer(agentStreamReducer, initialState)
+  const abortRef = useRef(null)
 
-  // ── LLM thinking state ──────────────────────────────────────────────────
-  // thinkingText: running buffer of LLM tokens for the currently active node.
-  //   { node: string, text: string }
-  // thinkingLog: array of completed thinking segments from finished nodes.
-  //   [{ id, node, text, ts }]
-  // toolCalls: array of MCP tool call entries.  Start/end are PAIRED in-place:
-  //   on_tool_start creates a new entry with action='start'; on_tool_end finds
-  //   the matching start entry and updates it to action='end' with outputPreview.
-  //   When the agent completes, any remaining 'start' entries are forced to 'end'.
-  //   [{ id, action, tool, node, inputPreview?, outputPreview?, ts, endTs? }]
-  const [thinkingText,  setThinkingText]  = useState(null)  // current node's LLM buffer
-  const [thinkingLog,   setThinkingLog]   = useState([])    // completed node thinking segments
-  const [toolCalls,     setToolCalls]     = useState([])    // MCP tool activity
+  // ── Cleanup on unmount — prevents memory leaks ──────────────────────────
+  useEffect(() => {
+    return () => { abortRef.current?.abort() }
+  }, [])
 
-  const abortRef          = useRef(null)
-  const activeStepRef     = useRef(null)
-  const seenStepsRef      = useRef(new Set()) // guards against duplicate progress events
-  const thinkingNodeRef   = useRef(null)      // tracks which node is currently streaming LLM tokens
-  const thinkingBufferRef = useRef('')        // accumulates tokens between React renders
-
-  // ── Step timeline helpers ─────────────────────────────────────────────────
-
-  const _advanceStep = (message) => {
-    // Guard against empty messages and duplicates.
-    //
-    // Why a Set and not just a consecutive-equality check?
-    // gather_payments and gather_news run in parallel; their ReAct specialist
-    // agents make multiple tool calls, each firing on_chain_start with the
-    // same langgraph_node name.  Because the two parallel branches interleave,
-    // the same message may arrive non-consecutively (e.g. gather_payments fires,
-    // then gather_news fires changing activeStep, then gather_payments fires
-    // again).  A Set deduplicates across all orderings.
-    if (!message || seenStepsRef.current.has(message)) return
-    seenStepsRef.current.add(message)
-
-    if (activeStepRef.current) {
-      setSteps((prev) => [
-        ...prev,
-        { id: `${Date.now()}-${Math.random()}`, message: activeStepRef.current, ts: Date.now() },
-      ])
-    }
-    activeStepRef.current = message
-    setActiveStep(message)
-  }
-
-  const _flushActiveStep = () => {
-    if (activeStepRef.current) {
-      setSteps((prev) => [
-        ...prev,
-        { id: `flush-${Date.now()}`, message: activeStepRef.current, ts: Date.now() },
-      ])
-      activeStepRef.current = null
-      setActiveStep(null)
-    }
-  }
-
-  // Flush the current thinking buffer when the LLM switches to a new node
-  const _flushThinkingBuffer = () => {
-    if (thinkingNodeRef.current && thinkingBufferRef.current) {
-      const node = thinkingNodeRef.current
-      const text = thinkingBufferRef.current
-      setThinkingLog((prev) => [
-        ...prev,
-        { id: `think-${Date.now()}-${Math.random()}`, node, text, ts: Date.now() },
-      ])
-    }
-    thinkingNodeRef.current   = null
-    thinkingBufferRef.current = ''
-    setThinkingText(null)
-  }
-
-  // ── Public API ────────────────────────────────────────────────────────────
-
+  // ── Public API ──────────────────────────────────────────────────────────
   const run = useCallback(async ({ endpoint, body }) => {
-    // Reset all state for a fresh run
-    setSteps([])
-    setActiveStep(null)
-    setThoughts([])
-    setStreamingText('')
-    setOutput(null)
-    setClientName(null)
-    setError(null)
-    setThinkingText(null)
-    setThinkingLog([])
-    setToolCalls([])
-    setStatus('streaming')
-    activeStepRef.current     = null
-    seenStepsRef.current      = new Set()
-    thinkingNodeRef.current   = null
-    thinkingBufferRef.current = ''
+    dispatch({ type: ActionTypes.START })
 
     const controller = new AbortController()
     abortRef.current = controller
@@ -154,151 +311,68 @@ export function useAgentStream() {
       for await (const { type, data } of sseStream(endpoint, body, buildHeaders(), controller.signal)) {
 
         if (type === 'progress') {
-          _advanceStep(data.message)
+          dispatch({ type: ActionTypes.ADVANCE_STEP, payload: { message: data.message } })
 
         } else if (type === 'token') {
-          // Accumulate rendered-markdown tokens into the live text buffer.
-          // The ThinkingBlock will auto-collapse when this becomes non-empty.
-          setStreamingText((prev) => prev + data.text)
+          dispatch({ type: ActionTypes.APPEND_TOKEN, payload: { text: data.text } })
 
         } else if (type === 'llm_token') {
-          // Real-time LLM reasoning tokens — accumulate per-node.
-          // When the node changes, flush the previous node's buffer to thinkingLog.
-          const node = data.node ?? 'unknown'
-          if (thinkingNodeRef.current && thinkingNodeRef.current !== node) {
-            _flushThinkingBuffer()
-          }
-          thinkingNodeRef.current    = node
-          thinkingBufferRef.current += data.text
-          setThinkingText({ node, text: thinkingBufferRef.current })
+          dispatch({ type: ActionTypes.APPEND_LLM_TOKEN, payload: { node: data.node ?? 'unknown', text: data.text } })
 
         } else if (type === 'tool_activity') {
           if (data.action === 'end') {
-            // Pair with the matching "start" entry — update it to "end" in-place
-            // so the UI shows a single bubble that transitions from calling → done.
-            setToolCalls((prev) => {
-              const idx = prev.findLastIndex(
-                (tc) => tc.tool === data.tool && tc.action === 'start'
-              )
-              if (idx >= 0) {
-                const updated = [...prev]
-                updated[idx] = {
-                  ...updated[idx],
-                  action:        'end',
-                  outputPreview: data.output_preview ?? null,
-                  endTs:         Date.now(),
-                }
-                return updated
-              }
-              // No matching start found — add as standalone end entry
-              return [
-                ...prev,
-                {
-                  id:            `tool-${Date.now()}-${Math.random()}`,
-                  action:        'end',
-                  tool:          data.tool,
-                  node:          data.node,
-                  inputPreview:  null,
-                  outputPreview: data.output_preview ?? null,
-                  ts:            Date.now(),
-                },
-              ]
-            })
+            dispatch({ type: ActionTypes.TOOL_END, payload: data })
           } else {
-            // Start event — add a new entry
-            setToolCalls((prev) => [
-              ...prev,
-              {
-                id:            `tool-${Date.now()}-${Math.random()}`,
-                action:        'start',
-                tool:          data.tool,
-                node:          data.node,
-                inputPreview:  data.input_preview  ?? null,
-                outputPreview: null,
-                ts:            Date.now(),
-              },
-            ])
+            dispatch({ type: ActionTypes.TOOL_START, payload: data })
           }
 
         } else if (type === 'brief' || type === 'report') {
-          _flushThinkingBuffer()
-          _flushActiveStep()
-          // Force any in-flight tool calls to "done" — some on_tool_end events
-          // from nested ReAct agents may not propagate through astream_events.
-          setToolCalls((prev) =>
-            prev.map((tc) => tc.action === 'start' ? { ...tc, action: 'end' } : tc)
-          )
-          // Set the authoritative full output.  OutputCanvas transitions from
-          // streamingText to output automatically when output becomes non-null.
-          setOutput(data.markdown ?? '')
-          setClientName(data.client_name ?? null)
-          setStatus('complete')
+          dispatch({ type: ActionTypes.SET_OUTPUT, payload: data })
 
         } else if (type === 'thinking') {
-          setThoughts((prev) => [
-            ...prev,
-            {
-              id:             `thought-${Date.now()}-${Math.random()}`,
-              ts:             Date.now(),
-              message:        data.message,
-              verdict:        data.verdict,
-              score:          data.score,
-              issues:         data.issues         ?? [],
-              missed_signals: data.missed_signals ?? [],
-              phase:          data.phase,
-            },
-          ])
+          dispatch({ type: ActionTypes.ADD_THOUGHT, payload: data })
 
         } else if (type === 'error') {
-          _flushThinkingBuffer()
-          _flushActiveStep()
-          setError(data.message ?? 'Unknown error from agent')
-          setStatus('error')
+          dispatch({ type: ActionTypes.SET_ERROR, payload: data })
         }
       }
 
-      // Safety net: stream closed cleanly without a final event
-      setStatus((s) => (s === 'streaming' ? 'complete' : s))
+      // Stream closed cleanly without a final event
+      dispatch({ type: ActionTypes.COMPLETE })
 
     } catch (err) {
       if (err.name === 'AbortError') return
       console.error('[useAgentStream]', err)
-      setError(err.message)
-      setStatus('error')
+      dispatch({ type: ActionTypes.SET_ERROR, payload: { message: err.message } })
     }
   }, [])
 
   const abort = useCallback(() => {
     abortRef.current?.abort()
-    activeStepRef.current = null
-    setActiveStep(null)
-    setStatus('idle')
+    dispatch({ type: ActionTypes.ABORT })
   }, [])
 
   const reset = useCallback(() => {
     abortRef.current?.abort()
-    activeStepRef.current     = null
-    seenStepsRef.current      = new Set()
-    thinkingNodeRef.current   = null
-    thinkingBufferRef.current = ''
-    setSteps([])
-    setActiveStep(null)
-    setThoughts([])
-    setStreamingText('')
-    setOutput(null)
-    setClientName(null)
-    setThinkingText(null)
-    setThinkingLog([])
-    setToolCalls([])
-    setError(null)
-    setStatus('idle')
+    dispatch({ type: ActionTypes.RESET })
   }, [])
 
   return {
-    steps, activeStep, thoughts,
-    streamingText, output, clientName,
-    thinkingText, thinkingLog, toolCalls,
-    status, error,
-    run, abort, reset,
+    // Public state (excludes internal _prefixed fields)
+    steps:         state.steps,
+    activeStep:    state.activeStep,
+    thoughts:      state.thoughts,
+    streamingText: state.streamingText,
+    output:        state.output,
+    clientName:    state.clientName,
+    thinkingText:  state.thinkingText,
+    thinkingLog:   state.thinkingLog,
+    toolCalls:     state.toolCalls,
+    status:        state.status,
+    error:         state.error,
+    // Actions
+    run,
+    abort,
+    reset,
   }
 }

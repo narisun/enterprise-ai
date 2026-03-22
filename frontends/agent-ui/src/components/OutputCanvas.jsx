@@ -1,550 +1,142 @@
 /**
- * OutputCanvas — full-width response canvas, Phase 3.
+ * OutputCanvas — Full-width response canvas with professional streaming UX.
  *
- * ── Visual states ─────────────────────────────────────────────────────────
+ * ── Design principles (matching Claude / ChatGPT / Gemini) ──────────────
  *
- *  idle          Empty state with agent icon
+ *  1. THINKING PHASE — Collapsed-by-default activity indicator that shows
+ *     a live one-line preview. User can expand to see full timeline.
+ *     Activity shimmer communicates "working" without being distracting.
  *
- *  streaming     ThinkingBlock (collapsed, shows live activity preview)
- *  + no tokens   The agent is doing background work (data fetching, routing…)
+ *  2. STREAMING PHASE — Token-by-token markdown rendering with a subtle
+ *     blinking cursor. Auto-scrolls to follow new content. Smooth
+ *     transition when final output replaces the stream.
  *
- *  streaming     ThinkingBlock (collapsed) + markdown building word-by-word
- *  + tokens      with a blinking cursor
+ *  3. COMPLETE PHASE — Clean output with toolbar (copy, download).
+ *     Refinement bar with suggested follow-ups. ThinkingBlock stays
+ *     collapsed but expandable for transparency.
  *
- *  complete      ThinkingBlock (collapsed, user can expand) + full output
- *
- *  error         Error card
- *
- * ── ThinkingBlock behaviour ───────────────────────────────────────────────
- * Matches industry-standard UX from Claude, ChatGPT, and Gemini:
- *   • COLLAPSED by default — never auto-expands
- *   • Shows a one-line live preview of current activity on the header
- *   • User clicks to expand and see the full activity timeline
- *   • After completion, stays collapsed — user can re-open to inspect steps
- *
- * ── Token streaming ───────────────────────────────────────────────────────
- * RM Prep emits `token` events from its `synthesize` LLM node.  The hook
- * accumulates them into `streamingText`.  Once the authoritative `brief`
- * event arrives, `output` is set and `streamingText` is superseded — the
- * transition is invisible to the user because the text is the same.
- *
- * Portfolio Watch does not emit `token` events (revision loop would produce
- * confusing partial drafts), so `streamingText` is always empty for Morgan.
+ *  4. ERROR PHASE — Classified error with retry button and partial
+ *     output preservation when possible.
  *
  * Props:
- *   output       — string | null    — final authoritative markdown
- *   streamingText — string          — live token buffer (empty when not streaming)
- *   clientName   — string | null    — extracted client name (RM Prep)
- *   status       — 'streaming' | 'complete' | 'error' | 'idle'
- *   error        — string | null
- *   onRefine     — (prompt: string) => void
- *   agent        — agent display config
- *   steps        — [{id, message, ts}]
- *   activeStep   — string | null
- *   thoughts     — [{id, message, verdict, score, issues, missed_signals, ts}]
- *   thinkingText — {node, text} | null — live LLM token buffer for current node
- *   thinkingLog  — [{id, node, text, ts}] — completed LLM thinking segments
- *   toolCalls    — [{id, action, tool, node, inputPreview?, outputPreview?, ts}]
+ *   output        — string | null     — final authoritative markdown
+ *   streamingText — string            — live token buffer
+ *   clientName    — string | null     — extracted client name (RM Prep)
+ *   status        — 'streaming' | 'complete' | 'error' | 'idle'
+ *   error         — string | null
+ *   onRefine      — (prompt: string) => void
+ *   onRetry       — () => void
+ *   agent         — agent display config
+ *   steps, activeStep, thoughts, thinkingText, thinkingLog, toolCalls
  */
 
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeRaw from 'rehype-raw'
 import {
-  Copy, Download, RefreshCw, Check, SendHorizonal, Zap,
-  CheckCircle2, Loader2, ChevronDown, ChevronUp, Lightbulb,
+  Copy, Download, Check, RefreshCw, AlertTriangle, Wifi, WifiOff,
 } from 'lucide-react'
 
-// ── Custom ReactMarkdown renderers ────────────────────────────────────────────
-const MD_COMPONENTS = {
-  h1: ({ children }) => <h1 className="text-2xl font-bold text-slate-900 mt-0 mb-4 pb-3 border-b border-slate-200">{children}</h1>,
-  h2: ({ children }) => <h2 className="text-lg font-semibold text-slate-800 mt-6 mb-3">{children}</h2>,
-  h3: ({ children }) => <h3 className="text-base font-semibold text-slate-700 mt-4 mb-2">{children}</h3>,
-  p:  ({ children }) => <p  className="text-slate-700 leading-relaxed mb-3">{children}</p>,
-  ul: ({ children }) => <ul className="list-disc list-inside space-y-1 mb-3 text-slate-700">{children}</ul>,
-  ol: ({ children }) => <ol className="list-decimal list-inside space-y-1 mb-3 text-slate-700">{children}</ol>,
-  li: ({ children }) => <li className="leading-relaxed">{children}</li>,
-  strong: ({ children }) => <strong className="font-semibold text-slate-900">{children}</strong>,
-  em:     ({ children }) => <em className="italic text-slate-700">{children}</em>,
-  hr: () => <hr className="border-slate-200 my-4" />,
-  blockquote: ({ children }) => (
-    <blockquote className="border-l-4 border-blue-400 pl-4 text-slate-600 italic my-3">{children}</blockquote>
-  ),
-  // eslint-disable-next-line no-unused-vars
-  code: ({ node, className, children, ...rest }) => {
-    const isBlock = Boolean(className)
-    return isBlock
-      ? <code className="block bg-slate-100 text-slate-800 p-4 rounded-lg overflow-x-auto text-sm font-mono whitespace-pre" {...rest}>{children}</code>
-      : <code className="bg-slate-100 text-blue-700 px-1.5 py-0.5 rounded text-sm font-mono" {...rest}>{children}</code>
-  },
-  // eslint-disable-next-line no-unused-vars
-  pre: ({ node, children }) => <pre className="mb-3 overflow-x-auto">{children}</pre>,
-  table: ({ children }) => (
-    <div className="overflow-x-auto mb-4">
-      <table className="w-full text-sm border-collapse">{children}</table>
-    </div>
-  ),
-  thead: ({ children }) => <thead className="bg-slate-100">{children}</thead>,
-  th: ({ children }) => <th className="text-left font-semibold text-slate-700 px-3 py-2 border border-slate-200">{children}</th>,
-  td: ({ children }) => <td className="px-3 py-2 border border-slate-200 text-slate-700">{children}</td>,
-  // eslint-disable-next-line no-unused-vars
-  a:  ({ node, href, children, ...rest }) => (
-    <a href={href} target="_blank" rel="noopener noreferrer"
-       className="text-blue-600 underline hover:text-blue-800" {...rest}>
-      {children}
-    </a>
-  ),
-  // eslint-disable-next-line no-unused-vars
-  img: ({ node, src, alt, ...rest }) => (
-    <img src={src} alt={alt ?? ''} className="max-w-full rounded-lg my-3"
-      onError={(e) => { e.currentTarget.style.display = 'none' }} />
-  ),
-}
+import { MD_COMPONENTS } from '../lib/markdownRenderers.jsx'
+import ThinkingBlock from './ThinkingBlock.jsx'
+import RefinementBar from './RefinementBar.jsx'
 
-// ── Merge steps + thoughts + thinking + tool calls into a time-ordered timeline
-function buildTimeline(steps, thoughts, thinkingLog = [], toolCalls = []) {
-  return [
-    ...steps.map((s)       => ({ ...s,  _type: 'step'     })),
-    ...thoughts.map((t)    => ({ ...t,  _type: 'thought'  })),
-    ...thinkingLog.map((l) => ({ ...l,  _type: 'llm'      })),
-    ...toolCalls.map((tc)  => ({ ...tc, _type: 'tool'     })),
-  ].sort((a, b) => (a.ts ?? 0) - (b.ts ?? 0))
-}
-
-// ── ThoughtBubble — evaluator fact-check card (Portfolio Watch) ───────────────
-function ThoughtBubble({ thought }) {
-  const [expanded, setExpanded] = useState(false)
-  const isPass     = thought.verdict === 'pass'
-  const issueCount = (thought.issues?.length ?? 0) + (thought.missed_signals?.length ?? 0)
-
-  return (
-    <div className={`rounded-lg border px-3 py-2.5 ${
-      isPass ? 'bg-emerald-50 border-emerald-200' : 'bg-violet-50 border-violet-200'
-    }`}>
-      <div className="flex items-start gap-2.5">
-        <Lightbulb className={`w-3.5 h-3.5 shrink-0 mt-0.5 ${isPass ? 'text-emerald-500' : 'text-violet-500'}`} />
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className={`text-xs font-bold px-1.5 py-px rounded-full ${
-              isPass ? 'bg-emerald-100 text-emerald-700' : 'bg-violet-100 text-violet-700'
-            }`}>
-              {thought.score != null ? `${(thought.score * 100).toFixed(0)}%` : '—'}
-            </span>
-            <span className={`text-xs font-medium ${isPass ? 'text-emerald-700' : 'text-violet-700'}`}>
-              {thought.message}
-            </span>
-          </div>
-
-          {issueCount > 0 && (
-            <button
-              onClick={() => setExpanded((v) => !v)}
-              className={`flex items-center gap-1 text-xs mt-1.5 font-medium transition-colors ${
-                isPass ? 'text-emerald-600 hover:text-emerald-800' : 'text-violet-500 hover:text-violet-700'
-              }`}
-            >
-              {expanded
-                ? <><ChevronUp className="w-3 h-3" />Hide details</>
-                : <><ChevronDown className="w-3 h-3" />{issueCount} issue{issueCount !== 1 ? 's' : ''} — show details</>}
-            </button>
-          )}
-
-          {expanded && issueCount > 0 && (
-            <div className="mt-2 space-y-2 border-t border-violet-100 pt-2">
-              {thought.issues?.map((iss, i) => (
-                <div key={i} className="text-xs">
-                  <div className="flex items-center gap-1.5 flex-wrap mb-0.5">
-                    <span className="font-semibold text-slate-700">{iss.client}:</span>
-                    <span className={`px-1.5 py-px rounded font-medium ${
-                      iss.problem === 'unsupported'    ? 'bg-red-100 text-red-600' :
-                      iss.problem === 'wrong_severity' ? 'bg-amber-100 text-amber-600' :
-                                                         'bg-orange-100 text-orange-600'
-                    }`}>{iss.problem?.replace('_', ' ')}</span>
-                  </div>
-                  {iss.claim      && <p className="text-slate-500 italic mb-0.5">"{iss.claim}"</p>}
-                  {iss.correction && <p className="text-violet-600">→ {iss.correction}</p>}
-                </div>
-              ))}
-              {thought.missed_signals?.map((m, i) => (
-                <div key={`missed-${i}`} className="text-xs">
-                  <span className="font-semibold text-amber-600">Missed signal: </span>
-                  <span className="text-slate-600">{m}</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// ── Human-readable node labels ──────────────────────────────────────────────
-// Includes both outer orchestrator node names and inner ReAct agent node names
-// ("agent", "tools") which appear when specialist agents stream events.
-const _NODE_LABELS = {
-  // RM Prep outer orchestrator nodes
-  parse_intent:       'Parsing intent',
-  route:              'Routing',
-  gather_crm:         'CRM specialist',
-  gather_payments:    'Payments specialist',
-  gather_news:        'News specialist',
-  synthesize:         'Synthesizing brief',
-  format_brief:       'Formatting brief',
-  // Portfolio Watch nodes
-  gather_portfolio:   'Portfolio data',
-  gather_signals:     'Signal analysis',
-  generate_narrative: 'Generating narrative',
-  evaluate_narrative: 'Evaluating narrative',
-  format_report:      'Formatting report',
-  // Inner ReAct agent nodes (from build_specialist_agent)
-  agent:              'Agent reasoning',
-  tools:              'Running tools',
-}
-
-// ── LLMThinkingBubble — shows a completed or live LLM thinking segment ──────
-function LLMThinkingBubble({ node, text, isLive = false }) {
-  const [expanded, setExpanded] = useState(false)
-  const label  = _NODE_LABELS[node] ?? node
-  const maxLen = 120
-  const isLong  = text.length > maxLen
-  const preview = isLong ? text.slice(0, maxLen) + '\u2026' : text
-
-  return (
-    <div className={`rounded-lg border px-3 py-2 ${
-      isLive ? 'bg-blue-50 border-blue-200' : 'bg-slate-50 border-slate-200'
-    }`}>
-      <div className="flex items-start gap-2">
-        {isLive
-          ? <Loader2 className="w-3 h-3 text-blue-500 animate-spin shrink-0 mt-1" />
-          : <Zap className="w-3 h-3 text-amber-500 shrink-0 mt-1" />
-        }
-        <div className="flex-1 min-w-0">
-          <span className={`text-xs font-semibold ${isLive ? 'text-blue-700' : 'text-slate-600'}`}>
-            {label}
-            {isLive && <span className="ml-1.5 font-normal text-blue-500 animate-pulse">thinking\u2026</span>}
-          </span>
-          <p className="text-xs text-slate-500 mt-0.5 font-mono leading-relaxed whitespace-pre-wrap break-words">
-            {expanded ? text : preview}
-          </p>
-          {isLong && (
-            <button
-              onClick={() => setExpanded((v) => !v)}
-              className="text-xs text-blue-500 hover:text-blue-700 mt-1 font-medium"
-            >
-              {expanded ? 'Show less' : 'Show more'}
-            </button>
-          )}
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// ── ToolCallBubble — shows an MCP tool call (paired start→done) ────────────
-// Each tool call is a single entry that transitions from "calling" (amber) to
-// "done" (green).  The useAgentStream hook pairs on_tool_start with on_tool_end
-// events in-place so we never show duplicate bubbles for the same tool call.
-function ToolCallBubble({ action, tool, node, inputPreview, outputPreview }) {
-  const [expanded, setExpanded] = useState(false)
-  const isDone     = action === 'end'
-  const nodeLabel  = _NODE_LABELS[node] ?? node
-  // Show input args while calling; output result when done (fall back to input if no output)
-  const detail     = isDone ? (outputPreview || inputPreview) : inputPreview
-
-  return (
-    <div className={`rounded-lg border px-3 py-2 ${
-      isDone ? 'bg-emerald-50 border-emerald-200' : 'bg-amber-50 border-amber-200'
-    }`}>
-      <div className="flex items-start gap-2">
-        {isDone
-          ? <CheckCircle2 className="w-3 h-3 text-emerald-500 shrink-0 mt-0.5" />
-          : <Loader2 className="w-3 h-3 text-amber-500 animate-spin shrink-0 mt-0.5" />
-        }
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-1.5 flex-wrap">
-            <span className={`text-xs font-bold font-mono px-1.5 py-px rounded ${
-              isDone ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
-            }`}>
-              {tool}
-            </span>
-            <span className="text-xs text-slate-400">{nodeLabel}</span>
-            {isDone
-              ? <span className="text-xs text-emerald-600 font-medium">done</span>
-              : <span className="text-xs text-amber-600 font-medium">calling\u2026</span>
-            }
-          </div>
-          {detail && (
-            <>
-              {detail.length > 100 ? (
-                <>
-                  <p className="text-xs text-slate-500 mt-1 font-mono leading-relaxed whitespace-pre-wrap break-words">
-                    {expanded ? detail : detail.slice(0, 100) + '\u2026'}
-                  </p>
-                  <button
-                    onClick={() => setExpanded((v) => !v)}
-                    className="text-xs text-blue-500 hover:text-blue-700 mt-0.5 font-medium"
-                  >
-                    {expanded ? 'Show less' : 'Show more'}
-                  </button>
-                </>
-              ) : (
-                <p className="text-xs text-slate-500 mt-1 font-mono leading-relaxed whitespace-pre-wrap break-words">
-                  {detail}
-                </p>
-              )}
-            </>
-          )}
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// ── ThinkingBlock ─────────────────────────────────────────────────────────────
-//
-// Industry-standard collapsed-by-default thinking indicator, matching the
-// patterns used by Claude, ChatGPT, and Gemini:
-//
-//   • COLLAPSED by default — never auto-expands
-//   • Shows a single-line summary of current activity on the header
-//   • User clicks to expand and see the full activity timeline
-//   • After completion, shows step count and verification badge
-//
-// This keeps the user engaged (they see real-time status) without
-// overwhelming them with details they didn't ask for.
-//
-function ThinkingBlock({ steps, activeStep, thoughts, agent, status, hasTokens,
-                         thinkingText, thinkingLog, toolCalls }) {
-  const isStreaming = status === 'streaming'
-  const isDone      = status === 'complete' || status === 'error'
-  const [open, setOpen] = useState(false)
-
-  // NO auto-expand/collapse.  The block is always collapsed by default.
-  // Users click to expand when they want to see details.
-
-  const timeline    = buildTimeline(steps, thoughts, thinkingLog ?? [], toolCalls ?? [])
-  const hasContent  = timeline.length > 0 || !!activeStep || !!thinkingText
-  if (!hasContent) return null
-
-  const agentName = agent?.workerName ?? 'Agent'
-
-  // Compute a live activity preview for the collapsed header
-  const livePreview = (() => {
-    if (!isStreaming) return null
-    // Show the latest LLM thinking as a one-line preview
-    if (thinkingText?.text) {
-      const label = _NODE_LABELS[thinkingText.node] ?? thinkingText.node
-      const snippet = thinkingText.text.replace(/\n/g, ' ').slice(-60)
-      return `${label}: ${snippet}`
-    }
-    // Fall back to the active step label
-    if (activeStep) return activeStep
-    return 'starting up…'
-  })()
-
-  // Primary header text
-  const headerText = isStreaming
-    ? `${agentName} is working`
-    : `${agentName} worked through ${steps.length} step${steps.length !== 1 ? 's' : ''}`
-
-  // Verification badge (Portfolio Watch evaluator)
-  const lastPass = [...thoughts].reverse().find((t) => t.verdict === 'pass')
-
-  // Count of active tool calls (started but not yet ended)
-  const activeToolCount = (toolCalls ?? []).filter((tc) => tc.action === 'start').length
-    - (toolCalls ?? []).filter((tc) => tc.action === 'end').length
-
-  return (
-    <div className="mb-5 rounded-xl border border-slate-200 bg-slate-50 overflow-hidden">
-      {/* ── Collapsed header — always visible ──────────────────────────── */}
-      <button
-        onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center gap-2.5 px-4 py-2.5 hover:bg-slate-100 transition-colors text-left"
-      >
-        {/* Spinner while streaming, checkmark when done */}
-        {isStreaming
-          ? <Loader2 className="w-3.5 h-3.5 text-blue-500 animate-spin shrink-0" />
-          : <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-        }
-
-        {/* Primary label */}
-        <span className="text-sm font-medium text-slate-700 shrink-0">{headerText}</span>
-
-        {/* Live activity preview — single line, truncated, fades out */}
-        {isStreaming && livePreview && (
-          <span className="flex-1 text-xs text-slate-400 truncate min-w-0 ml-1">
-            · {livePreview}
-          </span>
-        )}
-        {!isStreaming && <span className="flex-1" />}
-
-        {/* Active tool call indicator */}
-        {isStreaming && activeToolCount > 0 && (
-          <span className="text-xs px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-600 font-medium shrink-0 animate-pulse">
-            {activeToolCount} tool{activeToolCount !== 1 ? 's' : ''}
-          </span>
-        )}
-
-        {/* Step count chip */}
-        {steps.length > 0 && (
-          <span className="text-xs text-slate-400 shrink-0">
-            {steps.length} step{steps.length !== 1 ? 's' : ''}
-          </span>
-        )}
-
-        {/* Evaluator verification badge */}
-        {lastPass && (
-          <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-600 font-medium shrink-0">
-            {(lastPass.score * 100).toFixed(0)}% verified
-          </span>
-        )}
-
-        {open
-          ? <ChevronUp   className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-          : <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-        }
-      </button>
-
-      {/* ── Expanded timeline — shown only when user clicks ──────────── */}
-      {open && (
-        <div className="border-t border-slate-200 px-4 py-3 space-y-2.5 max-h-96 overflow-y-auto">
-          {timeline.map((item) => {
-            if (item._type === 'step') {
-              return (
-                <div key={item.id} className="flex items-center gap-2.5">
-                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-                  <span className="text-sm text-slate-600">{item.message}</span>
-                </div>
-              )
-            }
-            if (item._type === 'thought') {
-              return <ThoughtBubble key={item.id} thought={item} />
-            }
-            if (item._type === 'llm') {
-              return <LLMThinkingBubble key={item.id} node={item.node} text={item.text} />
-            }
-            if (item._type === 'tool') {
-              return (
-                <ToolCallBubble
-                  key={item.id}
-                  action={item.action}
-                  tool={item.tool}
-                  node={item.node}
-                  inputPreview={item.inputPreview}
-                  outputPreview={item.outputPreview}
-                />
-              )
-            }
-            return null
-          })}
-
-          {/* Live LLM thinking — shown at the bottom when actively streaming */}
-          {thinkingText && (
-            <LLMThinkingBubble
-              node={thinkingText.node}
-              text={thinkingText.text}
-              isLive
-            />
-          )}
-
-          {activeStep && (
-            <div className="flex items-center gap-2.5">
-              <Loader2 className="w-3.5 h-3.5 text-blue-500 animate-spin shrink-0" />
-              <span className="text-sm font-medium text-blue-700">{activeStep}</span>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ── Copy button ───────────────────────────────────────────────────────────────
+// ── Copy button ───────────────────────────────────────────────────────────
 function CopyButton({ text }) {
   const [copied, setCopied] = useState(false)
-  const handle = async () => {
+  const handle = useCallback(async () => {
     await navigator.clipboard.writeText(text)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
-  }
+  }, [text])
+
   return (
-    <button onClick={handle}
-      className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-800 px-3 py-1.5 rounded-lg hover:bg-slate-100 transition-colors">
+    <button
+      onClick={handle}
+      aria-label={copied ? 'Copied to clipboard' : 'Copy to clipboard'}
+      className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-800 px-3 py-1.5 rounded-lg hover:bg-slate-100 transition-colors"
+    >
       {copied ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
       {copied ? 'Copied!' : 'Copy'}
     </button>
   )
 }
 
-// ── Download button ───────────────────────────────────────────────────────────
+// ── Download button ───────────────────────────────────────────────────────
 function DownloadButton({ text, filename }) {
-  const handle = () => {
+  const handle = useCallback(() => {
     const blob = new Blob([text], { type: 'text/markdown' })
     const url  = URL.createObjectURL(blob)
     const a    = document.createElement('a')
     a.href = url; a.download = filename; a.click()
     URL.revokeObjectURL(url)
-  }
+  }, [text, filename])
+
   return (
-    <button onClick={handle}
-      className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-800 px-3 py-1.5 rounded-lg hover:bg-slate-100 transition-colors">
+    <button
+      onClick={handle}
+      aria-label="Download as markdown file"
+      className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-800 px-3 py-1.5 rounded-lg hover:bg-slate-100 transition-colors"
+    >
       <Download className="w-3.5 h-3.5" />
       Download .md
     </button>
   )
 }
 
-// ── Refinement bar ────────────────────────────────────────────────────────────
-function RefinementBar({ onSubmit, isRefining, suggestions }) {
-  const [value, setValue] = useState('')
-  const inputRef = useRef(null)
+// ── Error classification ──────────────────────────────────────────────────
+function classifyError(errorMsg) {
+  if (!errorMsg) return { type: 'unknown', title: 'Something went wrong', suggestion: 'Try again or rephrase your request.' }
+  const msg = errorMsg.toLowerCase()
+  if (msg.includes('401') || msg.includes('unauthorized'))
+    return { type: 'auth', title: 'Authentication Error', suggestion: 'Your API key may be invalid or expired. Check your .env configuration.' }
+  if (msg.includes('timeout') || msg.includes('timed out'))
+    return { type: 'timeout', title: 'Request Timed Out', suggestion: 'The agent took too long to respond. Try a simpler request or check if the backend is running.' }
+  if (msg.includes('500') || msg.includes('internal server'))
+    return { type: 'server', title: 'Server Error', suggestion: 'The backend encountered an error. Check the agent logs for details.' }
+  if (msg.includes('network') || msg.includes('fetch') || msg.includes('failed'))
+    return { type: 'network', title: 'Connection Error', suggestion: 'Could not reach the backend. Check your network connection and that the agent service is running.' }
+  return { type: 'unknown', title: 'Agent Error', suggestion: 'Try rephrasing your request or check the agent logs.' }
+}
 
-  const submit = () => {
-    if (!value.trim() || isRefining) return
-    onSubmit(value.trim())
-    setValue('')
-  }
+// ── Error Card ────────────────────────────────────────────────────────────
+function ErrorCard({ error, onRetry }) {
+  const classified = classifyError(error)
+  const IconComponent = classified.type === 'network' ? WifiOff : AlertTriangle
 
   return (
-    <div className="border-t border-slate-200 bg-slate-50 px-6 pt-4 pb-6">
-      {suggestions?.length > 0 && (
-        <div className="flex flex-wrap gap-2 mb-4">
-          {suggestions.map((s) => (
-            <button key={s}
-              onClick={() => { setValue(s); inputRef.current?.focus() }}
-              className="text-sm px-4 py-2 rounded-full border border-blue-200 text-blue-600 bg-blue-50 hover:bg-blue-100 transition-colors">
-              <Zap className="w-3.5 h-3.5 inline mr-1.5 -mt-0.5" />{s}
-            </button>
-          ))}
+    <div className="rounded-xl bg-red-50 border border-red-200 p-5 max-w-lg mt-2 animate-fade-in">
+      <div className="flex items-start gap-3">
+        <IconComponent className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
+        <div className="flex-1">
+          <p className="font-semibold text-red-700 text-sm mb-1">{classified.title}</p>
+          <p className="text-sm text-red-600 mb-1">{error ?? 'An unexpected error occurred.'}</p>
+          <p className="text-xs text-red-500 mb-3">{classified.suggestion}</p>
+          <button
+            onClick={onRetry}
+            className="inline-flex items-center gap-1.5 text-sm font-medium text-red-700 hover:text-red-800
+              bg-red-100 hover:bg-red-200 px-3 py-1.5 rounded-lg transition-colors"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+            Retry
+          </button>
         </div>
-      )}
-      <div className="flex gap-3">
-        <input ref={inputRef} type="text" value={value}
-          onChange={(e) => setValue(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && submit()}
-          placeholder="Ask a follow-up question or request a change…"
-          disabled={isRefining}
-          className="flex-1 rounded-xl border border-slate-300 px-4 py-3.5 text-sm text-slate-800 outline-none
-            focus:ring-2 focus:ring-blue-100 focus:border-blue-400 placeholder-slate-400
-            disabled:bg-slate-50 disabled:text-slate-400 transition-all"
-        />
-        <button onClick={submit} disabled={!value.trim() || isRefining}
-          className="px-5 py-3.5 bg-blue-600 text-white rounded-xl hover:bg-blue-700 disabled:opacity-40
-            disabled:cursor-not-allowed transition-colors flex items-center gap-2 text-sm font-medium shrink-0">
-          {isRefining
-            ? <RefreshCw className="w-4 h-4 animate-spin" />
-            : <SendHorizonal className="w-4 h-4" />}
-          {isRefining ? 'Updating…' : 'Ask'}
-        </button>
       </div>
     </div>
   )
 }
 
-// ── Main component ─────────────────────────────────────────────────────────────
+// ── Streaming cursor (blinking line like Claude/ChatGPT) ──────────────────
+function StreamingCursor() {
+  return (
+    <span className="streaming-cursor inline-block w-0.5 h-[1.1em] bg-blue-500 ml-0.5 align-text-bottom rounded-sm" />
+  )
+}
+
+// ── Main component ─────────────────────────────────────────────────────────
 export default function OutputCanvas({
-  output, streamingText = '', clientName, status, error, onRefine, agent,
+  output, streamingText = '', clientName, status, error, onRefine, onRetry, agent,
   steps = [], activeStep = null, thoughts = [],
   thinkingText = null, thinkingLog = [], toolCalls = [],
 }) {
@@ -554,14 +146,14 @@ export default function OutputCanvas({
   const isRefining = status === 'streaming' && hasOutput
   const isDone     = status === 'complete'
 
-  // Scroll to top when a completed response arrives
+  // Scroll to top when completed response arrives
   useEffect(() => {
     if (isDone && canvasRef.current) {
       canvasRef.current.scrollTo({ top: 0, behavior: 'smooth' })
     }
   }, [isDone, output])
 
-  // Auto-scroll to the bottom while tokens are streaming in
+  // Auto-scroll to follow streaming tokens
   const streamingBottomRef = useRef(null)
   useEffect(() => {
     if (hasTokens && !hasOutput) {
@@ -572,20 +164,20 @@ export default function OutputCanvas({
   return (
     <div className="flex-1 flex flex-col overflow-hidden bg-white">
 
-      {/* ── Toolbar ─────────────────────────────────────────────────────── */}
+      {/* ── Toolbar — visible when output is ready ───────────────────────── */}
       {hasOutput && (
-        <div className="shrink-0 px-6 py-3 border-b border-slate-100 flex items-center justify-between bg-slate-50">
+        <div className="shrink-0 px-4 sm:px-6 py-3 border-b border-slate-100 flex items-center justify-between bg-slate-50/80 backdrop-blur-sm animate-fade-in">
           <div className="flex items-center gap-2">
             <span className="text-lg">{agent?.icon}</span>
             <span className="text-sm font-semibold text-slate-700">
-              {clientName ? `Brief — ${clientName}` : `${agent?.workerName ?? 'Worker'} · Output`}
+              {clientName ? `Brief \u2014 ${clientName}` : `${agent?.workerName ?? 'Worker'} \u00B7 Output`}
             </span>
             {isDone && (
               <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-medium">Ready</span>
             )}
             {isRefining && (
               <span className="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 font-medium animate-pulse">
-                Updating…
+                Updating\u2026
               </span>
             )}
           </div>
@@ -599,29 +191,31 @@ export default function OutputCanvas({
         </div>
       )}
 
-      {/* ── Scrollable canvas ────────────────────────────────────────────── */}
-      <div ref={canvasRef} className="flex-1 overflow-y-auto px-8 py-6">
+      {/* ── Scrollable canvas ──────────────────────────────────────────── */}
+      <div ref={canvasRef} className="flex-1 overflow-y-auto px-4 sm:px-8 py-6">
 
-        {/* ── Idle state ────────────────────────────────────────────────── */}
+        {/* ── Idle state ───────────────────────────────────────────────── */}
         {status === 'idle' && !hasOutput && (
-          <div className="flex flex-col items-center justify-center h-64 text-slate-400">
-            <span className="text-4xl mb-3">{agent?.icon ?? '📋'}</span>
+          <div className="flex flex-col items-center justify-center h-64 text-slate-400 animate-fade-in">
+            <span className="text-4xl mb-3">{agent?.icon ?? '\uD83D\uDCCB'}</span>
             <p className="text-sm font-medium text-slate-500">{agent?.workerName ?? 'The agent'} is ready</p>
             <p className="text-xs mt-1">Output will appear here once you submit a request.</p>
           </div>
         )}
 
-        {/* ── First-frame spinner (before first progress event arrives) ─── */}
-        {status === 'streaming' && !hasTokens && !steps.length && !activeStep && (
-          <div className="flex items-center gap-3 text-slate-500 mb-5">
-            <Loader2 className="w-4 h-4 animate-spin text-blue-500 shrink-0" />
-            <span className="text-sm font-medium">{agent?.workerName ?? 'Agent'} is starting up…</span>
+        {/* ── Initial loading (before any events arrive) ───────────────── */}
+        {status === 'streaming' && !hasTokens && !steps.length && !activeStep && !thinkingText && (
+          <div className="flex items-center gap-3 text-slate-500 mb-5 animate-fade-in">
+            <div className="flex gap-1">
+              <span className="w-2 h-2 bg-blue-500 rounded-full animate-bounce [animation-delay:0ms]" />
+              <span className="w-2 h-2 bg-blue-500 rounded-full animate-bounce [animation-delay:150ms]" />
+              <span className="w-2 h-2 bg-blue-500 rounded-full animate-bounce [animation-delay:300ms]" />
+            </div>
+            <span className="text-sm font-medium">{agent?.workerName ?? 'Agent'} is starting up\u2026</span>
           </div>
         )}
 
-        {/* ── Thinking block — collapsed by default, click to expand ──── */}
-        {/*    Shows real-time activity preview on the header line.            */}
-        {/*    User clicks to expand and see full timeline details.           */}
+        {/* ── ThinkingBlock — collapsed activity timeline ───────────────── */}
         <ThinkingBlock
           steps={steps}
           activeStep={activeStep}
@@ -635,11 +229,8 @@ export default function OutputCanvas({
         />
 
         {/* ── Live token stream ─────────────────────────────────────────── */}
-        {/*    Visible only while RM Prep is synthesising and no final        */}
-        {/*    output has arrived yet.  Portfolio Watch skips this state      */}
-        {/*    entirely (it has no `token` events).                           */}
         {hasTokens && !hasOutput && (
-          <div className="max-w-3xl">
+          <div className="max-w-3xl animate-fade-in">
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}
               rehypePlugins={[rehypeRaw]}
@@ -647,25 +238,31 @@ export default function OutputCanvas({
             >
               {streamingText}
             </ReactMarkdown>
-            {/* Blinking cursor — disappears when final output replaces this */}
-            <span className="inline-block w-0.5 h-[1.1em] bg-blue-500 animate-pulse ml-0.5 align-text-bottom rounded-sm" />
+            <StreamingCursor />
             <div ref={streamingBottomRef} />
           </div>
         )}
 
-        {/* ── Error state ───────────────────────────────────────────────── */}
+        {/* ── Error state — classified with retry ──────────────────────── */}
         {status === 'error' && (
-          <div className="rounded-xl bg-red-50 border border-red-200 p-5 max-w-lg mt-2">
-            <p className="font-semibold text-red-700 text-sm mb-1">Agent returned an error</p>
-            <p className="text-sm text-red-600">{error ?? 'An unexpected error occurred.'}</p>
-            <p className="text-xs text-red-500 mt-3">Try rephrasing your request using the follow-up bar below.</p>
-          </div>
+          <>
+            {/* Show partial output if we had some streaming text */}
+            {hasTokens && (
+              <div className="max-w-3xl mb-4 opacity-60">
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  rehypePlugins={[rehypeRaw]}
+                  components={MD_COMPONENTS}
+                >
+                  {streamingText}
+                </ReactMarkdown>
+              </div>
+            )}
+            <ErrorCard error={error} onRetry={onRetry} />
+          </>
         )}
 
-        {/* ── Final output ─────────────────────────────────────────────── */}
-        {/*    Replaces the token stream when the authoritative brief/report   */}
-        {/*    event arrives.  Also shown directly (no token phase) for        */}
-        {/*    Portfolio Watch and on follow-up refinement runs.               */}
+        {/* ── Final output ──────────────────────────────────────────────── */}
         {hasOutput && (
           <div className="max-w-3xl animate-fade-in">
             <ReactMarkdown
@@ -677,10 +274,9 @@ export default function OutputCanvas({
             </ReactMarkdown>
           </div>
         )}
-
       </div>
 
-      {/* ── Refinement bar ───────────────────────────────────────────────── */}
+      {/* ── Refinement bar ──────────────────────────────────────────────── */}
       {(isDone || status === 'error' || isRefining) && (
         <RefinementBar
           onSubmit={onRefine}

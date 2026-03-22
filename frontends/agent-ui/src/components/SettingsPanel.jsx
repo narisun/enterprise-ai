@@ -1,23 +1,19 @@
 /**
  * SettingsPanel.jsx — User-configurable settings for the Quantitix platform.
  *
- * Settings are lifted to App.jsx state so they affect the live UI immediately.
- * They are persisted in localStorage so they survive page refreshes.
- *
- * Sections:
- *   Profile       — RM display name, region
- *   Display       — card density, show coming-soon agents
- *   Session       — auto-reset on agent switch, session timeout display
- *   Data          — default news lookback, max search results
- *   About         — version, build info, reset to defaults
+ * This component is PURE UI — it receives settings as props and emits
+ * changes via onChange. All persistence logic lives in lib/settings.js.
  *
  * Props:
- *   settings    {object}   — current settings object from App.jsx
+ *   settings    {object}   — current settings object from useSettings hook
  *   onChange    {function} — called with (key, value) on any change
  *   onBack      {function} — return to the previous phase
- *   rmId        {string}   — current RM display name (mirrored in settings)
+ *   rmId        {string}   — current RM display name
  *   onRmIdChange {function} — update RM name in App state
  */
+
+import { useRef } from 'react'
+import { DEFAULT_SETTINGS } from '../lib/settings.js'
 
 // ── Sub-components ─────────────────────────────────────────────────────────────
 
@@ -113,41 +109,14 @@ function TextInput({ value, onChange, placeholder, maxLength }) {
   )
 }
 
-// ── Default settings export (used to initialise App state) ─────────────────────
-export const DEFAULT_SETTINGS = {
-  // Profile
-  region:             'EMEA',
-  // Display
-  cardMinWidth:       280,
-  showComingSoon:     true,
-  compactSidebar:     false,
-  // Session
-  autoResetOnSwitch:  false,
-  // Data
-  newsLookbackDays:   30,
-  maxNewsResults:     10,
-  // Appearance
-  density:            'comfortable',
-}
-
-// ── Persist helpers ────────────────────────────────────────────────────────────
-export const loadSettings = () => {
-  try {
-    const stored = localStorage.getItem('quantitix-settings')
-    return stored ? { ...DEFAULT_SETTINGS, ...JSON.parse(stored) } : { ...DEFAULT_SETTINGS }
-  } catch {
-    return { ...DEFAULT_SETTINGS }
-  }
-}
-
-export const saveSettings = (settings) => {
-  try {
-    localStorage.setItem('quantitix-settings', JSON.stringify(settings))
-  } catch { /* quota exceeded or private browsing — degrade silently */ }
-}
-
 // ── Main component ─────────────────────────────────────────────────────────────
 export default function SettingsPanel({ settings, onChange, onBack, rmId, onRmIdChange }) {
+
+  // Use refs for scroll-to-section (avoids direct DOM ID coupling)
+  const sectionRefs = useRef({})
+  const scrollToSection = (id) => {
+    sectionRefs.current[id]?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
 
   const handleReset = () => {
     if (window.confirm('Reset all settings to their defaults?')) {
@@ -174,7 +143,7 @@ export default function SettingsPanel({ settings, onChange, onBack, rmId, onRmId
           ].map(({ id, icon, label }) => (
             <li key={id}>
               <button
-                onClick={() => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                onClick={() => scrollToSection(id)}
                 className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition-colors text-left"
               >
                 <span>{icon}</span>
@@ -210,7 +179,7 @@ export default function SettingsPanel({ settings, onChange, onBack, rmId, onRmId
         <div className="px-8 py-8 max-w-2xl space-y-12">
 
           {/* ── Profile ─────────────────────────────────────────────── */}
-          <section id="s-profile">
+          <section ref={(el) => { sectionRefs.current['s-profile'] = el }}>
             <SectionHeader
               icon="👤"
               title="Profile"
@@ -248,7 +217,7 @@ export default function SettingsPanel({ settings, onChange, onBack, rmId, onRmId
           </section>
 
           {/* ── Display ─────────────────────────────────────────────── */}
-          <section id="s-display">
+          <section ref={(el) => { sectionRefs.current['s-display'] = el }}>
             <SectionHeader
               icon="🖥️"
               title="Display"
@@ -299,7 +268,7 @@ export default function SettingsPanel({ settings, onChange, onBack, rmId, onRmId
           </section>
 
           {/* ── Session ─────────────────────────────────────────────── */}
-          <section id="s-session">
+          <section ref={(el) => { sectionRefs.current['s-session'] = el }}>
             <SectionHeader
               icon="🔄"
               title="Session"
@@ -328,7 +297,7 @@ export default function SettingsPanel({ settings, onChange, onBack, rmId, onRmId
           </section>
 
           {/* ── Data & Search ────────────────────────────────────────── */}
-          <section id="s-data">
+          <section ref={(el) => { sectionRefs.current['s-data'] = el }}>
             <SectionHeader
               icon="📡"
               title="Data & Search"
@@ -366,7 +335,7 @@ export default function SettingsPanel({ settings, onChange, onBack, rmId, onRmId
           </section>
 
           {/* ── About ────────────────────────────────────────────────── */}
-          <section id="s-about">
+          <section ref={(el) => { sectionRefs.current['s-about'] = el }}>
             <SectionHeader
               icon="ℹ️"
               title="About"
