@@ -24,10 +24,9 @@ Model tiering:
 """
 from contextlib import asynccontextmanager
 
-from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph
 
-from platform_sdk import AgentConfig, configure_logging, get_logger, make_chat_llm
+from platform_sdk import AgentConfig, configure_logging, get_logger, make_chat_llm, make_checkpointer
 from .state import PortfolioWatchState
 from .nodes.gather import make_gather_portfolio_node, make_gather_signals_node
 from .nodes.generator import make_generate_narrative_node
@@ -45,7 +44,7 @@ configure_logging()
 log = get_logger(__name__)
 
 
-def build_portfolio_watch_graph(generator_llm, evaluator_llm, router_llm) -> object:
+def build_portfolio_watch_graph(generator_llm, evaluator_llm, router_llm, config=None) -> object:
     """Assemble and compile the Portfolio Watch StateGraph with multi-turn support."""
 
     builder = StateGraph(PortfolioWatchState)
@@ -102,7 +101,7 @@ def build_portfolio_watch_graph(generator_llm, evaluator_llm, router_llm) -> obj
 
     builder.add_edge("format_report", END)
 
-    checkpointer = MemorySaver()
+    checkpointer = make_checkpointer(config)
     return builder.compile(checkpointer=checkpointer)
 
 
@@ -121,7 +120,7 @@ async def portfolio_watch_lifespan(app):
     # Router uses the fast model for classification
     router_llm = make_chat_llm(config.router_model_route)
 
-    app.state.graph  = build_portfolio_watch_graph(generator_llm, evaluator_llm, router_llm)
+    app.state.graph  = build_portfolio_watch_graph(generator_llm, evaluator_llm, router_llm, config=config)
     app.state.config = config
 
     log.info("portfolio_watch_graph_ready")

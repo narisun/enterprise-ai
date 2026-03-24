@@ -1,5 +1,5 @@
 /**
- * dataSources.js — Data source registry for the Meridian platform.
+ * dataSources.js — Data source registry for the Enterprise AI platform.
  *
  * Each entry describes a data source that agents can access via MCP tool servers:
  *   • id          — unique key, referenced by agents.js dataSources[].sourceId
@@ -34,7 +34,7 @@ export const DATA_SOURCES = {
     description:
       'Salesforce CRM is the system of record for client relationships. ' +
       'It holds accounts, contacts, opportunities, contracts, tasks, events, ' +
-      'and cases. The Meridian platform accesses it read-only via the ' +
+      'and cases. The Enterprise AI platform accesses it read-only via the ' +
       'salesforce-mcp server, which enforces row-level filtering so each RM ' +
       'only sees accounts in their assigned book.',
     accessNote:

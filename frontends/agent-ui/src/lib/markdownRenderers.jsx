@@ -13,7 +13,7 @@ import React from 'react'
 
 /**
  * Custom component map for ReactMarkdown.
- * Provides Quantitix-branded styling for all common markdown elements.
+ * Provides Enterprise AI branded styling for all common markdown elements.
  */
 export const MD_COMPONENTS = {
   h1: ({ children }) => <h1 className="text-2xl font-bold text-slate-900 mt-0 mb-4 pb-3 border-b border-slate-200">{children}</h1>,

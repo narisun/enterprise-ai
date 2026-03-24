@@ -100,7 +100,7 @@ def auth_callback(username: str, password: str) -> cl.User | None:
     and set OAUTH_AZURE_AD_CLIENT_ID / OAUTH_AZURE_AD_CLIENT_SECRET in .env.
     """
     if not INTERNAL_API_KEY:
-        # H1: fail closed — never allow logins when auth is not configured
+        # Fail closed — never allow logins when auth is not configured
         log.error("auth_misconfigured", reason="INTERNAL_API_KEY not set — rejecting all logins")
         return None
 
@@ -132,7 +132,7 @@ async def _init_session(thread_id: str, username: str) -> bool:
 
         cl.user_session.set("bridge", bridge)
         cl.user_session.set("agent", agent)
-        cl.user_session.set("tool_names", [t.name for t in tools])  # M3: cached here, avoids second call
+        cl.user_session.set("tool_names", [t.name for t in tools])
 
         log.info("session_initialised", username=username, thread_id=thread_id,
                  tools=[t.name for t in tools])
@@ -164,7 +164,7 @@ async def on_chat_start() -> None:
     ok = await _init_session(session_id, username)
 
     if ok:
-        # M3: read tool_names cached by _init_session — no second MCP round-trip
+        # Read tool_names cached by _init_session — no second MCP round-trip
         tool_names = cl.user_session.get("tool_names") or []
         tool_list = "\n".join(f"- `{name}`" for name in tool_names)
 

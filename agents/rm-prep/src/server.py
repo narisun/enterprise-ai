@@ -10,7 +10,6 @@ Endpoints:
   GET  /auth/personas       — list available test personas (dev/local only)
 """
 import json
-import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -20,12 +19,13 @@ from langchain_core.messages import HumanMessage
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
-from platform_sdk import AgentConfig, AgentContext, configure_logging, get_logger, make_api_key_verifier, setup_telemetry
+from platform_sdk import AgentConfig, AgentContext, MCPConfig, configure_logging, get_logger, make_api_key_verifier, setup_telemetry
 from platform_sdk.testing import TEST_PERSONAS
-from .graph import build_rm_orchestrator_with_bridges, orchestrator_lifespan
+from .lifespan import build_rm_orchestrator_with_bridges, orchestrator_lifespan
 
 configure_logging()
-setup_telemetry(os.getenv("SERVICE_NAME", "rm-prep-agent"))
+_mcp_config = MCPConfig.from_env()
+setup_telemetry(_mcp_config.service_name)
 log = get_logger(__name__)
 
 verify_api_key = make_api_key_verifier()
@@ -59,7 +59,7 @@ _STRUCTURED_OUTPUT_NODES = {"conversation_router", "synthesize", "refine_brief"}
 _TEST_PERSONAS = TEST_PERSONAS
 
 from platform_sdk.auth import _get_jwt_secret, _DEFAULT_DEV_SECRET
-_ENV        = os.environ.get("ENVIRONMENT", "prod")
+_ENV        = _mcp_config.environment
 
 # Simple in-memory rate limiter for test token endpoint
 import time as _time

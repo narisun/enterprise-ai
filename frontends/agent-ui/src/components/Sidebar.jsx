@@ -56,8 +56,8 @@ export default function Sidebar({
             <Zap className="w-3.5 h-3.5 text-white" />
           </div>
           <div>
-            <p className="font-bold text-sm leading-tight tracking-tight">Quantitix</p>
-            <p className="text-xs text-slate-400 leading-tight">Agentic AI</p>
+            <p className="font-bold text-sm leading-tight tracking-tight">Enterprise AI</p>
+            <p className="text-xs text-slate-400 leading-tight">Agentic Platform</p>
           </div>
         </a>
         <button

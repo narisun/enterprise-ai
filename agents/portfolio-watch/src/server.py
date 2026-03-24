@@ -7,7 +7,6 @@ Endpoints:
   POST /portfolio-watch/sync  — synchronous (for testing)
 """
 import json
-import os
 from contextlib import asynccontextmanager
 from typing import Optional
 
@@ -16,11 +15,11 @@ from langchain_core.messages import HumanMessage
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
-from platform_sdk import AgentConfig, configure_logging, get_logger, make_api_key_verifier, setup_telemetry
+from platform_sdk import AgentConfig, MCPConfig, configure_logging, get_logger, make_api_key_verifier, setup_telemetry
 from .graph import portfolio_watch_lifespan
 
 configure_logging()
-setup_telemetry(os.getenv("SERVICE_NAME", "portfolio-watch-agent"))
+setup_telemetry(MCPConfig.from_env().service_name)
 log = get_logger(__name__)
 
 verify_api_key  = make_api_key_verifier()

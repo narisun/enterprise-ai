@@ -19,13 +19,14 @@ import os
 import re
 import uuid
 from contextlib import asynccontextmanager
+from contextvars import ContextVar
+from dataclasses import dataclass
 from typing import AsyncIterator, Optional
 
 import asyncpg
 from mcp.server.fastmcp import FastMCP
 from opentelemetry import trace
 
-# L1: use platform_sdk structured logging for consistent JSON schema across services
 # setup_telemetry is idempotent (guarded by _initialized flag) — safe on reconnect
 from platform_sdk import (
     MCPConfig,
@@ -36,28 +37,29 @@ from platform_sdk import (
     get_logger,
     setup_telemetry,
 )
+from platform_sdk.protocols import Authorizer, CacheStore
 
 configure_logging()
 log = get_logger(__name__)
 
 # ---- Configuration (all from MCPConfig, NO hardcoded defaults) --------------
-_config = MCPConfig.from_env()
 
-# DB config still read directly (not part of MCPConfig — DB is data-mcp specific)
-DB_HOST = os.environ.get("DB_HOST", "localhost")
-DB_PORT = int(os.environ.get("DB_PORT", "5432"))
-DB_USER = os.environ.get("DB_USER", "admin")
-DB_PASS = os.environ.get("DB_PASS", "")
-DB_NAME = os.environ.get("DB_NAME", "ai_memory")
-# DB_REQUIRE_SSL=true for RDS/managed Postgres; leave unset for local dev
-DB_REQUIRE_SSL = os.environ.get("DB_REQUIRE_SSL", "false").lower() == "true"
+# TRANSPORT is read at module level because FastMCP construction requires it at import time
+# (before lifespan runs). This cannot be deferred to the lifespan function.
 TRANSPORT = os.environ.get("MCP_TRANSPORT", "stdio")
 
-# ---- Module-level singletons (set inside lifespan) --------------------------
-_db_pool: Optional[asyncpg.Pool] = None
-_opa: Optional[OpaClient] = None
-_cache: Optional[ToolResultCache] = None
-_tracer: Optional[trace.Tracer] = None
+# ---- ServerContext (replaces module-level globals) ----------------------------
+
+@dataclass(frozen=True)
+class ServerContext:
+    """All runtime dependencies, created once in lifespan."""
+    opa: Authorizer
+    cache: Optional[CacheStore]
+    db_pool: asyncpg.Pool
+    tracer: trace.Tracer
+    config: MCPConfig
+
+_ctx: ContextVar[ServerContext] = ContextVar("data_mcp_ctx")
 
 
 # ---- Lifespan ---------------------------------------------------------------
@@ -71,49 +73,51 @@ async def _lifespan(server: FastMCP) -> AsyncIterator[None]:
     created here so they share the same event loop that FastMCP uses for
     request handlers.
     """
-    global _db_pool, _opa, _cache, _tracer
+    # --- Configuration ---
+    config = MCPConfig.from_env()
 
     # --- Telemetry ---
-    service_name = os.environ.get("SERVICE_NAME", "data-mcp")
-    setup_telemetry(service_name)
-    _tracer = trace.get_tracer(__name__)
+    setup_telemetry(config.service_name)
+    tracer = trace.get_tracer(__name__)
 
     # --- OPA client (from SDK — shared connection pool, server-stamped env/role) ---
-    _opa = OpaClient(_config)
-    log.info("opa_client_ready", url=_config.opa_url)
+    opa = OpaClient(config)
+    log.info("opa_client_ready", url=config.opa_url)
 
     # --- Tool-result cache (graceful degradation when REDIS_HOST not set) ---
-    if _config.enable_tool_cache:
-        _cache = ToolResultCache.from_env(ttl_seconds=_config.tool_cache_ttl_seconds)
+    cache: Optional[CacheStore] = None
+    if config.enable_tool_cache:
+        cache = ToolResultCache.from_config(config, ttl_seconds=config.tool_cache_ttl_seconds)
     else:
         log.info("tool_cache_disabled", reason="MCPConfig.enable_tool_cache=False")
-        _cache = None
 
     # --- DB connection pool --------------------------------------------------
-    _db_pool = await asyncpg.create_pool(
-        user=DB_USER,
-        password=DB_PASS,
-        database=DB_NAME,
-        host=DB_HOST,
-        port=DB_PORT,
+    db_pool = await asyncpg.create_pool(
+        user=config.db_user,
+        password=config.db_pass,
+        database=config.db_name,
+        host=config.db_host,
+        port=config.db_port,
         min_size=1,
         max_size=10,
-        statement_cache_size=_config.statement_cache_size,
-        ssl="require" if DB_REQUIRE_SSL else None,
+        statement_cache_size=config.statement_cache_size,
+        ssl="require" if config.db_require_ssl else None,
     )
-    log.info("db_pool_ready", host=DB_HOST, db=DB_NAME)
+    log.info("db_pool_ready", host=config.db_host, db=config.db_name)
+
+    ctx = ServerContext(opa=opa, cache=cache, db_pool=db_pool, tracer=tracer, config=config)
+    token = _ctx.set(ctx)
     log.info("startup_complete", transport=TRANSPORT)
 
     yield  # ← server handles requests while we're here
 
     # --- Teardown (runs on SIGTERM / KeyboardInterrupt) ----------------------
-    if _db_pool:
-        await _db_pool.close()
-        log.info("db_pool_closed")
-    if _opa:
-        await _opa.aclose()
-    if _cache:
-        await _cache.aclose()
+    _ctx.reset(token)
+    await db_pool.close()
+    log.info("db_pool_closed")
+    await opa.aclose()
+    if cache:
+        await cache.aclose()
     log.info("shutdown_complete")
 
 
@@ -152,18 +156,13 @@ async def execute_read_query(query: str, session_id: str) -> str:
     Returns:
         JSON-encoded rows, a "no records found" message, or an error string.
     """
-    if _tracer is None:
-        raise RuntimeError("execute_read_query called before lifespan: telemetry not initialised")
-    if _db_pool is None:
-        raise RuntimeError("execute_read_query called before lifespan: DB pool not initialised")
-    if _opa is None:
-        raise RuntimeError("execute_read_query called before lifespan: OPA client not initialised")
+    ctx = _ctx.get()
 
-    with _tracer.start_as_current_span("execute_read_query") as span:
+    with ctx.tracer.start_as_current_span("execute_read_query") as span:
         span.set_attribute("session_id", session_id)
 
         # 1. OPA policy check (fails closed on any error) — via SDK OpaClient
-        is_authorized = await _opa.authorize(
+        is_authorized = await ctx.opa.authorize(
             "execute_read_query",
             {"query": query, "session_id": session_id},
         )
@@ -180,18 +179,18 @@ async def execute_read_query(query: str, session_id: str) -> str:
         # Strip a trailing semicolon first — standard SQL practice, not an injection.
         # The embedded-semicolon check below catches actual multi-statement attempts
         # (e.g. "SELECT 1; DROP TABLE users").
-        # M8: \b prevents prefix bypass (e.g. "SELECTBAD"); readonly=True transaction
-        #     is the primary DB-level guard against mutation.
+        # \b prevents prefix bypass (e.g. "SELECTBAD"); readonly=True transaction
+        # is the primary DB-level guard against mutation.
         query = query.rstrip().rstrip(";").rstrip()
         if not re.match(r"^\s*SELECT\b", query, re.IGNORECASE) or ";" in query:
             return "ERROR: Security policy violation — only single SELECT queries are permitted."
 
         # 4. Cache lookup — skip DB round-trip for repeated identical queries
         cache_key = None
-        if _cache is not None:
+        if ctx.cache is not None:
             from platform_sdk.cache import make_cache_key
             cache_key = make_cache_key("execute_read_query", {"query": query, "session_id": session_id})
-            cached_result = await _cache.get(cache_key)
+            cached_result = await ctx.cache.get(cache_key)
             if cached_result is not None:
                 span.set_attribute("cache.hit", True)
                 return cached_result
@@ -201,14 +200,13 @@ async def execute_read_query(query: str, session_id: str) -> str:
         # Defence in depth: verify the schema name matches the expected pattern
         # before interpolating it into SQL.  The UUID check above should prevent
         # anything unexpected, but this regex is a second safety net.
-        import re as _re
-        if not _re.fullmatch(r"ws_[0-9a-f_]+", schema_name):
+        if not re.fullmatch(r"ws_[0-9a-f_]+", schema_name):
             return "ERROR: Invalid session_id format — cannot construct schema name."
 
         try:
-            async with _db_pool.acquire() as conn:
+            async with ctx.db_pool.acquire() as conn:
                 async with conn.transaction(readonly=True):
-                    # H2: SET LOCAL scopes this to the current transaction only,
+                    # SET LOCAL scopes this to the current transaction only,
                     # preventing schema leakage to the next request on the same
                     # connection when it is returned to the pool.
                     # statement_timeout prevents long-running or sleep() queries from
@@ -227,14 +225,14 @@ async def execute_read_query(query: str, session_id: str) -> str:
 
                     output = json.dumps([dict(r) for r in records], default=str)
 
-                    if len(output) > _config.max_result_bytes:
+                    if len(output) > ctx.config.max_result_bytes:
                         span.set_attribute("db.truncated", True)
                         log.warning("result_truncated", session_id=session_id, bytes=len(output))
-                        output = output[:_config.max_result_bytes] + "\n... [RESULTS TRUNCATED]"
+                        output = output[:ctx.config.max_result_bytes] + "\n... [RESULTS TRUNCATED]"
 
                     # 5. Cache successful result for future identical queries
-                    if _cache is not None and cache_key is not None:
-                        await _cache.set(cache_key, output)
+                    if ctx.cache is not None and cache_key is not None:
+                        await ctx.cache.set(cache_key, output)
 
                     return output
 

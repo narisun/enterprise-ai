@@ -19,24 +19,35 @@ import asyncio
 import json
 import os
 from contextlib import asynccontextmanager
+from contextvars import ContextVar
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Any, Optional
 
 from mcp.server.fastmcp import FastMCP
 
 from platform_sdk import MCPConfig, OpaClient, ToolResultCache, cached_tool, configure_logging, get_logger, make_error
 from platform_sdk.authorized_tool import is_error_response
+from platform_sdk.mcp_server_base import create_base_resources
+from platform_sdk.protocols import Authorizer, CacheStore
 
 configure_logging()
 log = get_logger(__name__)
 
-_config = MCPConfig.from_env()
+# ---- ServerContext (replaces module-level globals) ----------------------------
 
-# Initialised inside lifespan so they share the correct event loop.
-_cache: Optional[ToolResultCache] = None
-_opa: Optional[OpaClient] = None
-_tavily_client = None
+@dataclass(frozen=True)
+class ServerContext:
+    """All runtime dependencies, created once in lifespan."""
+    opa: Authorizer
+    cache: Optional[CacheStore]
+    tavily_client: Any  # TavilyClient or None
+    config: MCPConfig
 
+_ctx: ContextVar[ServerContext] = ContextVar("news_mcp_ctx")
+
+# Module-level: required for FastMCP construction before lifespan runs.
+# Canonical source is MCPConfig, but we cannot call from_env() at import time.
 TRANSPORT = os.environ.get("MCP_TRANSPORT", "sse")
 PORT = int(os.environ.get("PORT", 8083))
 
@@ -144,48 +155,42 @@ async def _lifespan(server: FastMCP):
     Initialise all async resources inside the lifespan so they share the
     correct event loop with FastMCP's request handlers.
 
-    Previously _cache was created at module level which could cause asyncio
-    loop mismatch errors when the Redis connection was made in the import loop
-    rather than the server loop.
+    Uses ``create_base_resources`` from the SDK for OPA/cache boilerplate.
+    Only the Tavily client init is server-specific.
     """
-    global _opa, _cache, _tavily_client
+    async with create_base_resources(
+        service_name="news-search-mcp",
+        cache_ttl_seconds=1800,
+        requires_database=False,
+    ) as resources:
+        # Tavily client (optional — falls back to mock when key is absent)
+        tavily_client = None
+        # Note: TAVILY_API_KEY is intentionally server-specific and read directly from os.environ.
+        # It is not part of the canonical MCPConfig as it's external API credentials, not platform config.
+        tavily_key = os.environ.get("TAVILY_API_KEY", "")
+        if tavily_key:
+            try:
+                from tavily import TavilyClient
+                tavily_client = TavilyClient(api_key=tavily_key)
+                log.info("news_mcp_ready", mode="tavily")
+            except ImportError:
+                log.warning("tavily_not_installed", fallback="mock")
+        else:
+            log.info("news_mcp_ready", mode="mock", reason="TAVILY_API_KEY not set")
 
-    # OPA client — required for tool authorization
-    _opa = OpaClient(_config)
-    log.info("opa_client_ready", url=_config.opa_url)
-
-    # Tool result cache — gracefully degrades when REDIS_HOST is not set
-    if _config.enable_tool_cache:
-        _cache = ToolResultCache.from_env(ttl_seconds=1800)
-        log.info("tool_cache_ready")
-    else:
-        log.info("tool_cache_disabled")
-
-    # Tavily client (optional — falls back to mock when key is absent)
-    tavily_key = os.environ.get("TAVILY_API_KEY", "")
-    if tavily_key:
-        try:
-            from tavily import TavilyClient
-            _tavily_client = TavilyClient(api_key=tavily_key)
-            log.info("news_mcp_ready", mode="tavily")
-        except ImportError:
-            log.warning("tavily_not_installed", fallback="mock")
-    else:
-        log.info("news_mcp_ready", mode="mock", reason="TAVILY_API_KEY not set")
-
-    yield
-
-    if _opa:
-        await _opa.aclose()
-    if _cache:
-        await _cache.aclose()
-    log.info("news_mcp_shutdown")
+        ctx = ServerContext(
+            opa=resources.opa, cache=resources.cache,
+            tavily_client=tavily_client, config=resources.config,
+        )
+        token = _ctx.set(ctx)
+        yield
+        _ctx.reset(token)
 
 
 mcp = FastMCP("news-search-mcp", lifespan=_lifespan, host="0.0.0.0", port=PORT)
 
 
-async def _search_tavily(company_name: str) -> list:
+async def _search_tavily(company_name: str, tavily_client) -> list:
     """Search using Tavily API.
 
     TavilyClient.search() is a synchronous blocking HTTP call.  Running it
@@ -196,7 +201,7 @@ async def _search_tavily(company_name: str) -> list:
     loop = asyncio.get_running_loop()
     response = await loop.run_in_executor(
         None,
-        lambda: _tavily_client.search(
+        lambda: tavily_client.search(
             query=f"{company_name} company news business",
             search_depth="basic",
             max_results=5,
@@ -245,14 +250,16 @@ async def search_company_news(company_name: str) -> str:
     """
     # OPA authorization — same pattern as all other MCP tools.
     # This was missing entirely in the original implementation.
-    if _opa is None:
+    ctx = _ctx.get()
+
+    if ctx.opa is None:
         return make_error("service_not_initialised", "OPA client not ready.")
 
     if not company_name or not company_name.strip():
         return make_error("invalid_input", "company_name must not be empty.")
     company_name = company_name.strip()[:256]
 
-    is_authorized = await _opa.authorize(
+    is_authorized = await ctx.opa.authorize(
         "search_company_news", {"company_name": company_name}
     )
     if not is_authorized:
@@ -261,19 +268,19 @@ async def search_company_news(company_name: str) -> str:
 
     # Cache lookup — keyed on company_name
     cache_key = None
-    if _cache is not None:
+    if ctx.cache is not None:
         from platform_sdk.cache import make_cache_key
         cache_key = make_cache_key("search_company_news", {"company_name": company_name})
-        cached = await _cache.get(cache_key)
+        cached = await ctx.cache.get(cache_key)
         if cached is not None:
             log.info("news_cache_hit", company=company_name)
             return cached
 
-    log.info("news_tool_call", company=company_name, mode="tavily" if _tavily_client else "mock")
+    log.info("news_tool_call", company=company_name, mode="tavily" if ctx.tavily_client else "mock")
 
     try:
-        if _tavily_client:
-            articles = await _search_tavily(company_name)
+        if ctx.tavily_client:
+            articles = await _search_tavily(company_name, ctx.tavily_client)
         else:
             articles = _get_mock_articles(company_name)
     except Exception as exc:
@@ -310,8 +317,8 @@ async def search_company_news(company_name: str) -> str:
     output = json.dumps(result, default=str)
 
     # Cache the result
-    if _cache is not None and cache_key is not None:
-        await _cache.set(cache_key, output)
+    if ctx.cache is not None and cache_key is not None:
+        await ctx.cache.set(cache_key, output)
 
     return output
 

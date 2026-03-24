@@ -25,6 +25,8 @@ Security fixes applied:
 import json
 import os
 from contextlib import asynccontextmanager
+from contextvars import ContextVar
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -33,17 +35,26 @@ from mcp.server.fastmcp import FastMCP
 
 from platform_sdk import MCPConfig, OpaClient, ToolResultCache, cached_tool, configure_logging, get_logger
 from platform_sdk.auth import assert_secrets_configured
+from platform_sdk.mcp_server_base import create_base_resources
+from platform_sdk.protocols import Authorizer, CacheStore
 
 configure_logging()
 log = get_logger(__name__)
 
-_config = MCPConfig.from_env()
+# ---- ServerContext (replaces module-level globals) ----------------------------
 
-# Initialised in lifespan — do NOT create at module level (wrong event loop).
-_cache: Optional[ToolResultCache] = None
-_opa: Optional[OpaClient] = None
-_pool: Optional[asyncpg.Pool] = None
+@dataclass(frozen=True)
+class ServerContext:
+    """All runtime dependencies, created once in lifespan."""
+    opa: Authorizer
+    cache: Optional[CacheStore]
+    db_pool: asyncpg.Pool
+    config: MCPConfig
 
+_ctx: ContextVar[ServerContext] = ContextVar("payments_mcp_ctx")
+
+# Module-level: required for FastMCP construction before lifespan runs.
+# Canonical source is MCPConfig, but we cannot call from_env() at import time.
 TRANSPORT = os.environ.get("MCP_TRANSPORT", "sse")
 PORT = int(os.environ.get("PORT", 8082))
 
@@ -63,36 +74,21 @@ _DEFAULT_DAYS = 360
 
 @asynccontextmanager
 async def _lifespan(server: FastMCP):
-    global _opa, _cache, _pool
-
-    assert_secrets_configured()
-
-    _opa = OpaClient(_config)
-    log.info("opa_client_ready", url=_config.opa_url)
-
-    if _config.enable_tool_cache:
-        _cache = ToolResultCache.from_env(ttl_seconds=3600)
-        log.info("tool_cache_ready")
-
-    _pool = await asyncpg.create_pool(
-        host=os.environ.get("DB_HOST", "pgvector"),
-        port=int(os.environ.get("DB_PORT", 5432)),
-        user=os.environ.get("DB_USER", "admin"),
-        password=os.environ.get("DB_PASS", ""),
-        database=os.environ.get("DB_NAME", "ai_memory"),
-        ssl="require" if os.environ.get("DB_REQUIRE_SSL", "false").lower() == "true" else None,
-        min_size=2,
-        max_size=10,
-        statement_cache_size=_config.statement_cache_size,
-    )
-    log.info("payments_mcp_ready")
-    yield
-
-    await _pool.close()
-    await _opa.aclose()
-    if _cache:
-        await _cache.aclose()
-    log.info("payments_mcp_shutdown")
+    """Initialise runtime dependencies using SDK base resources."""
+    async with create_base_resources(
+        service_name="payments-mcp",
+        cache_ttl_seconds=3600,
+        requires_database=True,
+        assert_secrets=True,
+    ) as resources:
+        ctx = ServerContext(
+            opa=resources.opa, cache=resources.cache,
+            db_pool=resources.db_pool, config=resources.config,
+        )
+        token = _ctx.set(ctx)
+        log.info("payments_mcp_ready")
+        yield
+        _ctx.reset(token)
 
 
 mcp = FastMCP("payments-mcp", lifespan=_lifespan, host="0.0.0.0", port=PORT)
@@ -139,7 +135,8 @@ async def _get_payment_summary_impl(client_name: str, days: int, col_mask: list[
     and PostgreSQL has no bigint * interval operator — the explicit cast to
     int4 is required for the multiplication to resolve correctly.
     """
-    async with _pool.acquire() as conn:
+    ctx = _ctx.get()
+    async with ctx.db_pool.acquire() as conn:
         async with conn.transaction(isolation="repeatable_read", readonly=True):
 
             # 1. Outbound volume by payment rail (client as Payor)
@@ -342,9 +339,9 @@ async def _get_payment_summary_impl(client_name: str, days: int, col_mask: list[
     output = json.dumps(result, default=str)
 
     # Enforce result size limit (was defined in config but never applied)
-    if len(output) > _config.max_result_bytes:
-        log.warning("result_truncated", bytes=len(output), limit=_config.max_result_bytes)
-        output = output[:_config.max_result_bytes] + "\n... [RESULTS TRUNCATED]"
+    if len(output) > ctx.config.max_result_bytes:
+        log.warning("result_truncated", bytes=len(output), limit=ctx.config.max_result_bytes)
+        output = output[:ctx.config.max_result_bytes] + "\n... [RESULTS TRUNCATED]"
 
     return output
 
@@ -374,7 +371,9 @@ async def get_payment_summary(client_name: str) -> str:
     """
     days = _DEFAULT_DAYS
 
-    if _opa is None:
+    ctx = _ctx.get()
+
+    if ctx.opa is None:
         return "ERROR: Service not initialised — OPA client not ready."
 
     if not client_name or not client_name.strip():
@@ -383,7 +382,7 @@ async def get_payment_summary(client_name: str) -> str:
     # Truncate excessively long client names (defence against log/cache abuse)
     client_name = client_name.strip()[:256]
 
-    is_authorized = await _opa.authorize(
+    is_authorized = await ctx.opa.authorize(
         "get_payment_summary", {"client_name": client_name}
     )
     if not is_authorized:
@@ -394,36 +393,36 @@ async def get_payment_summary(client_name: str) -> str:
     # If no valid signed context header is present, get_agent_context() returns
     # None (middleware falls through to no-context) so we use anonymous()
     # which now grants minimum privilege — all compliance columns are masked.
-    ctx = get_agent_context()
-    if ctx is None:
+    agent_ctx = get_agent_context()
+    if agent_ctx is None:
         from platform_sdk.auth import AgentContext
-        ctx = AgentContext.anonymous()
+        agent_ctx = AgentContext.anonymous()
         log.warning("no_agent_context", tool="get_payment_summary", fallback="anonymous/readonly")
 
-    col_mask = ctx.build_col_mask()
+    col_mask = agent_ctx.build_col_mask()
 
     # Row-level filter for standard RM role
-    row_filters = ctx.build_row_filters_payments(party_names=[client_name])
+    row_filters = agent_ctx.build_row_filters_payments(party_names=[client_name])
     if row_filters.get("fact_payments") == ["__DENY_ALL__"]:
-        log.warning("row_filter_deny", tool="get_payment_summary", role=ctx.role)
+        log.warning("row_filter_deny", tool="get_payment_summary", role=agent_ctx.role)
         return "ERROR: Unauthorized. You do not have access to payment data for this client."
 
     # Cache key includes the col_mask so different clearance levels get
     # separate entries (a compliance_full user must not get an rm-masked entry).
     col_mask_key = ",".join(sorted(col_mask))
 
-    if _cache is not None:
+    if ctx.cache is not None:
         from platform_sdk.cache import make_cache_key
         cache_key = make_cache_key(
             "get_payment_summary",
             {"client_name": client_name, "col_mask_key": col_mask_key},
         )
-        cached = await _cache.get(cache_key)
+        cached = await ctx.cache.get(cache_key)
         if cached is not None:
             log.info("payments_cache_hit", client=client_name)
             return cached
 
-    log.info("payments_tool_call", client=client_name, days=days, role=ctx.role)
+    log.info("payments_tool_call", client=client_name, days=days, role=agent_ctx.role)
 
     try:
         result = await _get_payment_summary_impl(client_name, days, col_mask)
@@ -444,8 +443,8 @@ async def get_payment_summary(client_name: str) -> str:
         return "ERROR: An unexpected error occurred. Please try again."
 
     # Cache the result
-    if _cache is not None:
-        await _cache.set(cache_key, result)
+    if ctx.cache is not None:
+        await ctx.cache.set(cache_key, result)
 
     return result
 

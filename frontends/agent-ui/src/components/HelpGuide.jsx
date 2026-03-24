@@ -1,5 +1,5 @@
 /**
- * HelpGuide.jsx — User guide for the Quantitix platform.
+ * HelpGuide.jsx — User guide for the Enterprise AI platform.
  *
  * Rendered as a full-page in the HELP phase. Covers:
  *   • Platform overview
@@ -130,7 +130,7 @@ export default function HelpGuide({ onBack }) {
           </button>
           <div className="w-px h-4 bg-slate-200" />
           <div>
-            <h1 className="text-base font-bold text-slate-900">Quantitix User Guide</h1>
+            <h1 className="text-base font-bold text-slate-900">Enterprise AI User Guide</h1>
             <p className="text-xs text-slate-500">Agentic AI for regulated financial services</p>
           </div>
         </div>
@@ -141,13 +141,13 @@ export default function HelpGuide({ onBack }) {
           {/* ── 1. Overview ─────────────────────────────────────────────── */}
           <Section id="overview" icon="🧭" title="Platform Overview">
             <p>
-              Quantitix is a multi-agent AI platform purpose-built for regulated financial services.
+              Enterprise AI is a multi-agent AI platform purpose-built for regulated financial services.
               It gives relationship managers, compliance teams, and treasury professionals access to
               specialist AI workers — each with defined data access, role-based authorization, and
               an auditable reasoning trail.
             </p>
             <p>
-              Unlike general-purpose chat tools, every agent in Quantitix has a fixed scope: it
+              Unlike general-purpose chat tools, every agent in Enterprise AI has a fixed scope: it
               knows which systems to query, which OPA policies govern its data access, and how to
               structure its output for its specific workflow. Agents never access data directly —
               they delegate to MCP tool servers that enforce row-level and column-level controls
@@ -211,7 +211,7 @@ export default function HelpGuide({ onBack }) {
 
             <p className="mt-2">
               The breadcrumb at the top always shows your current position. Click
-              <strong className="text-slate-800"> Quantitix</strong> at any point to return to the team directory,
+              <strong className="text-slate-800"> Enterprise AI</strong> at any point to return to the team directory,
               or click the agent name to go back to the configuration screen.
             </p>
           </Section>
@@ -377,7 +377,7 @@ export default function HelpGuide({ onBack }) {
             <p className="mt-4 font-semibold text-slate-700">Tips</p>
             <ul className="list-disc list-inside space-y-2 ml-1">
               <li>Click any data source chip on an agent card to explore its schema before running the agent.</li>
-              <li>The <strong className="text-slate-800">Quantitix</strong> logo and breadcrumb link always return you to the team directory.</li>
+              <li>The <strong className="text-slate-800">Enterprise AI</strong> logo and breadcrumb link always return you to the team directory.</li>
               <li>Your RM name at the bottom of the sidebar is editable inline — changes take effect on the next run.</li>
               <li>
                 Run <code className="font-mono text-xs bg-slate-100 px-1 rounded">make dev-up</code> from the

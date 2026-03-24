@@ -1,5 +1,5 @@
 /**
- * SettingsPanel.jsx — User-configurable settings for the Quantitix platform.
+ * SettingsPanel.jsx — User-configurable settings for the Enterprise AI platform.
  *
  * This component is PURE UI — it receives settings as props and emits
  * changes via onChange. All persistence logic lives in lib/settings.js.
@@ -343,7 +343,7 @@ export default function SettingsPanel({ settings, onChange, onBack, rmId, onRmId
             />
             <div className="border border-slate-200 rounded-xl px-5 divide-y divide-slate-100">
               {[
-                { label: 'Platform',       value: 'Quantitix — Agentic AI' },
+                { label: 'Platform',       value: 'Enterprise AI — Agentic Platform' },
                 { label: 'UI version',     value: '1.0.0-dev' },
                 { label: 'Agent runtime',  value: 'LangGraph 0.2 · Python 3.12' },
                 { label: 'MCP transport',  value: 'FastMCP SSE' },

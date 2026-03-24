@@ -7,7 +7,7 @@
  * @module lib/settings
  */
 
-const STORAGE_KEY = 'quantitix-settings'
+const STORAGE_KEY = 'enterprise-ai-settings'
 
 /** @type {import('../types/settings').Settings} */
 export const DEFAULT_SETTINGS = {

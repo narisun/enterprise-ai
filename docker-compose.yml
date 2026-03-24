@@ -114,12 +114,12 @@ services:
     networks:
       - ai-network
     ports:
-      - "127.0.0.1:5432:5432"    # L4: bind to loopback — DB clients on same machine only
+      - "127.0.0.1:5432:5432"    # Bind to loopback — DB clients on same machine only
 
   redis:
     image: *img-redis
     container_name: ai-redis
-    # H5: require authentication; REDIS_PASSWORD from .env
+    # Require authentication; REDIS_PASSWORD from .env
     command: ["redis-server", "--requirepass", "${REDIS_PASSWORD}"]
     environment:
       REDIS_PASSWORD: ${REDIS_PASSWORD}
@@ -146,8 +146,8 @@ services:
     # infrastructure.  Blocking here would delay all agents by ~20s while
     # Loki's start_period elapses, causing OTLP export timeouts.
     ports:
-      - "127.0.0.1:4317:4317"    # L4: OTLP gRPC — loopback only in dev
-      - "127.0.0.1:4318:4318"    # L4: OTLP HTTP — loopback only in dev
+      - "127.0.0.1:4317:4317"    # OTLP gRPC — loopback only in dev
+      - "127.0.0.1:4318:4318"    # OTLP HTTP — loopback only in dev
     networks:
       - ai-network
 
@@ -163,7 +163,7 @@ services:
       AZURE_API_VERSION: ${AZURE_API_VERSION:-2024-10-21}
       REDIS_HOST: redis
       REDIS_PORT: 6379
-      REDIS_PASSWORD: ${REDIS_PASSWORD}          # H5: authenticated Redis
+      REDIS_PASSWORD: ${REDIS_PASSWORD}          # Authenticated Redis
       INTERNAL_API_KEY: ${INTERNAL_API_KEY}      # read by litellm-local.yaml via os.environ/INTERNAL_API_KEY
       LITELLM_MASTER_KEY: ${INTERNAL_API_KEY}    # LiteLLM auto-detects this env var as fallback
       <<: *otel-env
@@ -189,7 +189,7 @@ services:
     networks:
       - ai-network
     ports:
-      - "127.0.0.1:4000:4000"    # L4: loopback only in dev
+      - "127.0.0.1:4000:4000"    # Loopback only in dev
 
   # ============================================================
   # POLICY ENGINE
@@ -206,7 +206,7 @@ services:
       timeout: 5s
       retries: 5
     ports:
-      - "127.0.0.1:8181:8181"    # L4: loopback only — needed by integration test runner
+      - "127.0.0.1:8181:8181"    # Loopback only — needed by integration test runner
     networks:
       - ai-network
 
@@ -227,12 +227,12 @@ services:
       DB_PASS: ${POSTGRES_PASSWORD}
       DB_NAME: ai_memory
       SERVICE_NAME: data-mcp
-      ENVIRONMENT: ${ENVIRONMENT:-local}    # H3: stamped into OPA input
+      ENVIRONMENT: ${ENVIRONMENT:-local}    # Stamped into OPA input
       AGENT_ROLE: ${AGENT_ROLE:-data_analyst_agent}
       # Tool-result caching via platform_sdk.ToolResultCache
       REDIS_HOST: redis
       REDIS_PORT: 6379
-      REDIS_PASSWORD: ${REDIS_PASSWORD}    # H5: authenticated Redis
+      REDIS_PASSWORD: ${REDIS_PASSWORD}    # Authenticated Redis
       ENABLE_TOOL_CACHE: "true"
       TOOL_CACHE_TTL: "300"                # 5 minutes — tune based on data freshness
       <<: *otel-env
@@ -257,7 +257,7 @@ services:
     networks:
       - ai-network
     ports:
-      - "127.0.0.1:8080:8080"    # L4: loopback only in dev
+      - "127.0.0.1:8080:8080"    # Loopback only in dev
 
   # ============================================================
   # AGENT SERVICE
@@ -283,7 +283,7 @@ services:
         condition: service_healthy
       data-mcp:
         condition: service_healthy
-    # M4: healthcheck so dependent services and orchestrators know when the
+    # Healthcheck so dependent services and orchestrators know when the
     # agent is fully ready (MCP handshake + LangGraph init included in startup)
     healthcheck:
       test: ["CMD", "python3", "-c",
@@ -295,7 +295,7 @@ services:
     networks:
       - ai-network
     ports:
-      - "127.0.0.1:8000:8000"  # L4: bind to loopback only in dev
+      - "127.0.0.1:8000:8000"  # Bind to loopback only in dev
 
   # ============================================================
   # FRONTENDS — User-facing interfaces (chat UI, future plugins)
@@ -390,7 +390,7 @@ services:
     networks:
       - ai-network
     ports:
-      - "127.0.0.1:8081:8081"    # L4: loopback only in dev
+      - "127.0.0.1:8081:8081"    # Loopback only in dev
 
   payments-mcp:
     build:
@@ -435,7 +435,7 @@ services:
     networks:
       - ai-network
     ports:
-      - "127.0.0.1:8082:8082"    # L4: loopback only in dev
+      - "127.0.0.1:8082:8082"    # Loopback only in dev
 
   news-search-mcp:
     build:
@@ -474,7 +474,7 @@ services:
     networks:
       - ai-network
     ports:
-      - "127.0.0.1:8083:8083"    # L4: loopback only in dev
+      - "127.0.0.1:8083:8083"    # Loopback only in dev
 
   # ============================================================
   # RM PREP AGENT — Orchestrator Service
@@ -522,7 +522,7 @@ services:
     networks:
       - ai-network
     ports:
-      - "127.0.0.1:8003:8003"    # L4: loopback only in dev
+      - "127.0.0.1:8003:8003"    # Loopback only in dev
 
   # ============================================================
   # PORTFOLIO WATCH AGENT — Morgan (Generator-Evaluator pattern)
@@ -557,7 +557,7 @@ services:
     networks:
       - ai-network
     ports:
-      - "127.0.0.1:8004:8004"    # L4: loopback only in dev
+      - "127.0.0.1:8004:8004"    # Loopback only in dev
 
   # ============================================================
   # AGENT UI — React frontend (supports multiple agents)

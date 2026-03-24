@@ -1,5 +1,5 @@
 /**
- * UserProfile.jsx — User profile page for Quantitix.
+ * UserProfile.jsx — User profile page for Enterprise AI.
  *
  * Sections:
  *   Identity         — avatar, display name, job title, department
@@ -10,7 +10,7 @@
  *
  * Profile fields that correspond to real app state (rmId, region, settings)
  * are editable and update live. Other fields use local state and are saved
- * to localStorage under 'quantitix-profile'.
+ * to localStorage under 'enterprise-ai-profile'.
  *
  * Props:
  *   rmId          {string}
@@ -25,7 +25,7 @@ import { useState, useCallback } from 'react'
 import { Settings, ExternalLink } from 'lucide-react'
 
 // ── Persist helpers ────────────────────────────────────────────────────────────
-const STORAGE_KEY = 'quantitix-profile'
+const STORAGE_KEY = 'enterprise-ai-profile'
 
 export const loadProfile = () => {
   try {

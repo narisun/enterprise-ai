@@ -1,5 +1,5 @@
 /**
- * Meridian Worker Registry — display configuration only.
+ * Enterprise AI Worker Registry — display configuration only.
  *
  * Each entry describes how an AI digital worker appears in the UI:
  * its name, role, icon, colour, template variables, data sources, and

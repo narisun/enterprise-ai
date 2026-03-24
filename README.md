@@ -1,8 +1,8 @@
-# Meridian Enterprise AI
+# Enterprise AI — Agentic Platform
 
-![Meridian Intelligence Team](meridian.png)
+![Enterprise AI Intelligence Team](enterprise-ai.png)
 
-Meridian is an enterprise agentic AI platform for regulated financial-services workflows. It combines:
+Enterprise AI is an agentic platform for regulated financial-services workflows. It combines:
 
 - Secure agent services built with LangGraph and FastAPI
 - MCP tool servers for CRM, payments, news, and SQL access
@@ -232,13 +232,14 @@ Orchestrator agents own the workflow and routing logic. They never call data sou
 
 The `platform-sdk/` package centralizes cross-cutting behavior so every service uses the same patterns for:
 
-- API key verification
-- `AgentContext` creation and propagation
-- OPA authorization
-- cache helpers
-- structured logging
-- telemetry
-- config loading
+- API key verification and HMAC-signed `AgentContext` propagation
+- OPA authorization (fail-closed, with `CircuitBreaker` resilience)
+- Redis-backed tool-result caching (also circuit-breaker protected)
+- Sandboxed prompt loading via `PromptLoader` (prevents SSTI attacks)
+- Structured JSON logging and OpenTelemetry tracing
+- Typed configuration via `AgentConfig` and `MCPConfig`
+- `make_checkpointer()` factory for MemorySaver or AsyncPostgresSaver selection
+- Dependency injection protocols (`Authorizer`, `CacheStore`, `LLMClient`, `ToolBridge`, `PortfolioDataSource`)
 
 This keeps service code focused on business logic instead of repeating infrastructure code.
 
@@ -273,20 +274,26 @@ All agents follow a two-tier pattern: an **orchestrator** drives the workflow, a
 ### RM Prep flow
 
 ```text
-parse_intent
-  -> route
-  -> gather_crm
-  -> gather_payments
-  -> gather_news
+conversation_router
+  -> route (new_task)
+  -> gather_crm ─┐
+  -> gather_payments ─┤ (parallel)
+  -> gather_news ─────┘
   -> synthesize
   -> format_brief
+
+Multi-turn branches:
+  conversation_router -> conversational_responder   (follow_up)
+  conversation_router -> refine_brief -> format_brief (refinement)
+  conversation_router -> clarify_intent              (clarification)
 ```
 
 Why this matters:
 
-- CRM, payments, and news can run in parallel
+- CRM, payments, and news run in parallel
 - the brief always checks the required domains
 - the output shape is predictable
+- multi-turn conversation allows follow-up questions, brief refinement, and clarification without restarting the workflow
 
 ### Security model
 
@@ -301,18 +308,22 @@ Authentication and authorization flow:
 
 This avoids forwarding raw user JWTs to every downstream service.
 
+### Resilience model
+
+Infrastructure clients use a reusable `CircuitBreaker` (from `platform_sdk.resilience`) that opens after consecutive failures and recovers after a configurable timeout. Both `OpaClient` and `ToolResultCache` use this pattern, preventing cascading failures when OPA or Redis is temporarily unavailable.
+
 ### Caching model
 
 There are two main cache layers:
 
 - LiteLLM semantic cache for model responses
-- tool-result caching for MCP tool outputs
+- tool-result caching for MCP tool outputs (Redis-backed, circuit-breaker protected)
 
 This improves latency and reduces repeated work while keeping security decisions centralized.
 
 ## Testing Strategy
 
-The repo uses three layers of testing so failures are easier to understand and debug.
+The repo uses three layers of testing so failures are easier to understand and debug. CI runs via four GitHub Actions workflows: `ci-unit.yml`, `ci-integration.yml`, `ci-evals.yml`, and `ci-deploy.yml`.
 
 ### Layer 1: unit tests
 
@@ -326,7 +337,9 @@ Focus:
 
 - auth and HMAC helpers
 - row-filter and column-mask logic
+- circuit-breaker state transitions
 - cache-key behavior
+- prompt loader rendering
 - markdown rendering
 
 ### Layer 2: integration tests
@@ -340,10 +353,10 @@ make test-integration
 
 Focus:
 
-- API behavior
+- API behavior end-to-end
 - OPA policy decisions
 - database-backed tool behavior
-- seeded local test data
+- seeded local test data (45 CRM accounts, 1000 payments)
 
 ### Layer 3: evals
 
@@ -365,10 +378,10 @@ Focus:
 enterprise-ai/
 ├── agents/
 │   ├── src/                  # Generic chat agent service
-│   ├── rm-prep/              # RM Prep agent
-│   └── portfolio-watch/      # Portfolio Watch agent
+│   ├── rm-prep/              # RM Prep agent (StateGraph, multi-turn)
+│   └── portfolio-watch/      # Portfolio Watch agent (generator/evaluator)
 ├── frontends/
-│   ├── agent-ui/             # React frontend
+│   ├── agent-ui/             # React frontend (Vite + Tailwind)
 │   └── chat-ui/              # Chainlit frontend
 ├── tools/
 │   ├── data-mcp/             # Secure SQL MCP
@@ -376,10 +389,12 @@ enterprise-ai/
 │   ├── payments-mcp/         # Payments MCP
 │   ├── news-search-mcp/      # News MCP
 │   └── shared/               # Shared MCP auth helpers
-├── platform-sdk/             # Shared SDK used by services
+├── platform-sdk/             # Shared SDK (auth, OPA, cache, resilience, prompts, telemetry)
 ├── platform/                 # DB schema, seed data, LiteLLM, OTel config
 ├── tests/                    # Unit, integration, and eval tests
 ├── testdata/                 # Synthetic CRM and payments fixtures
+├── .github/workflows/        # CI: unit, integration, evals, deploy
+├── infra/terraform/          # Terraform modules (RDS, ECS, networking)
 ├── docker-compose.yml
 ├── docker-compose.test.yml
 └── Makefile
@@ -409,4 +424,5 @@ For deeper troubleshooting, see [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
 - [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md) for adding new agents and MCP servers
 - [RM_PREP_AGENT_ARCHITECTURE.md](RM_PREP_AGENT_ARCHITECTURE.md) for RM Prep design details
 - [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for common issues and recovery steps
+- [architecture.html](architecture.html) for an interactive layered architecture diagram
 - [`docs/`](docs/) for additional architecture and design notes

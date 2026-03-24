@@ -1,6 +1,6 @@
-# Developer Guide — Meridian Enterprise AI Platform
+# Developer Guide — Enterprise AI Agentic Platform
 
-This guide is the primary reference for engineers building on the Meridian platform. It covers local environment setup, how the platform SDK works, and step-by-step walkthroughs for building new agents and MCP servers.
+This guide is the primary reference for engineers building on the Enterprise AI platform. It covers local environment setup, how the platform SDK works, and step-by-step walkthroughs for building new agents and MCP servers.
 
 ---
 
@@ -14,7 +14,8 @@ This guide is the primary reference for engineers building on the Meridian platf
 6. [Step-by-Step: Building a New MCP Server](#6-step-by-step-building-a-new-mcp-server)
 7. [Component Reference](#7-component-reference)
 8. [Environment Variables](#8-environment-variables)
-9. [Data Flows](#9-data-flows)
+9. [CI/CD Pipeline](#9-cicd-pipeline)
+10. [Data Flows](#10-data-flows)
 
 ---
 
@@ -104,9 +105,10 @@ On first start Docker will build images (5–10 min). Subsequent starts take abo
 
 | Service | Port | Purpose |
 |---|---|---|
-| Meridian RM Prep UI | 8502 | Streamlit brief-writing UI |
+| Agent UI | 3000 | React UI for RM Prep and Portfolio Watch |
 | Chat UI | 8501 | Chainlit generic chat |
 | RM Prep Agent | 8003 | Brief orchestrator API |
+| Portfolio Watch Agent | 8004 | Portfolio monitoring API |
 | Generic Agent | 8000 | ReAct chat API |
 | LiteLLM Proxy | 4000 | Multi-cloud LLM router |
 | Salesforce MCP | 8081 | CRM data tool server |
@@ -241,14 +243,20 @@ The `platform-sdk` collapses all cross-cutting concerns into one tested, version
 ```
 platform-sdk/platform_sdk/
 │
-├── auth.py       — "Who is calling, and what are they allowed to see?"
-├── config.py     — "What does this service need to know about itself?"
-├── security.py   — "Is this specific request authorized?"
-├── cache.py      — "Have we computed this result recently?"
-├── compaction.py — "Is the context window getting too full?"
-├── agent.py      — "Build me a LangGraph agent or specialist sub-agent"
-├── logging.py    — "Write structured JSON logs with keyword args"
-└── telemetry.py  — "Emit OpenTelemetry traces automatically"
+├── auth.py            — "Who is calling, and what are they allowed to see?"
+├── config.py          — "What does this service need to know about itself?"
+├── security.py        — "Is this specific request authorized?" (uses CircuitBreaker)
+├── cache.py           — "Have we computed this result recently?" (uses CircuitBreaker)
+├── resilience.py      — Reusable CircuitBreaker for fail-fast + auto-recovery
+├── prompts.py         — Sandboxed Jinja2 PromptLoader (prevents SSTI)
+├── compaction.py      — "Is the context window getting too full?"
+├── agent.py           — Agent/specialist factories + make_checkpointer()
+├── protocols.py       — DI protocols: Authorizer, CacheStore, LLMClient, ToolBridge, PortfolioDataSource
+├── mcp_server_base.py — BaseMCPServer and shared health router
+├── mcp_bridge.py      — SSE client for MCP tool servers → LangChain tools
+├── metrics.py         — OPA/cache/MCP Prometheus-style metric recorders
+├── logging.py         — "Write structured JSON logs with keyword args"
+└── telemetry.py       — "Emit OpenTelemetry traces automatically"
 ```
 
 A new MCP tool server needs roughly 80 lines of service code to be fully production-ready. The SDK handles the rest.
@@ -317,6 +325,8 @@ config = MCPConfig.from_env()
 from platform_sdk import OpaClient, MCPConfig, make_api_key_verifier
 
 # OPA client — fail-closed: OPA unreachable → deny
+# Internally uses CircuitBreaker — after 5 consecutive failures, the circuit
+# opens and calls are short-circuited for 30s before allowing a probe.
 opa = OpaClient(MCPConfig.from_env())
 allowed = await opa.authorize("my_tool", {"session_id": sid, "role": role})
 if not allowed:
@@ -330,7 +340,46 @@ async def brief(body: BriefRequest, _: str = Depends(verify_api_key)):
     ...
 ```
 
-Both helpers are fail-closed by design. An unconfigured `INTERNAL_API_KEY` rejects all requests. OPA returning a network error is treated as a denial.
+Both helpers are fail-closed by design. An unconfigured `INTERNAL_API_KEY` rejects all requests. OPA returning a network error is treated as a denial. The `CircuitBreaker` (from `platform_sdk.resilience`) prevents thundering-herd retries when OPA is temporarily down.
+
+---
+
+### `resilience.py` — Circuit breaker
+
+```python
+from platform_sdk import CircuitBreaker
+
+cb = CircuitBreaker(name="opa", failure_threshold=5, recovery_timeout=30.0)
+
+if cb.is_open:
+    return False  # fail fast — don't hit the downstream
+
+try:
+    result = await do_something()
+    cb.record_success()
+except TransientError:
+    cb.record_failure()
+```
+
+Used internally by `OpaClient` and `ToolResultCache`. Also available for custom infrastructure clients.
+
+---
+
+### `prompts.py` — Sandboxed prompt loading
+
+```python
+from platform_sdk.prompts import PromptLoader
+
+# Production: load from the service's prompts/ directory
+prompts = PromptLoader.from_directory(Path("src/prompts"))
+text = prompts.render("router.j2", client_name="Acme", has_brief=True)
+
+# Tests: inject a loader pointing at test-only templates
+test_prompts = PromptLoader.from_directory(Path("tests/fixtures/prompts"))
+graph = build_rm_orchestrator(prompts=test_prompts)
+```
+
+Uses Jinja2's `SandboxedEnvironment` to prevent server-side template injection (SSTI). The loader is a frozen dataclass — safe to share across async requests.
 
 ---
 
@@ -379,7 +428,20 @@ Reads `INTERNAL_API_KEY` from the environment. Uses a timing-safe comparison to 
 
 ---
 
-### `agent.py` — LangGraph factories
+### `agent.py` — LangGraph factories and checkpointer
+
+`make_checkpointer(config)` — selects the right checkpointer backend:
+
+```python
+from platform_sdk import make_checkpointer, AgentConfig
+
+config = AgentConfig.from_env()
+checkpointer = make_checkpointer(config)
+# Returns AsyncPostgresSaver if config.checkpointer_type == "postgres"
+# and checkpointer_db_url is set; otherwise falls back to MemorySaver.
+```
+
+Set `CHECKPOINTER_TYPE=postgres` and `CHECKPOINTER_DB_URL=postgresql://...` in `.env` for persistent checkpointing.
 
 `build_agent(tools, config, prompt)` — ReAct loop for interactive agents:
 
@@ -593,21 +655,24 @@ CMD ["uvicorn", "src.server:app", "--host", "0.0.0.0", "--port", "8004"]
 
 ```python
 from pathlib import Path
-from jinja2 import Environment, FileSystemLoader
 from platform_sdk import AgentConfig, build_agent
+from platform_sdk.prompts import PromptLoader
 
 _PROMPTS_DIR = Path(__file__).parent / "prompts"
-_jinja = Environment(loader=FileSystemLoader(str(_PROMPTS_DIR)), autoescape=False)
+_default_prompts = PromptLoader.from_directory(_PROMPTS_DIR)
 
 
-def build_contract_agent(tools: list):
+def build_contract_agent(tools: list, prompts: PromptLoader | None = None):
     """Build a ReAct agent for contract review queries."""
+    prompts = prompts or _default_prompts
     config = AgentConfig.from_env()
-    prompt = _jinja.get_template("contract_agent.j2").render(
+    prompt = prompts.render("contract_agent.j2",
         tool_names=[t.name for t in tools]
     )
     return build_agent(tools, config=config, prompt=prompt)
 ```
+
+The `prompts` parameter enables dependency injection — tests can supply a `PromptLoader` pointing at test-only templates.
 
 #### Step 5 — `src/prompts/contract_agent.j2`
 
@@ -976,15 +1041,27 @@ log = get_logger(__name__)
 _config = MCPConfig.from_env()
 PORT    = int(os.environ.get("PORT", 8085))
 
-_db_pool: Optional[asyncpg.Pool] = None
-_opa:     Optional[OpaClient]    = None
-_cache:   Optional[ToolResultCache] = None
+
+# ── ServerContext (replaces module-level globals) ─────────────────────────────
+# All MCP servers use a frozen dataclass + ContextVar so that lifespan
+# resources are accessed without module globals and are easy to mock in tests.
+
+from contextvars import ContextVar
+from dataclasses import dataclass
+
+@dataclass(frozen=True)
+class ServerContext:
+    config: MCPConfig
+    db: asyncpg.Pool
+    opa: OpaClient
+    cache: Optional[ToolResultCache]
+
+_ctx: ContextVar[ServerContext] = ContextVar("contracts_mcp_ctx")
 
 
 @asynccontextmanager
 async def _lifespan(server: FastMCP):
-    global _db_pool, _opa, _cache
-    _db_pool = await asyncpg.create_pool(
+    db_pool = await asyncpg.create_pool(
         host     = os.environ["DB_HOST"],
         port     = int(os.environ.get("DB_PORT", 5432)),
         user     = os.environ["DB_USER"],
@@ -993,12 +1070,13 @@ async def _lifespan(server: FastMCP):
         min_size = 2,
         max_size = 10,
     )
-    _opa   = OpaClient(_config)
-    _cache = ToolResultCache.from_env(ttl_seconds=1800)
+    opa   = OpaClient(_config)
+    cache = ToolResultCache.from_env(ttl_seconds=1800)
+    _ctx.set(ServerContext(config=_config, db=db_pool, opa=opa, cache=cache))
     log.info("contracts_mcp_ready", port=PORT)
     yield
-    if _db_pool:
-        await _db_pool.close()
+    if db_pool:
+        await db_pool.close()
 
 
 mcp = FastMCP(
@@ -1023,45 +1101,46 @@ async def get_contract_summary(client_name: str) -> str:
     Returns:
         JSON object with contracts list, or an error string.
     """
-    # 1. Read caller identity from the signed X-Agent-Context header
-    ctx = get_agent_context()
-    log.info("contracts_tool_call", client_name=client_name, role=ctx.role)
+    # 1. Read caller identity and server resources
+    ctx = _ctx.get()           # ServerContext (db, opa, cache)
+    agent_ctx = get_agent_context()  # AgentContext (role, clearance)
+    log.info("contracts_tool_call", client_name=client_name, role=agent_ctx.role)
 
     # 2. Authorise the call via OPA
-    allowed = await _opa.authorize(
+    allowed = await ctx.opa.authorize(
         "get_contract_summary",
         {
-            "role":       ctx.role,
-            "rm_id":      ctx.rm_id,
-            "session_id": ctx.session_id,
+            "role":       agent_ctx.role,
+            "rm_id":      agent_ctx.rm_id,
+            "session_id": agent_ctx.session_id,
             "resource":   client_name,
         },
     )
     if not allowed:
-        log.warning("contracts_unauthorized", client_name=client_name, role=ctx.role)
+        log.warning("contracts_unauthorized", client_name=client_name, role=agent_ctx.role)
         return json.dumps({"error": "Unauthorized — insufficient permissions for this tool."})
 
     # 3. Check the cache (key includes clearance level to isolate per-role results)
-    col_mask_key = ":".join(sorted(ctx.build_col_mask()))
+    col_mask_key = ":".join(sorted(agent_ctx.build_col_mask()))
     cache_key    = make_cache_key(
         "get_contract_summary",
         {"client_name": client_name, "col_mask_key": col_mask_key},
     )
-    if _cache:
-        cached = await _cache.get(cache_key)
+    if ctx.cache:
+        cached = await ctx.cache.get(cache_key)
         if cached:
             log.info("contracts_cache_hit", client_name=client_name)
             return cached
 
     # 4. Apply row-level security: rm role sees only assigned accounts
-    row_filters = ctx.build_row_filters_crm()
+    row_filters = agent_ctx.build_row_filters_crm()
     assigned_ids = row_filters.get("Account") or []
-    if ctx.role == "rm" and not assigned_ids:
+    if agent_ctx.role == "rm" and not assigned_ids:
         return json.dumps({"no_data": True, "reason": "No accounts assigned to this RM."})
 
     # 5. Query with row filter and column masking
     try:
-        result = await _query_contracts(client_name, assigned_ids, ctx.build_col_mask())
+        result = await _query_contracts(ctx.db, client_name, assigned_ids, agent_ctx.build_col_mask())
     except asyncpg.PostgresError as exc:
         log.error("contracts_db_error", error=str(exc))
         return f"ERROR: Database error: {exc}"
@@ -1073,19 +1152,19 @@ async def get_contract_summary(client_name: str) -> str:
 
     # 6. Store in cache (never cache errors)
     output = json.dumps(result, default=str)
-    if _cache and not output.startswith('{"error"'):
-        await _cache.set(cache_key, output)
+    if ctx.cache and not output.startswith('{"error"'):
+        await ctx.cache.set(cache_key, output)
 
     return output
 
 
 async def _query_contracts(
+    db_pool: asyncpg.Pool,
     client_name: str,
     assigned_ids: list[str],
     col_mask: list[str],
 ) -> dict:
     """Run the actual SQL. Applies row and column security."""
-    assert _db_pool is not None
 
     # Column masking: null out any masked column in the SELECT list
     contract_value_col = (
@@ -1102,7 +1181,7 @@ async def _query_contracts(
         account_filter = ""
         params = [client_name]
 
-    rows = await _db_pool.fetch(
+    rows = await db_pool.fetch(
         f"""
         SELECT
             c."Id"            AS contract_id,
@@ -1248,14 +1327,21 @@ Add `tests/evals/fixtures/case_NNN_contracts_*.json` with:
 
 ### RM Prep Agent (`agents/rm-prep/src/`)
 
-LangGraph `StateGraph` orchestrator. Stages:
-1. `parse_intent` — Haiku structured extraction: client name, intent, meeting date
+LangGraph `StateGraph` orchestrator with multi-turn conversation support.
+
+New-task flow:
+1. `conversation_router` — Haiku structured classification: turn_type, client name, intent, meeting date
 2. `route` — maps intent to specialist list (`full_brief` → all three)
 3. `gather_crm` / `gather_payments` / `gather_news` — parallel, each backed by a dedicated MCP server
 4. `synthesize` — Sonnet structured output → `RMBrief` Pydantic model
-5. `format_brief` — Jinja2 render → Markdown
+5. `format_brief` — Jinja2 render via `PromptLoader` → Markdown
 
-Model tiering: Haiku (fast, cheap) for extraction and tool calls; Sonnet only for the synthesis step that requires coherent writing.
+Multi-turn branches (routed by `conversation_router`):
+- `follow_up` → `conversational_responder` (answers questions about existing brief data)
+- `refinement` → `refine_brief` → `format_brief` (modifies the brief based on feedback)
+- `clarification` → `clarify_intent` (asks for more info when the request is ambiguous)
+
+Model tiering: Haiku (fast, cheap) for routing, extraction, and tool calls; Sonnet only for synthesis and conversational responses. All prompt templates use `PromptLoader` (sandboxed Jinja2, injectable for tests).
 
 ### Salesforce MCP (`tools/salesforce-mcp/` :8081)
 
@@ -1334,9 +1420,31 @@ All configuration is injected via environment variables. Run `cp .env.example .e
 | `TOOL_CACHE_TTL` | Cache TTL in seconds | per-service |
 | `TAVILY_API_KEY` | Live news search — omit for mock data | — |
 
+### Checkpointer
+
+| Variable | Purpose | Default |
+|---|---|---|
+| `CHECKPOINTER_TYPE` | `memory` or `postgres` | `memory` |
+| `CHECKPOINTER_DB_URL` | PostgreSQL connection string for persistent checkpointing | — |
+
 ---
 
-## 9. Data Flows
+## 9. CI/CD Pipeline
+
+The repo uses four GitHub Actions workflows in `.github/workflows/`:
+
+| Workflow | Trigger | What it does |
+|---|---|---|
+| `ci-unit.yml` | Push / PR to `main` | Runs `make test-unit` + `make test-policies` + `make lint` |
+| `ci-integration.yml` | Push / PR to `main` | Builds Docker stack, seeds data, runs `make test-integration` |
+| `ci-evals.yml` | Manual / scheduled | Runs LLM-in-the-loop evals against a deployed stack |
+| `ci-deploy.yml` | Push to `main` (after merge) | Builds images, pushes to ECR, deploys to ECS |
+
+The recommended contribution workflow is: create a feature branch, open a PR, confirm `ci-unit` and `ci-integration` pass, request review. Evals run on-demand for changes that affect LLM prompts or synthesis logic.
+
+---
+
+## 10. Data Flows
 
 ### Generic Chat Request
 
@@ -1362,7 +1470,7 @@ Every step emits an OTel span. Full trace visible in your OTel backend (Dynatrac
 ```
 RM → POST /brief/persona (Bearer INTERNAL_API_KEY + jwt_token in body)
   → AgentContext.from_jwt(jwt_token) — verified once at boundary
-  → parse_intent (Haiku): client name, intent type, meeting date
+  → conversation_router (Haiku): classify turn → new_task / follow_up / refinement / clarification
   → route: full_brief → dispatch all three specialists in parallel
   ┌─ gather_crm:      MCPToolBridge → salesforce-mcp
   │    → AgentContextMiddleware reads X-Agent-Context

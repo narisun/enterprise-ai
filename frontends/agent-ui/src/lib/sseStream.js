@@ -125,8 +125,7 @@ export async function* sseStream(url, body, headers, signal, {
         }
 
         // Primary dispatch: use the explicit `event:` field.
-        // Fallback: content-based inference (deprecated — see below).
-        const type = currentEvent ?? _inferEventType(data)
+        const type = currentEvent
 
         if (type === null) {
           console.warn('[sseStream] unrecognised event (no event: field, inference failed):', data)
@@ -139,32 +138,3 @@ export async function* sseStream(url, body, headers, signal, {
   }
 }
 
-// ── Content-based event type inference (DEPRECATED) ───────────────────────
-//
-// This fallback exists only to guard against a misconfigured backend that
-// omits the `event:` field.  sse_starlette always includes it, so this code
-// should NEVER fire in production.
-//
-// A console.warn is intentionally emitted every time it triggers so that
-// any regression is immediately visible in the browser DevTools console.
-// Do not promote this to a silent fallback.
-//
-// @deprecated  Fix the backend to emit `event:` rather than relying on this.
-function _inferEventType(data) {
-  let inferred = null
-  if ('markdown' in data && 'meta' in data) inferred = 'report'
-  else if ('markdown' in data)              inferred = 'brief'
-  else if ('verdict'  in data && 'score' in data) inferred = 'thinking'
-  else if ('message'  in data)             inferred = 'progress'
-
-  if (inferred !== null) {
-    console.warn(
-      '[sseStream] _inferEventType triggered — backend omitted event: field. ' +
-      `Inferred type: "${inferred}". ` +
-      'Fix the backend to emit an explicit event: field on every SSE block.',
-      data,
-    )
-  }
-
-  return inferred
-}

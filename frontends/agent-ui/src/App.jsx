@@ -230,7 +230,7 @@ export default function App() {
                   : overlay === 'profile' ? 'User Profile'
                   : overlay === 'data-source' ? 'Data Source'
                   : selectedAgent ? selectedAgent.workerName
-                  : 'Quantitix AI'}
+                  : 'Enterprise AI'}
               </h1>
             </div>
           </div>

@@ -22,7 +22,7 @@ export default function Breadcrumb({ phase, agent, selectedSourceId, onSelectCli
         className="hover:text-slate-800 transition-colors flex items-center gap-1"
       >
         <LayoutGrid className="w-3.5 h-3.5" />
-        Quantitix
+        Enterprise AI
       </a>
 
       {isAgentPhase && (

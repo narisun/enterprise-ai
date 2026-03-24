@@ -39,7 +39,7 @@ resource "aws_security_group" "rds_sg" {
     cidr_blocks = var.allowed_cidr_blocks
   }
 
-  # M9: RDS instances never initiate outbound connections — no egress rule needed.
+  # RDS instances never initiate outbound connections — no egress rule needed.
   # AWS security groups are stateful: responses to allowed inbound connections
   # are permitted automatically without an explicit egress rule.
 

@@ -17,7 +17,7 @@ from platform_sdk import AgentConfig, build_agent
 
 # Prompt registry: versioned Jinja2 templates in src/prompts/
 _PROMPT_DIR = Path(__file__).parent / "prompts"
-# L8: autoescape=False is correct for LLM prompt templates (not HTML).
+# autoescape=False is correct for LLM prompt templates (not HTML).
 # IMPORTANT: never pass raw user input as a Jinja2 template variable — doing so
 # would allow prompt injection via {{ }} / {% %} constructs.  If user-supplied
 # content must appear in the prompt, inject it as a data value (e.g. a quoted

@@ -8,7 +8,6 @@ Key design decisions:
 - Recursion limit and message length read from platform_sdk.AgentConfig
 - Structured logging with correlation IDs via OpenTelemetry trace context
 """
-import os
 import uuid
 from contextlib import asynccontextmanager
 from typing import Optional
@@ -21,16 +20,16 @@ from .graph import build_enterprise_agent
 from .mcp_bridge import MCPToolBridge, reset_session_id, set_session_id
 
 # Import shared SDK — installed via `make sdk-install` or the Dockerfile
-from platform_sdk import AgentConfig, configure_logging, get_logger, make_api_key_verifier, setup_telemetry
+from platform_sdk import AgentConfig, MCPConfig, configure_logging, get_logger, make_api_key_verifier, setup_telemetry
 
 # ---- Startup ----------------------------------------------------------------
 configure_logging()
-setup_telemetry(os.getenv("SERVICE_NAME", "ai-agents"))
+_mcp_config = MCPConfig.from_env()
+setup_telemetry(_mcp_config.service_name)
 
-# Use structlog logger (supports keyword args) rather than standard logging.getLogger()
 log = get_logger(__name__)
 
-MCP_SSE_URL = os.environ.get("MCP_SSE_URL", "http://localhost:8080/sse")
+MCP_SSE_URL = _mcp_config.mcp_sse_url
 
 # Read agent config from environment — recursion_limit, max_message_length, etc.
 _agent_config = AgentConfig.from_env()
@@ -73,7 +72,6 @@ app = FastAPI(
 # ---- Request / Response Models ----------------------------------------------
 
 class ChatRequest(BaseModel):
-    # H4: length limits prevent context-overflow and runaway token spend
     message: str = Field(..., min_length=1, max_length=_agent_config.max_message_length)
     # Default to a fresh UUID so OPA _valid_session_id always passes even when
     # the caller omits session_id (e.g. quick curl tests).
