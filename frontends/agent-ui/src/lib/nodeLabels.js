@@ -26,3 +26,32 @@ export const NODE_LABELS = {
   agent:              'Agent reasoning',
   tools:              'Running tools',
 }
+
+/**
+ * Human-readable labels for MCP tool names.
+ * Maps raw tool identifiers to friendly descriptions shown in the UI.
+ */
+export const TOOL_LABELS = {
+  get_salesforce_summary:  'Looking up CRM account',
+  get_crm_relationships:   'Fetching CRM relationships',
+  get_crm_activities:      'Fetching recent activities',
+  get_crm_opportunities:   'Fetching opportunities',
+  get_payment_summary:     'Analysing payment trends',
+  get_payment_details:     'Fetching payment details',
+  search_company_news:     'Searching company news',
+  get_portfolio_positions: 'Fetching portfolio data',
+  get_market_signals:      'Scanning market signals',
+  get_risk_metrics:        'Calculating risk metrics',
+}
+
+/**
+ * Get a human-readable label for a tool name.
+ * Falls back to a cleaned-up version of the raw name.
+ */
+export function getToolLabel(toolName) {
+  if (TOOL_LABELS[toolName]) return TOOL_LABELS[toolName]
+  // Fallback: convert snake_case to Title Case
+  return toolName
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (c) => c.toUpperCase())
+}

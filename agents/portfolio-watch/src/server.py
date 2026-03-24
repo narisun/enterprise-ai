@@ -28,11 +28,15 @@ _agent_config   = AgentConfig.from_env()
 
 # Human-readable progress labels — keyed by LangGraph node name
 _PROGRESS_LABELS = {
-    "gather_portfolio":   "Loading your portfolio…",
-    "gather_signals":     "Gathering payment, credit & news signals…",
-    "generate_narrative": "Morgan is drafting the portfolio narrative…",
-    "evaluate_narrative": "Fact-checking every claim against source data…",
-    "format_report":      "Finalising the verified report…",
+    "conversation_router":       "Understanding your request…",
+    "gather_portfolio":          "Loading your portfolio…",
+    "gather_signals":            "Gathering payment, credit & news signals…",
+    "generate_narrative":        "Morgan is drafting the portfolio narrative…",
+    "evaluate_narrative":        "Fact-checking every claim against source data…",
+    "format_report":             "Finalising the verified report…",
+    "conversational_responder":  "Answering from portfolio data…",
+    "refine_report":             "Refining the report with your feedback…",
+    "clarify_intent":            "Need a bit more information…",
 }
 
 # When the generator loops (iteration ≥ 2), show a more specific label
@@ -41,10 +45,13 @@ _REVISE_LABEL = "Revising draft based on fact-check findings…"
 # Nodes whose LLM streaming tokens should be forwarded to the UI.
 # Portfolio Watch nodes call LLMs directly (not through nested sub-graphs),
 # so all their events already have the correct langgraph_node metadata.
-_STREAMABLE_NODES = {"gather_portfolio", "gather_signals", "generate_narrative", "evaluate_narrative"}
+_STREAMABLE_NODES = {
+    "gather_portfolio", "gather_signals", "generate_narrative", "evaluate_narrative",
+    "conversational_responder", "refine_report",
+}
 
 # Nodes that use structured output (emit JSON tokens, not useful for UI).
-_STRUCTURED_OUTPUT_NODES = set()
+_STRUCTURED_OUTPUT_NODES = {"conversation_router"}
 
 
 @asynccontextmanager
@@ -117,6 +124,9 @@ async def watch_streaming(
                     "evaluation_missed":  None,
                     "final_report":  None,
                     "report_meta":   None,
+                    "turn_type":     None,
+                    "turn_count":    0,
+                    "schema_version": 2,
                 },
                 config={
                     "configurable": {"thread_id": body.session_id},
@@ -241,6 +251,28 @@ async def watch_streaming(
                         "data":  json.dumps({"markdown": final_report, "meta": meta}),
                     }
 
+                # ── Conversational responder output (follow-up answers) ────────
+                elif event_type == "on_chain_end" and node_name == "conversational_responder":
+                    raw = event.get("data", {}).get("output")
+                    if isinstance(raw, dict):
+                        answer = raw.get("final_report", "")
+                        log.info("pw_follow_up_complete", session_id=body.session_id)
+                        yield {
+                            "event": "report",
+                            "data": json.dumps({"markdown": answer, "meta": {}}),
+                        }
+
+                # ── Clarify intent output ──────────────────────────────────────
+                elif event_type == "on_chain_end" and node_name == "clarify_intent":
+                    raw = event.get("data", {}).get("output")
+                    if isinstance(raw, dict):
+                        msg = raw.get("final_report", "")
+                        log.info("pw_clarification_sent", session_id=body.session_id)
+                        yield {
+                            "event": "report",
+                            "data": json.dumps({"markdown": msg, "meta": {}}),
+                        }
+
         except Exception as exc:
             log.error("watch_stream_error", error=str(exc), exc_info=True)
             yield {"event": "error", "data": json.dumps({"message": str(exc)})}
@@ -273,6 +305,9 @@ async def watch_sync(
                 "evaluation_missed":  None,
                 "final_report":  None,
                 "report_meta":   None,
+                "turn_type":     None,
+                "turn_count":    0,
+                "schema_version": 2,
             },
             config={
                 "configurable": {"thread_id": body.session_id},
@@ -293,10 +328,14 @@ async def watch_sync(
 
 def _node_to_phase(node_name: str) -> str:
     mapping = {
-        "gather_portfolio":   "gather",
-        "gather_signals":     "gather",
-        "generate_narrative": "generate",
-        "evaluate_narrative": "evaluate",
-        "format_report":      "format",
+        "conversation_router":       "routing",
+        "gather_portfolio":          "gather",
+        "gather_signals":            "gather",
+        "generate_narrative":        "generate",
+        "evaluate_narrative":        "evaluate",
+        "format_report":             "format",
+        "conversational_responder":  "responding",
+        "refine_report":             "refining",
+        "clarify_intent":            "clarifying",
     }
     return mapping.get(node_name, "unknown")

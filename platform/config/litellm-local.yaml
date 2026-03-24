@@ -42,3 +42,4 @@ litellm_settings:
 general_settings:
   master_key: os.environ/INTERNAL_API_KEY
   store_model_in_db: false
+

@@ -150,4 +150,19 @@
       transform: translateX(0);
     }
   }
+
+  .animate-slide-down {
+    animation: slide-down 200ms ease-out both;
+  }
+
+  @keyframes slide-down {
+    from {
+      opacity: 0;
+      max-height: 0;
+    }
+    to {
+      opacity: 1;
+      max-height: 28rem;
+    }
+  }
 }

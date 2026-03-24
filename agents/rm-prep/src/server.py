@@ -32,18 +32,21 @@ verify_api_key = make_api_key_verifier()
 _agent_config = AgentConfig.from_env()
 
 _PROGRESS_LABELS = {
-    "parse_intent":     "Identifying client...",
-    "route":            "Planning data retrieval...",
-    "gather_crm":       "Fetching CRM relationship data...",
-    "gather_payments":  "Analysing payment trends...",
-    "gather_news":      "Searching latest news...",
-    "synthesize":       "Generating your brief...",
-    "format_brief":     "Brief ready",
+    "conversation_router":       "Understanding your request...",
+    "route":                     "Planning data retrieval...",
+    "gather_crm":                "Fetching CRM relationship data...",
+    "gather_payments":           "Analysing payment trends...",
+    "gather_news":               "Searching latest news...",
+    "synthesize":                "Generating your brief...",
+    "format_brief":              "Brief ready",
+    "conversational_responder":  "Answering from available data...",
+    "refine_brief":              "Refining the brief with your feedback...",
+    "clarify_intent":            "Need a bit more information...",
 }
 
 # Nodes that use with_structured_output (emit JSON tokens, not human-readable).
 # Their on_chat_model_stream events are excluded from the llm_token SSE stream.
-_STRUCTURED_OUTPUT_NODES = {"parse_intent", "synthesize"}
+_STRUCTURED_OUTPUT_NODES = {"conversation_router", "synthesize", "refine_brief"}
 
 # Nodes in the outer orchestrator graph whose on_chain_start we track for
 # progress labels.  Inner ReAct agent events (from build_specialist_agent)
@@ -282,6 +285,9 @@ async def get_brief_streaming(
                     "session_id": body.session_id,
                     "error_states": {},
                     "agents_to_invoke": [],
+                    "turn_type": None,
+                    "turn_count": 0,
+                    "schema_version": 2,
                 },
                 config={
                     "configurable": {"thread_id": body.session_id},
@@ -307,8 +313,8 @@ async def get_brief_streaming(
                 # through astream_events(v2) but with INNER node names
                 # ("agent", "tools") rather than the outer node name.
                 #
-                # We exclude only _STRUCTURED_OUTPUT_NODES (parse_intent,
-                # synthesize) which emit JSON tokens from with_structured_output.
+                # We exclude only _STRUCTURED_OUTPUT_NODES (conversation_router,
+                # synthesize, refine_brief) which emit JSON tokens from with_structured_output.
                 # All other LLM token events are forwarded — including those
                 # from nested specialist agents.
                 elif event_type == "on_chat_model_stream" and node_name not in _STRUCTURED_OUTPUT_NODES:
@@ -402,6 +408,31 @@ async def get_brief_streaming(
                         "data": json.dumps({"markdown": brief_md, "client_name": _client_name}),
                     }
 
+                # ── Conversational responder output (follow-up answers) ────────
+                # The conversational_responder node streams LLM tokens naturally
+                # (not in _STRUCTURED_OUTPUT_NODES), but we also emit a final
+                # brief event so the frontend knows the response is complete.
+                elif event_type == "on_chain_end" and node_name == "conversational_responder":
+                    output = event.get("data", {}).get("output")
+                    if isinstance(output, dict):
+                        brief_md = output.get("brief_markdown", "")
+                        log.info("follow_up_complete", rm_id=body.rm_id, session_id=body.session_id)
+                        yield {
+                            "event": "brief",
+                            "data": json.dumps({"markdown": brief_md, "client_name": _client_name}),
+                        }
+
+                # ── Clarify intent output ──────────────────────────────────────
+                elif event_type == "on_chain_end" and node_name == "clarify_intent":
+                    output = event.get("data", {}).get("output")
+                    if isinstance(output, dict):
+                        brief_md = output.get("brief_markdown", "")
+                        log.info("clarification_sent", rm_id=body.rm_id, session_id=body.session_id)
+                        yield {
+                            "event": "brief",
+                            "data": json.dumps({"markdown": brief_md, "client_name": _client_name}),
+                        }
+
         except Exception as exc:
             log.error("brief_stream_error", error=str(exc), exc_info=True)
             yield {"event": "error", "data": json.dumps({"message": str(exc)})}
@@ -430,6 +461,9 @@ async def get_brief_sync(
                 "session_id": body.session_id,
                 "error_states": {},
                 "agents_to_invoke": [],
+                "turn_type": None,
+                "turn_count": 0,
+                "schema_version": 2,
             },
             config={
                 "configurable": {"thread_id": body.session_id},

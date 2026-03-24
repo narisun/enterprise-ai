@@ -1,0 +1,36 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* assistant-ui overrides */
+@layer base {
+  :root {
+    --aui-bg: theme(colors.white);
+    --aui-fg: theme(colors.slate.900);
+    --aui-border: theme(colors.slate.200);
+    --aui-accent: theme(colors.blue.600);
+    --aui-muted: theme(colors.slate.100);
+  }
+
+  *::-webkit-scrollbar { width: 6px; }
+  *::-webkit-scrollbar-track { background: transparent; }
+  *::-webkit-scrollbar-thumb { background: theme(colors.slate.300); border-radius: 3px; }
+
+  .sr-only {
+    position: absolute; width: 1px; height: 1px;
+    padding: 0; margin: -1px; overflow: hidden;
+    clip: rect(0, 0, 0, 0); white-space: nowrap; border-width: 0;
+  }
+}
+
+@layer components {
+  .streaming-cursor::after {
+    content: ''; display: inline-block; width: 2px; height: 1em;
+    background: theme(colors.blue.500); margin-left: 1px;
+    animation: cursorBlink 1s steps(1) infinite; vertical-align: text-bottom;
+  }
+  @keyframes cursorBlink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0; }
+  }
+}

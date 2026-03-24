@@ -1,85 +1,116 @@
 /**
- * App.jsx — Root shell that composes hooks and layout components.
+ * App.jsx — Chat-first root shell with URL-based routing.
  *
- * ── Architecture ────────────────────────────────────────────────────────
- * This file is intentionally thin (~200 lines). All concerns are delegated:
- *   • Phase routing & URL sync  → usePhaseRouter
- *   • SSE streaming state       → useAgentStream
- *   • Settings persistence      → useSettings
- *   • Session management        → useSession
- *   • Layout sidebar            → Sidebar (responsive)
- *   • Navigation breadcrumb     → Breadcrumb
- *   • Status indicator          → StatusPill
+ * ── Architecture ────────────────────────────────────────────────────────────
+ * The main view is ALWAYS the chat. Overlays (help, settings, profile,
+ * data-source) slide over it. URL routing via the History API gives us:
+ *   • Address bar always shows where you are (/agent/rm-prep, /help, etc.)
+ *   • Browser back/forward buttons navigate between views
+ *   • Deep-linking support (share a URL, bookmark it)
  *
- * ── Adding a new phase ──────────────────────────────────────────────────
- *   1. Add the phase to PHASES in usePhaseRouter.js
- *   2. Add the navigation function in usePhaseRouter.js
- *   3. Add the route content block here in the <main> section
+ * URL scheme:
+ *   /                    — Chat (no agent)
+ *   /agent/:agentId      — Chat with a specific agent
+ *   /help                — Help overlay
+ *   /settings            — Settings overlay
+ *   /profile             — Profile overlay
+ *   /data-source/:id     — Data source overlay
+ *
+ * State is composed from:
+ *   • useChat       — message history + streaming state
+ *   • useSession    — stable session UUID
+ *   • useSettings   — persisted preferences
+ *   • useRouter     — URL ↔ view state synchronisation
+ *   • selectedAgent — which specialist agent to use (auto or manual)
  */
 
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { HelpCircle, Settings, Menu } from 'lucide-react'
 
-import Sidebar           from './components/Sidebar.jsx'
-import Breadcrumb        from './components/Breadcrumb.jsx'
-import StatusPill        from './components/StatusPill.jsx'
-import AgentSelector     from './components/AgentSelector.jsx'
-import PromptBuilder     from './components/PromptBuilder.jsx'
-import OutputCanvas      from './components/OutputCanvas.jsx'
-import DataSourceDetail  from './components/DataSourceDetail.jsx'
-import HelpGuide         from './components/HelpGuide.jsx'
-import SettingsPanel     from './components/SettingsPanel.jsx'
-import UserProfile       from './components/UserProfile.jsx'
+import Sidebar          from './components/Sidebar.jsx'
+import ChatView         from './components/ChatView.jsx'
+import DataSourceDetail from './components/DataSourceDetail.jsx'
+import HelpGuide        from './components/HelpGuide.jsx'
+import SettingsPanel    from './components/SettingsPanel.jsx'
+import UserProfile      from './components/UserProfile.jsx'
+import StatusPill       from './components/StatusPill.jsx'
 
-import { usePhaseRouter, PHASES } from './hooks/usePhaseRouter.js'
-import { useAgentStream }         from './hooks/useAgentStream.js'
-import { useSession }              from './hooks/useSession.js'
-import { useSettings }             from './hooks/useSettings.js'
-import { getAgentClient }          from './api/agentClients.js'
+import { useChat }      from './hooks/useChat.js'
+import { useSession }   from './hooks/useSession.js'
+import { useSettings }  from './hooks/useSettings.js'
+import { useRouter }    from './hooks/useRouter.js'
+import { AGENTS, getAgent } from './config/agents.js'
+import { routeToAgent } from './lib/intentRouter.js'
 
 export default function App() {
-  // ── State hooks ──────────────────────────────────────────────────────────
-  const [rmId,        setRmId]        = useState('RM')
+  // ── Core state ──────────────────────────────────────────────────────────
+  const [rmId, setRmId]               = useState('RM')
   const [personaName, setPersonaName] = useState(null)
-  const [personaJwt,  setPersonaJwt]  = useState(null)
+  const [personaJwt, setPersonaJwt]   = useState(null)
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [selectedAgent, setSelectedAgent] = useState(null)
 
   const { sessionId, newSession } = useSession()
   const { settings, updateSetting } = useSettings()
-  const stream = useAgentStream()
 
-  const router = usePhaseRouter({ onResetStream: stream.reset })
-  const {
-    phase, selectedAgent, selectedSource,
-    selectAgent, goToExecute, goToSelect, goToConfigure,
-    openDataSource, openHelp, openSettings, openProfile,
-    closeOverlay, startNewSession,
-  } = router
+  // ── Router — URL ↔ view state sync ────────────────────────────────────
+  const router = useRouter({ getAgentById: getAgent })
 
-  // ── Focus management — announce phase changes to screen readers ────────
-  const mainRef = useRef(null)
-  const prevPhaseRef = useRef(phase)
-  useEffect(() => {
-    if (prevPhaseRef.current !== phase) {
-      prevPhaseRef.current = phase
-      // Move focus to main content on phase change for assistive tech
-      mainRef.current?.focus()
+  // Determine overlay from route
+  const overlay = (() => {
+    switch (router.route.view) {
+      case 'help':        return 'help'
+      case 'settings':    return 'settings'
+      case 'profile':     return 'profile'
+      case 'data-source': return 'data-source'
+      default:            return null
     }
-  }, [phase])
+  })()
+  const overlayData = router.route.view === 'data-source' ? router.route.param : null
 
-  // ── Global keyboard handler — Escape closes overlays ───────────────────
+  // ── Resolve agent from URL on initial load ────────────────────────────
+  const initialised = useRef(false)
+  useEffect(() => {
+    if (!initialised.current) {
+      initialised.current = true
+      const agentFromUrl = router.resolveInitialAgent()
+      if (agentFromUrl) {
+        setSelectedAgent(agentFromUrl)
+      }
+    }
+  }, [router])
+
+  // ── Keep URL in sync when agent changes ────────────────────────────────
+  useEffect(() => {
+    // Only update URL when we're on the chat view (not overlays)
+    if (!overlay) {
+      router.navigateToChat(selectedAgent?.id ?? null)
+    }
+  }, [selectedAgent, overlay]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const chat = useChat({
+    sessionId,
+    rmId,
+    personaJwt,
+  })
+
+  // ── Focus management ────────────────────────────────────────────────────
+  const mainRef = useRef(null)
+
+  // ── Keyboard handler — Escape goes back / closes sidebar ──────────────
   useEffect(() => {
     const handleKey = (e) => {
       if (e.key === 'Escape') {
-        if (phase === PHASES.HELP || phase === PHASES.SETTINGS || phase === PHASES.PROFILE || phase === PHASES.DATA_SOURCE) {
-          closeOverlay()
+        if (overlay) {
+          // Go back to chat (which might have an agent in its URL)
+          router.navigateToChat(selectedAgent?.id ?? null)
         }
         if (sidebarOpen) setSidebarOpen(false)
       }
     }
     window.addEventListener('keydown', handleKey)
     return () => window.removeEventListener('keydown', handleKey)
-  }, [phase, closeOverlay, sidebarOpen])
+  }, [overlay, sidebarOpen, selectedAgent, router])
 
   // ── Persona handler ────────────────────────────────────────────────────
   const handlePersonaChange = useCallback((name, jwt) => {
@@ -87,39 +118,71 @@ export default function App() {
     setPersonaJwt(jwt)
   }, [])
 
-  // ── Agent prompt submission ────────────────────────────────────────────
-  const handlePromptSubmit = useCallback(async (prompt) => {
-    goToExecute()
-    const client = getAgentClient(selectedAgent.id)
-    await stream.run({
-      endpoint: client.endpoint,
-      body:     client.buildRequest(prompt, rmId, sessionId, personaJwt),
-    })
-  }, [selectedAgent, rmId, sessionId, personaJwt, stream.run, goToExecute])
+  // ── Agent selection — always returns to chat view ──────────────────────
+  const handleSelectAgent = useCallback((agent) => {
+    setSelectedAgent(agent)
+    setSidebarOpen(false)
+    // Navigate to chat with the new agent — closes any open overlay
+    router.navigateToChat(agent?.id ?? null)
+  }, [router])
 
-  // Follow-up refinement — keeps same session
-  const handleRefine = useCallback(async (prompt) => {
-    const client = getAgentClient(selectedAgent.id)
-    await stream.run({
-      endpoint: client.endpoint,
-      body:     client.buildRequest(prompt, rmId, sessionId, personaJwt),
-    })
-  }, [selectedAgent, rmId, sessionId, personaJwt, stream.run])
+  // ── Chat send — auto-routes via intent router when no agent selected ──
+  const handleSend = useCallback((content) => {
+    let agent = selectedAgent
 
+    if (!agent) {
+      const routed = routeToAgent(content)
+      if (routed) {
+        agent = routed.agent
+        setSelectedAgent(agent)
+      }
+    }
+
+    if (!agent) {
+      agent = AGENTS.find((a) => !a.comingSoon)
+      if (agent) {
+        setSelectedAgent(agent)
+      }
+    }
+
+    if (!agent) return
+    chat.sendMessage(content, agent)
+  }, [selectedAgent, chat])
+
+  // ── Retry last failed message ─────────────────────────────────────────
+  const handleRetry = useCallback(() => {
+    const agent = selectedAgent ?? AGENTS.find((a) => !a.comingSoon)
+    if (agent) {
+      chat.retry(agent)
+    }
+  }, [selectedAgent, chat])
+
+  // ── New session — clears chat and resets ──────────────────────────────
   const handleNewSession = useCallback(() => {
-    startNewSession()
+    chat.clearChat()
+    setSelectedAgent(null)
     newSession()
-  }, [startNewSession, newSession])
+    router.navigateToChat(null)
+  }, [chat, newSession, router])
 
-  const handleOpenSettings = useCallback(() => {
-    openSettings()
-  }, [openSettings])
+  // ── Overlay navigation — all go through the router ────────────────────
+  const openDataSource = useCallback((sourceId) => {
+    router.navigateToOverlay('data-source', sourceId)
+  }, [router])
 
-  // ── Render ──────────────────────────────────────────────────────────────
+  const openHelp     = useCallback(() => router.navigateToOverlay('help'), [router])
+  const openSettings = useCallback(() => router.navigateToOverlay('settings'), [router])
+  const openProfile  = useCallback(() => router.navigateToOverlay('profile'), [router])
+
+  const closeOverlay = useCallback(() => {
+    router.navigateToChat(selectedAgent?.id ?? null)
+  }, [router, selectedAgent])
+
+  // ── Render ────────────────────────────────────────────────────────────
   return (
     <div className="h-screen flex overflow-hidden bg-slate-50">
 
-      {/* ── Skip navigation link (accessibility) ─────────────────────────── */}
+      {/* ── Skip navigation ───────────────────────────────────────────────── */}
       <a
         href="#main-content"
         className="sr-only focus:not-sr-only focus:absolute focus:z-[100] focus:top-2 focus:left-2
@@ -128,7 +191,7 @@ export default function App() {
         Skip to main content
       </a>
 
-      {/* ── Sidebar — responsive ─────────────────────────────────────────── */}
+      {/* ── Sidebar ───────────────────────────────────────────────────────── */}
       <Sidebar
         agent={selectedAgent}
         rmId={rmId}
@@ -138,14 +201,15 @@ export default function App() {
         onNewSession={handleNewSession}
         onPersonaChange={handlePersonaChange}
         onDataSourceClick={openDataSource}
-        onLogoClick={goToSelect}
+        onLogoClick={handleNewSession}
         onProfileClick={openProfile}
+        onAgentSelect={handleSelectAgent}
       />
 
-      {/* ── Content column ─────────────────────────────────────────────── */}
+      {/* ── Content column ────────────────────────────────────────────────── */}
       <div className="flex-1 flex flex-col overflow-hidden min-w-0">
 
-        {/* Sub-header */}
+        {/* Header */}
         <header className="shrink-0 h-14 bg-white border-b border-slate-200 px-4 sm:px-6 flex items-center justify-between z-10">
           <div className="flex items-center gap-3">
             {/* Mobile hamburger */}
@@ -156,45 +220,50 @@ export default function App() {
             >
               <Menu className="w-5 h-5" />
             </button>
-            <Breadcrumb
-              phase={phase}
-              agent={selectedAgent}
-              selectedSourceId={selectedSource}
-              onSelectClick={goToSelect}
-              onAgentClick={goToConfigure}
-            />
+
+            {/* Agent name / view title in header */}
+            <div className="flex items-center gap-2">
+              {!overlay && selectedAgent && <span className="text-lg">{selectedAgent.icon}</span>}
+              <h1 className="text-sm font-semibold text-slate-700">
+                {overlay === 'help' ? 'Help & Documentation'
+                  : overlay === 'settings' ? 'Settings'
+                  : overlay === 'profile' ? 'User Profile'
+                  : overlay === 'data-source' ? 'Data Source'
+                  : selectedAgent ? selectedAgent.workerName
+                  : 'Quantitix AI'}
+              </h1>
+            </div>
           </div>
+
           <div className="flex items-center gap-2">
-            <StatusPill status={stream.status} />
+            <StatusPill status={chat.isStreaming ? 'streaming' : (chat.messages.length > 0 ? 'complete' : 'idle')} />
             <div className="w-px h-4 bg-slate-200 mx-1 hidden sm:block" />
-            <a
-              href="/help"
-              onClick={(e) => { e.preventDefault(); openHelp() }}
-              title="Help & documentation"
+            <button
+              onClick={openHelp}
+              title="Help"
               className={`p-1.5 rounded-lg transition-colors inline-flex items-center
-                ${phase === PHASES.HELP
+                ${overlay === 'help'
                   ? 'text-blue-600 bg-blue-50'
                   : 'text-slate-400 hover:text-slate-600 hover:bg-slate-100'}`}
               aria-label="Help and documentation"
             >
               <HelpCircle className="w-4 h-4" />
-            </a>
-            <a
-              href="/settings"
-              onClick={(e) => { e.preventDefault(); openSettings() }}
+            </button>
+            <button
+              onClick={openSettings}
               title="Settings"
               className={`p-1.5 rounded-lg transition-colors inline-flex items-center
-                ${phase === PHASES.SETTINGS
+                ${overlay === 'settings'
                   ? 'text-blue-600 bg-blue-50'
                   : 'text-slate-400 hover:text-slate-600 hover:bg-slate-100'}`}
               aria-label="Settings"
             >
               <Settings className="w-4 h-4" />
-            </a>
+            </button>
           </div>
         </header>
 
-        {/* ── Main content ────────────────────────────────────────────────── */}
+        {/* ── Main content ──────────────────────────────────────────────────── */}
         <main
           ref={mainRef}
           id="main-content"
@@ -202,29 +271,27 @@ export default function App() {
           className="flex-1 flex flex-col overflow-hidden outline-none"
           aria-live="polite"
         >
-          {/* Phase: PROFILE */}
-          {phase === PHASES.PROFILE && (
+          {/* Overlays */}
+          {overlay === 'profile' && (
             <div className="flex-1 overflow-hidden bg-white animate-fade-in">
               <UserProfile
                 rmId={rmId}
                 onRmIdChange={setRmId}
                 sessionId={sessionId}
                 settings={{ ...settings, personaName }}
-                onOpenSettings={handleOpenSettings}
+                onOpenSettings={openSettings}
                 onBack={closeOverlay}
               />
             </div>
           )}
 
-          {/* Phase: HELP */}
-          {phase === PHASES.HELP && (
+          {overlay === 'help' && (
             <div className="flex-1 overflow-hidden bg-white animate-fade-in">
               <HelpGuide onBack={closeOverlay} />
             </div>
           )}
 
-          {/* Phase: SETTINGS */}
-          {phase === PHASES.SETTINGS && (
+          {overlay === 'settings' && (
             <div className="flex-1 overflow-hidden bg-white animate-fade-in">
               <SettingsPanel
                 settings={settings}
@@ -236,66 +303,27 @@ export default function App() {
             </div>
           )}
 
-          {/* Phase: DATA_SOURCE */}
-          {phase === PHASES.DATA_SOURCE && (
+          {overlay === 'data-source' && (
             <div className="flex-1 overflow-hidden bg-white animate-fade-in">
               <DataSourceDetail
-                sourceId={selectedSource}
-                onBack={() => window.history.back()}
+                sourceId={overlayData}
+                onBack={closeOverlay}
               />
             </div>
           )}
 
-          {/* Phase: SELECT — Staff Directory */}
-          {phase === PHASES.SELECT && (
-            <div className="flex-1 overflow-y-auto p-4 sm:p-8 animate-fade-in">
-              <div className="mb-8">
-                <h1 className="text-2xl font-bold text-slate-900">Your Intelligence Team</h1>
-                <p className="text-slate-500 mt-1">
-                  AI workers embedded in your workflows — each with a defined role, data access, and specialist skills.
-                </p>
-              </div>
-              <AgentSelector
-                onSelect={selectAgent}
-                onDataSourceClick={openDataSource}
-                cardMinWidth={settings.cardMinWidth}
-                showComingSoon={settings.showComingSoon}
-              />
-            </div>
-          )}
-
-          {/* Phase: CONFIGURE */}
-          {phase === PHASES.CONFIGURE && selectedAgent && (
-            <div className="flex-1 overflow-y-auto p-4 sm:p-8 animate-fade-in">
-              <div className="mb-8">
-                <div className="flex items-center gap-3 mb-1">
-                  <span className="text-2xl">{selectedAgent.icon}</span>
-                  <h1 className="text-2xl font-bold text-slate-900">{selectedAgent.workerName}</h1>
-                </div>
-                <p className="text-sm font-semibold text-slate-500">{selectedAgent.workerRole}</p>
-                <p className="text-slate-500 mt-2 text-sm">{selectedAgent.description}</p>
-              </div>
-              <PromptBuilder agent={selectedAgent} onSubmit={handlePromptSubmit} />
-            </div>
-          )}
-
-          {/* Phase: EXECUTE — full-width canvas with streaming UX */}
-          {phase === PHASES.EXECUTE && (
-            <OutputCanvas
-              output={stream.output}
-              streamingText={stream.streamingText}
-              clientName={stream.clientName}
-              status={stream.status}
-              error={stream.error}
-              onRefine={handleRefine}
-              onRetry={() => handlePromptSubmit(stream.output ? '' : 'retry')}
+          {/* Main chat view — shown when no overlay is active */}
+          {!overlay && (
+            <ChatView
+              messages={chat.messages}
+              liveStream={chat.liveStream}
+              hasLiveResponse={chat.hasLiveResponse}
+              isStreaming={chat.isStreaming}
               agent={selectedAgent}
-              steps={stream.steps}
-              activeStep={stream.activeStep}
-              thoughts={stream.thoughts}
-              thinkingText={stream.thinkingText}
-              thinkingLog={stream.thinkingLog}
-              toolCalls={stream.toolCalls}
+              onSend={handleSend}
+              onStop={chat.abort}
+              onRetry={handleRetry}
+              onSelectAgent={handleSelectAgent}
             />
           )}
         </main>

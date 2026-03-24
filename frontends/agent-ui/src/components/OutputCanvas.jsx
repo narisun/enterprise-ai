@@ -1,33 +1,22 @@
 /**
  * OutputCanvas — Full-width response canvas with professional streaming UX.
  *
- * ── Design principles (matching Claude / ChatGPT / Gemini) ──────────────
+ * ── Design principles (matching Claude / ChatGPT / Perplexity) ────────────
  *
- *  1. THINKING PHASE — Collapsed-by-default activity indicator that shows
- *     a live one-line preview. User can expand to see full timeline.
- *     Activity shimmer communicates "working" without being distracting.
+ *  1. THINKING PHASE — Auto-expanded timeline showing clean step labels
+ *     and tool call cards. No raw JSON ever shown to users. Animated
+ *     transitions for each new step.
  *
  *  2. STREAMING PHASE — Token-by-token markdown rendering with a subtle
  *     blinking cursor. Auto-scrolls to follow new content. Smooth
  *     transition when final output replaces the stream.
  *
  *  3. COMPLETE PHASE — Clean output with toolbar (copy, download).
- *     Refinement bar with suggested follow-ups. ThinkingBlock stays
- *     collapsed but expandable for transparency.
+ *     ThinkingBlock auto-collapses but stays expandable.
+ *     Refinement bar with suggested follow-ups.
  *
  *  4. ERROR PHASE — Classified error with retry button and partial
  *     output preservation when possible.
- *
- * Props:
- *   output        — string | null     — final authoritative markdown
- *   streamingText — string            — live token buffer
- *   clientName    — string | null     — extracted client name (RM Prep)
- *   status        — 'streaming' | 'complete' | 'error' | 'idle'
- *   error         — string | null
- *   onRefine      — (prompt: string) => void
- *   onRetry       — () => void
- *   agent         — agent display config
- *   steps, activeStep, thoughts, thinkingText, thinkingLog, toolCalls
  */
 
 import { useState, useRef, useEffect, useCallback } from 'react'
@@ -35,7 +24,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeRaw from 'rehype-raw'
 import {
-  Copy, Download, Check, RefreshCw, AlertTriangle, Wifi, WifiOff,
+  Copy, Download, Check, RefreshCw, AlertTriangle, WifiOff,
 } from 'lucide-react'
 
 import { MD_COMPONENTS } from '../lib/markdownRenderers.jsx'
@@ -80,7 +69,7 @@ function DownloadButton({ text, filename }) {
       className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-800 px-3 py-1.5 rounded-lg hover:bg-slate-100 transition-colors"
     >
       <Download className="w-3.5 h-3.5" />
-      Download .md
+      Download
     </button>
   )
 }
@@ -106,7 +95,7 @@ function ErrorCard({ error, onRetry }) {
   const IconComponent = classified.type === 'network' ? WifiOff : AlertTriangle
 
   return (
-    <div className="rounded-xl bg-red-50 border border-red-200 p-5 max-w-lg mt-2 animate-fade-in">
+    <div className="rounded-xl bg-red-50 border border-red-200 p-5 max-w-lg mt-4 animate-fade-in">
       <div className="flex items-start gap-3">
         <IconComponent className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
         <div className="flex-1">
@@ -127,10 +116,27 @@ function ErrorCard({ error, onRetry }) {
   )
 }
 
-// ── Streaming cursor (blinking line like Claude/ChatGPT) ──────────────────
+// ── Streaming cursor (blinking caret like Claude) ─────────────────────────
 function StreamingCursor() {
   return (
-    <span className="streaming-cursor inline-block w-0.5 h-[1.1em] bg-blue-500 ml-0.5 align-text-bottom rounded-sm" />
+    <span
+      className="streaming-cursor inline-block w-0.5 h-[1.1em] bg-blue-500 ml-0.5 align-text-bottom rounded-sm"
+      aria-hidden="true"
+    />
+  )
+}
+
+// ── Typing indicator dots ─────────────────────────────────────────────────
+function TypingIndicator({ agentName }) {
+  return (
+    <div className="flex items-center gap-3 text-slate-500 py-8 animate-fade-in">
+      <div className="flex gap-1.5 items-center bg-slate-100 rounded-full px-4 py-2.5">
+        <span className="w-2 h-2 bg-blue-400 rounded-full animate-bounce [animation-delay:0ms]" />
+        <span className="w-2 h-2 bg-blue-400 rounded-full animate-bounce [animation-delay:150ms]" />
+        <span className="w-2 h-2 bg-blue-400 rounded-full animate-bounce [animation-delay:300ms]" />
+        <span className="text-sm font-medium text-slate-500 ml-2">{agentName} is preparing a response</span>
+      </div>
+    </div>
   )
 }
 
@@ -140,11 +146,13 @@ export default function OutputCanvas({
   steps = [], activeStep = null, thoughts = [],
   thinkingText = null, thinkingLog = [], toolCalls = [],
 }) {
-  const canvasRef  = useRef(null)
-  const hasOutput  = !!output
-  const hasTokens  = !!streamingText
+  const canvasRef = useRef(null)
+  const hasOutput = !!output
+  const hasTokens = !!streamingText
   const isRefining = status === 'streaming' && hasOutput
-  const isDone     = status === 'complete'
+  const isDone = status === 'complete'
+  const isWorking = status === 'streaming'
+  const hasThinkingContent = steps.length > 0 || !!activeStep || (toolCalls ?? []).length > 0
 
   // Scroll to top when completed response arrives
   useEffect(() => {
@@ -170,10 +178,12 @@ export default function OutputCanvas({
           <div className="flex items-center gap-2">
             <span className="text-lg">{agent?.icon}</span>
             <span className="text-sm font-semibold text-slate-700">
-              {clientName ? `Brief \u2014 ${clientName}` : `${agent?.workerName ?? 'Worker'} \u00B7 Output`}
+              {clientName ? `Brief \u2014 ${clientName}` : `${agent?.workerName ?? 'Agent'} \u00B7 Output`}
             </span>
             {isDone && (
-              <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-medium">Ready</span>
+              <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-medium">
+                Ready
+              </span>
             )}
             {isRefining && (
               <span className="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 font-medium animate-pulse">
@@ -204,18 +214,11 @@ export default function OutputCanvas({
         )}
 
         {/* ── Initial loading (before any events arrive) ───────────────── */}
-        {status === 'streaming' && !hasTokens && !steps.length && !activeStep && !thinkingText && (
-          <div className="flex items-center gap-3 text-slate-500 mb-5 animate-fade-in">
-            <div className="flex gap-1">
-              <span className="w-2 h-2 bg-blue-500 rounded-full animate-bounce [animation-delay:0ms]" />
-              <span className="w-2 h-2 bg-blue-500 rounded-full animate-bounce [animation-delay:150ms]" />
-              <span className="w-2 h-2 bg-blue-500 rounded-full animate-bounce [animation-delay:300ms]" />
-            </div>
-            <span className="text-sm font-medium">{agent?.workerName ?? 'Agent'} is starting up\u2026</span>
-          </div>
+        {isWorking && !hasTokens && !hasThinkingContent && !thinkingText && (
+          <TypingIndicator agentName={agent?.workerName ?? 'Agent'} />
         )}
 
-        {/* ── ThinkingBlock — collapsed activity timeline ───────────────── */}
+        {/* ── ThinkingBlock — auto-expanding activity timeline ─────────── */}
         <ThinkingBlock
           steps={steps}
           activeStep={activeStep}
@@ -230,15 +233,17 @@ export default function OutputCanvas({
 
         {/* ── Live token stream ─────────────────────────────────────────── */}
         {hasTokens && !hasOutput && (
-          <div className="max-w-3xl animate-fade-in">
-            <ReactMarkdown
-              remarkPlugins={[remarkGfm]}
-              rehypePlugins={[rehypeRaw]}
-              components={MD_COMPONENTS}
-            >
-              {streamingText}
-            </ReactMarkdown>
-            <StreamingCursor />
+          <div className="max-w-3xl animate-fade-in mt-2">
+            <div className="brief-prose">
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                rehypePlugins={[rehypeRaw]}
+                components={MD_COMPONENTS}
+              >
+                {streamingText}
+              </ReactMarkdown>
+              <StreamingCursor />
+            </div>
             <div ref={streamingBottomRef} />
           </div>
         )}
@@ -246,16 +251,17 @@ export default function OutputCanvas({
         {/* ── Error state — classified with retry ──────────────────────── */}
         {status === 'error' && (
           <>
-            {/* Show partial output if we had some streaming text */}
             {hasTokens && (
               <div className="max-w-3xl mb-4 opacity-60">
-                <ReactMarkdown
-                  remarkPlugins={[remarkGfm]}
-                  rehypePlugins={[rehypeRaw]}
-                  components={MD_COMPONENTS}
-                >
-                  {streamingText}
-                </ReactMarkdown>
+                <div className="brief-prose">
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm]}
+                    rehypePlugins={[rehypeRaw]}
+                    components={MD_COMPONENTS}
+                  >
+                    {streamingText}
+                  </ReactMarkdown>
+                </div>
               </div>
             )}
             <ErrorCard error={error} onRetry={onRetry} />
@@ -264,14 +270,16 @@ export default function OutputCanvas({
 
         {/* ── Final output ──────────────────────────────────────────────── */}
         {hasOutput && (
-          <div className="max-w-3xl animate-fade-in">
-            <ReactMarkdown
-              remarkPlugins={[remarkGfm]}
-              rehypePlugins={[rehypeRaw]}
-              components={MD_COMPONENTS}
-            >
-              {output}
-            </ReactMarkdown>
+          <div className="max-w-3xl animate-fade-in mt-2">
+            <div className="brief-prose">
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                rehypePlugins={[rehypeRaw]}
+                components={MD_COMPONENTS}
+              >
+                {output}
+              </ReactMarkdown>
+            </div>
           </div>
         )}
       </div>

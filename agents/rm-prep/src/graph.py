@@ -1,20 +1,27 @@
 """
-RM Prep Orchestrator — LangGraph StateGraph.
+RM Prep Orchestrator — LangGraph StateGraph with multi-turn conversation support.
 
-Pipeline:
-  parse_intent → route → gather_crm
-                              ├─(parallel)─ gather_payments ─┐
-                              └─(parallel)─ gather_news      ─┤
-                                                              └─ synthesize → format_brief
+Pipeline (new_task):
+  conversation_router → route → gather_crm
+                                     ├─(parallel)─ gather_payments ─┐
+                                     └─(parallel)─ gather_news      ─┤
+                                                                     └─ synthesize → format_brief
+
+Multi-turn branches:
+  conversation_router → conversational_responder   (follow_up)
+  conversation_router → refine_brief → format_brief (refinement)
+  conversation_router → clarify_intent              (clarification)
 
 Model tiering:
-  parse_intent:    fast-routing  (Haiku — structured extraction)
-  route:           no LLM        (pure Python dict lookup)
-  gather_crm:      fast-routing  (Haiku — tool call + JSON passthrough)
-  gather_payments: fast-routing  (Haiku — tool call + JSON passthrough)
-  gather_news:     fast-routing  (Haiku — tool call + JSON passthrough)
-  synthesize:      complex-routing (Sonnet — coherent brief writing)
-  format_brief:    no LLM        (Jinja2 template render)
+  conversation_router:        fast-routing  (Haiku — structured classification)
+  route:                      no LLM        (pure Python dict lookup)
+  gather_crm:                 fast-routing  (Haiku — tool call + JSON passthrough)
+  gather_payments:            fast-routing  (Haiku — tool call + JSON passthrough)
+  gather_news:                fast-routing  (Haiku — tool call + JSON passthrough)
+  synthesize:                 complex-routing (Sonnet — coherent brief writing)
+  conversational_responder:   complex-routing (Sonnet — contextual answers)
+  refine_brief:               complex-routing (Sonnet — brief modification)
+  format_brief:               no LLM        (Jinja2 template render)
 """
 import asyncio
 import json
@@ -22,13 +29,13 @@ import os
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 
 from jinja2 import Environment, FileSystemLoader
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from platform_sdk import AgentConfig, AgentContext, build_specialist_agent, configure_logging, get_logger, make_chat_llm
 from .brief import RMBrief, render_brief
@@ -49,61 +56,226 @@ def _load_prompt(template: str, **ctx) -> str:
     return _jinja_env.get_template(template).render(**ctx)
 
 
-# ─── Node factories (closures capture agent/llm dependencies) ─────────────────
+# ─── Structured output models ────────────────────────────────────────────────
+
+class _TurnClassification(BaseModel):
+    """Structured output for the conversation router."""
+    turn_type: Literal["new_task", "follow_up", "refinement", "clarification"] = Field(
+        description="Type of turn: new_task for fresh requests, follow_up for questions about existing data, "
+                    "refinement for modifying the brief, clarification for ambiguous messages."
+    )
+    # Only populated for new_task turns:
+    client_name: Optional[str] = Field(
+        default=None,
+        description="Company/client name extracted from the message. Required for new_task, null for other turn types."
+    )
+    intent_type: Optional[str] = Field(
+        default=None,
+        description="One of: full_brief, quick_update, news_check, payment_check. Required for new_task, null for other turn types."
+    )
+    meeting_date: Optional[str] = Field(
+        default=None,
+        description="Meeting date if explicitly mentioned, null otherwise."
+    )
+
 
 class _IntentResult(BaseModel):
+    """Legacy structured output — kept for backward compatibility."""
     client_name: str
     intent_type: str
     meeting_date: Optional[str] = None
 
 
-def _make_parse_intent_node(router_llm):
-    structured = router_llm.with_structured_output(_IntentResult)
+# ─── Node factories (closures capture agent/llm dependencies) ─────────────────
 
-    async def parse_intent(state: RMPrepState) -> dict:
-        system = SystemMessage(content="""Extract from the RM's message:
-- client_name: exact company name mentioned
-- intent_type: one of full_brief | quick_update | news_check | payment_check | follow_up
-- meeting_date: date if explicitly mentioned, else null""")
+def _make_conversation_router_node(router_llm):
+    """Entry point node that classifies each turn and routes accordingly."""
+    structured = router_llm.with_structured_output(_TurnClassification)
+
+    async def conversation_router(state: RMPrepState) -> dict:
+        # Build context for the router prompt
+        has_brief = bool(state.get("brief_markdown"))
+        has_crm = bool(state.get("crm_output"))
+        has_payments = bool(state.get("payments_output"))
+        has_news = bool(state.get("news_output"))
+        turn_count = state.get("turn_count", 0)
+
+        system_prompt = _load_prompt(
+            "conversation_router.j2",
+            client_name=state.get("client_name"),
+            has_brief=has_brief,
+            has_crm=has_crm,
+            has_payments=has_payments,
+            has_news=has_news,
+            turn_count=turn_count,
+        )
+
         try:
-            result = await structured.ainvoke([system] + list(state["messages"]))
-            log.info("intent_parsed", client=result.client_name, intent=result.intent_type)
-            return {
-                "client_name": result.client_name,
-                "intent_type": result.intent_type,
-                "meeting_date": result.meeting_date,
+            result = await structured.ainvoke(
+                [SystemMessage(content=system_prompt)] + list(state["messages"])
+            )
+            log.info(
+                "turn_classified",
+                turn_type=result.turn_type,
+                client=result.client_name,
+                intent=result.intent_type,
+                turn_count=turn_count + 1,
+            )
+
+            update = {
+                "turn_type": result.turn_type,
+                "turn_count": turn_count + 1,
                 "error_states": {},
             }
+
+            # For new_task, populate identity fields like the old parse_intent did
+            if result.turn_type == "new_task":
+                if result.client_name:
+                    update["client_name"] = result.client_name
+                update["intent_type"] = result.intent_type or "full_brief"
+                update["meeting_date"] = result.meeting_date
+
+            return update
+
         except Exception as exc:
-            log.error("parse_intent_error", error=str(exc))
-            # Safe Fallback: Do not hallucinate client name. 
-            # Require clarification by setting intent to follow_up or triggering an error.
+            log.error("conversation_router_error", error=str(exc))
+            # If we have existing data, treat as follow_up (safer than re-running pipeline)
+            if has_brief or has_crm:
+                return {
+                    "turn_type": "follow_up",
+                    "turn_count": turn_count + 1,
+                    "error_states": {"conversation_router": str(exc)},
+                }
+            # No existing data — ask for clarification
             return {
+                "turn_type": "clarification",
+                "turn_count": turn_count + 1,
                 "client_name": "Clarification Required",
-                "intent_type": "error_clarification_needed", # Needs to be handled by the routing logic
-                "error_states": {"parse_intent": "Failed to extract intent and client name reliably. " + str(exc)},
+                "error_states": {"conversation_router": str(exc)},
             }
-    return parse_intent
+
+    return conversation_router
+
+
+def _route_after_classification(state: RMPrepState) -> str:
+    """Conditional edge: dispatch based on turn_type set by conversation_router."""
+    turn_type = state.get("turn_type", "new_task")
+
+    if turn_type == "follow_up":
+        return "conversational_responder"
+    elif turn_type == "refinement":
+        return "refine_brief"
+    elif turn_type == "clarification":
+        return "clarify_intent"
+    else:
+        # new_task — run the full pipeline
+        return "route"
+
+
+def _make_conversational_responder_node(synthesis_llm):
+    """Answers follow-up questions using data already in state."""
+
+    async def conversational_responder(state: RMPrepState) -> dict:
+        prompt = _load_prompt(
+            "conversational_responder.j2",
+            today=datetime.now().strftime("%B %d, %Y"),
+            rm_name=state.get("rm_id", "Relationship Manager"),
+            client_name=state.get("client_name", "Unknown"),
+            brief_markdown=state.get("brief_markdown"),
+            crm_data=state.get("crm_output") or "[CRM data not yet gathered]",
+            payments_data=state.get("payments_output") or "[Payments data not yet gathered]",
+            news_data=state.get("news_output") or "[News data not yet gathered]",
+        )
+
+        try:
+            response = await synthesis_llm.ainvoke(
+                [SystemMessage(content=prompt)] + list(state["messages"])
+            )
+            answer = response.content if hasattr(response, "content") else str(response)
+            log.info("follow_up_answered", client=state.get("client_name"))
+
+            return {
+                "messages": [AIMessage(content=answer)],
+                "brief_markdown": answer,
+            }
+        except Exception as exc:
+            log.error("conversational_responder_error", error=str(exc))
+            error_msg = (
+                "I encountered an issue answering your question. "
+                "Could you try rephrasing, or would you like me to generate a fresh brief?"
+            )
+            return {
+                "messages": [AIMessage(content=error_msg)],
+                "brief_markdown": error_msg,
+                "error_states": {"conversational_responder": str(exc)},
+            }
+
+    return conversational_responder
+
+
+def _make_refine_brief_node(synthesis_llm):
+    """Re-synthesizes the brief incorporating the RM's feedback."""
+    structured = synthesis_llm.with_structured_output(RMBrief)
+
+    async def refine_brief(state: RMPrepState) -> dict:
+        # Get the most recent user message (the refinement request)
+        user_messages = [m for m in state["messages"] if hasattr(m, "type") and m.type == "human"]
+        if not user_messages:
+            # Fallback: check for HumanMessage instances
+            user_messages = [m for m in state["messages"] if isinstance(m, HumanMessage)]
+        feedback = user_messages[-1].content if user_messages else "Improve the brief."
+
+        prompt = _load_prompt(
+            "refine_synthesis.j2",
+            today=datetime.now().strftime("%B %d, %Y"),
+            rm_name=state.get("rm_id", "Relationship Manager"),
+            previous_brief=state.get("brief_markdown") or "[No previous brief]",
+            feedback=feedback,
+            crm_data=state.get("crm_output") or "[CRM data unavailable]",
+            payments_data=state.get("payments_output") or "[Payments data unavailable]",
+            news_data=state.get("news_output") or "[News search unavailable]",
+        )
+
+        try:
+            brief = await structured.ainvoke([HumanMessage(content=prompt)])
+            log.info("brief_refined", client=state.get("client_name"))
+            return {"brief_data": brief.model_dump()}
+        except Exception as exc:
+            log.error("refine_brief_error", error=str(exc))
+            fallback = RMBrief(
+                client_name=state.get("client_name", "Unknown"),
+                meeting_date=state.get("meeting_date"),
+                executive_summary=f"Brief refinement encountered an error: {exc}. The original brief is preserved.",
+                recent_activity=state.get("crm_output") or "[Unavailable]",
+                payment_activity=state.get("payments_output") or "[Unavailable]",
+                latest_news=state.get("news_output") or "[Unavailable]",
+                talking_points=["Review the original brief and provide more specific feedback"],
+                suggested_questions=["What specific changes would you like?"],
+                watch_items="Brief refinement failed — original brief preserved",
+                sources=["[CRM]", "[Payments]", "[News]"],
+            )
+            return {"brief_data": fallback.model_dump(), "error_states": {"refine_brief": str(exc)}}
+
+    return refine_brief
+
 
 def _make_clarify_intent_node():
     """Node that short-circuits the graph to ask the user for missing parameters."""
     async def clarify_intent(state: RMPrepState) -> dict:
         log.info("clarification_requested", reason="Missing client name or intent")
-        
+
         # We skip synthesis and write directly to the final markdown output field
         clarification_msg = (
             "I couldn't clearly identify the client or company name in your request. "
             "Could you please specify which company you'd like me to look up?"
         )
-        
-        return {"brief_markdown": clarification_msg}
+
+        return {
+            "messages": [AIMessage(content=clarification_msg)],
+            "brief_markdown": clarification_msg,
+        }
     return clarify_intent
 
-def _route_after_parse(state: RMPrepState) -> str:
-    """Conditional edge logic to determine if we can proceed or must ask for clarity."""
-    if state.get("intent_type") == "error_clarification_needed":
-        return "clarify_intent"
-    return "route"
 
 def _make_route_node():
     _ROUTING_MAP = {
@@ -255,37 +427,47 @@ def build_rm_orchestrator(
     synthesis_llm,
     config: AgentConfig,
 ):
-    """Build the RM Prep StateGraph orchestrator."""
+    """Build the RM Prep StateGraph orchestrator with multi-turn conversation support."""
     router_llm = make_chat_llm(config.router_model_route)
 
     builder = StateGraph(RMPrepState)
 
-    # 1. Register all nodes (including the new clarify_intent node)
-    builder.add_node("parse_intent",     _make_parse_intent_node(router_llm))
-    builder.add_node("clarify_intent",   _make_clarify_intent_node())  # NEW
-    builder.add_node("route",            _make_route_node())
-    builder.add_node("gather_crm",       _make_gather_crm_node(crm_agent))
-    builder.add_node("gather_payments",  _make_gather_payments_node(pay_agent))
-    builder.add_node("gather_news",      _make_gather_news_node(news_agent))
-    builder.add_node("synthesize",       _make_synthesize_node(synthesis_llm, "rm_prep_synthesis.j2"))
-    builder.add_node("format_brief",     _make_format_brief_node())
+    # ── Register all nodes ─────────────────────────────────────────────────────
+    # Entry point: classifies turn type
+    builder.add_node("conversation_router",       _make_conversation_router_node(router_llm))
+    # Multi-turn branches
+    builder.add_node("conversational_responder",  _make_conversational_responder_node(synthesis_llm))
+    builder.add_node("refine_brief",              _make_refine_brief_node(synthesis_llm))
+    builder.add_node("clarify_intent",            _make_clarify_intent_node())
+    # Existing pipeline nodes
+    builder.add_node("route",                     _make_route_node())
+    builder.add_node("gather_crm",                _make_gather_crm_node(crm_agent))
+    builder.add_node("gather_payments",           _make_gather_payments_node(pay_agent))
+    builder.add_node("gather_news",               _make_gather_news_node(news_agent))
+    builder.add_node("synthesize",                _make_synthesize_node(synthesis_llm, "rm_prep_synthesis.j2"))
+    builder.add_node("format_brief",              _make_format_brief_node())
 
-    builder.set_entry_point("parse_intent")
+    # ── Entry point ────────────────────────────────────────────────────────────
+    builder.set_entry_point("conversation_router")
 
-    # 2. Replace the static edge with a conditional edge
+    # ── Conditional routing from conversation_router ────────────────────────────
     builder.add_conditional_edges(
-        "parse_intent", 
-        _route_after_parse,
+        "conversation_router",
+        _route_after_classification,
         {
-            "clarify_intent": "clarify_intent",
-            "route": "route"
+            "route":                      "route",                      # new_task → full pipeline
+            "conversational_responder":   "conversational_responder",   # follow_up
+            "refine_brief":               "refine_brief",               # refinement
+            "clarify_intent":             "clarify_intent",             # clarification
         }
     )
 
-    # 3. If clarification is needed, end the graph immediately after asking
+    # ── Multi-turn terminal edges ──────────────────────────────────────────────
+    builder.add_edge("conversational_responder", END)
     builder.add_edge("clarify_intent", END)
+    builder.add_edge("refine_brief", "format_brief")  # refinement re-uses format_brief
 
-    # The rest of the graph remains exactly the same
+    # ── Existing pipeline edges (unchanged) ────────────────────────────────────
     builder.add_edge("route", "gather_crm")
 
     builder.add_edge("gather_crm", "gather_payments")

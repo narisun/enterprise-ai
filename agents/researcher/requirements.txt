@@ -1,0 +1,23 @@
+# Deep agent framework (built on LangGraph + langchain-core 1.x)
+# deepagents pulls in langchain-core, langgraph, langchain-anthropic,
+# and langchain-google-genai. We add langchain-openai separately for GPT-4o.
+deepagents>=0.1.0
+
+# LLM provider — must match langchain-core 1.x from deepagents
+langchain-openai>=1.0.0
+
+# API server
+fastapi>=0.111.0,<1.0.0
+uvicorn[standard]>=0.30.0,<1.0.0
+pydantic>=2.7.0,<3.0.0
+
+# SSE streaming
+sse-starlette>=2.0.0,<3.0.0
+
+# Web search tool
+duckduckgo-search>=6.0.0,<8.0.0
+
+# Observability
+opentelemetry-sdk>=1.24.0,<2.0.0
+opentelemetry-exporter-otlp>=1.24.0,<2.0.0
+opentelemetry-instrumentation-fastapi>=0.45b0,<1.0.0
