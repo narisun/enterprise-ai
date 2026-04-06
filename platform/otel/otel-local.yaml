@@ -3,14 +3,9 @@
 #
 # OTel Collector — local development configuration.
 #
-# Traces/metrics: exported to Dynatrace if credentials are set,
-# AND printed to console so developers can see them immediately.
-# Leave DYNATRACE_* vars empty to skip remote export.
-#
-# Logs: OTel log records are forwarded to Loki so they appear in
-# Grafana alongside traces and metrics.  Container stdout logs
-# are also captured by Promtail (Docker socket scraping) which
-# is the primary path for our structlog JSON output.
+# Traces/metrics: printed to console so developers can see them
+# immediately. LLM observability is handled by LangFuse directly
+# (not via OTel Collector).
 # ============================================================
 
 receivers:
@@ -28,7 +23,7 @@ processors:
   memory_limiter:
     check_interval: 1s
     limit_mib: 512
-  # Tag every signal with project=enterprise-ai so Loki/Grafana can
+  # Tag every signal with project=enterprise-ai so dashboards can
   # filter to this stack even in a multi-project environment
   resource:
     attributes:
@@ -41,20 +36,6 @@ exporters:
   debug:
     verbosity: normal
 
-  # Remote Dynatrace export (only active if credentials are provided)
-  otlphttp/dynatrace:
-    endpoint: "${env:DYNATRACE_ENDPOINT}/api/v2/otlp"
-    headers:
-      Authorization: "Api-Token ${env:DYNATRACE_API_TOKEN}"
-
-  # Loki — receives OTel log records from services that emit via the
-  # OTel SDK logs exporter.  Promtail handles container stdout separately.
-  # Note: only `endpoint` is used — the `labels` mapping field was added in
-  # a later otel-contrib release and is not valid in 0.103.0.  Loki labels
-  # (service, level, etc.) come from Promtail's pipeline stages instead.
-  loki:
-    endpoint: http://loki:3100/loki/api/v1/push
-
 extensions:
   health_check:
     endpoint: 0.0.0.0:13133
@@ -65,13 +46,8 @@ service:
     traces:
       receivers:  [otlp]
       processors: [memory_limiter, resource, batch]
-      exporters:  [debug, otlphttp/dynatrace]
+      exporters:  [debug]
     metrics:
       receivers:  [otlp]
       processors: [memory_limiter, resource, batch]
-      exporters:  [debug, otlphttp/dynatrace]
-    # OTel SDK log records pipeline (complements Promtail stdout scraping)
-    logs:
-      receivers:  [otlp]
-      processors: [memory_limiter, resource, batch]
-      exporters:  [debug, loki]
+      exporters:  [debug]

@@ -16,7 +16,9 @@ RUN pip install --no-cache-dir /platform-sdk/
 
 # ---- Service dependencies -------------------------------------------
 COPY frontends/chat-ui/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt \
+    && python -c "import langchain; print('langchain', langchain.__version__)" \
+    && python -c "from langfuse.callback import CallbackHandler; print('langfuse CallbackHandler OK')"
 
 # ---- Reuse agent source (MCPToolBridge + graph builder) -------------
 # Copying agents/src/ means the chat-ui shares the exact same MCP

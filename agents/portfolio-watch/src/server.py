@@ -15,15 +15,17 @@ from langchain_core.messages import HumanMessage
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
-from platform_sdk import AgentConfig, MCPConfig, configure_logging, get_logger, make_api_key_verifier, setup_telemetry
+from platform_sdk import configure_logging, get_langfuse_callback_handler, get_logger, make_api_key_verifier, setup_telemetry
+from .PortfolioWatchService import PortfolioWatchService
 from .graph import portfolio_watch_lifespan
 
+_service = PortfolioWatchService()
+
 configure_logging()
-setup_telemetry(MCPConfig.from_env().service_name)
+setup_telemetry(_service.mcp_config.service_name)
 log = get_logger(__name__)
 
-verify_api_key  = make_api_key_verifier()
-_agent_config   = AgentConfig.from_env()
+verify_api_key = make_api_key_verifier()
 
 # Human-readable progress labels — keyed by LangGraph node name
 _PROGRESS_LABELS = {
@@ -107,6 +109,8 @@ async def watch_streaming(
         generate_call_count = 0
 
         try:
+            _lf_handler = get_langfuse_callback_handler()
+            _callbacks = [_lf_handler] if _lf_handler else []
             async for event in graph.astream_events(
                 {
                     "messages":  [HumanMessage(content=body.prompt)],
@@ -129,7 +133,8 @@ async def watch_streaming(
                 },
                 config={
                     "configurable": {"thread_id": body.session_id},
-                    "recursion_limit": _agent_config.recursion_limit,
+                    "recursion_limit": _service.agent_config.recursion_limit,
+                    "callbacks": _callbacks,
                 },
                 version="v2",
             ):
@@ -288,6 +293,8 @@ async def watch_sync(
     """Synchronous report generation — for testing."""
     graph = request.app.state.graph
     try:
+        _lf_handler = get_langfuse_callback_handler()
+        _callbacks = [_lf_handler] if _lf_handler else []
         result = await graph.ainvoke(
             {
                 "messages":  [HumanMessage(content=body.prompt)],
@@ -310,7 +317,8 @@ async def watch_sync(
             },
             config={
                 "configurable": {"thread_id": body.session_id},
-                "recursion_limit": _agent_config.recursion_limit,
+                "recursion_limit": _service.agent_config.recursion_limit,
+                "callbacks": _callbacks,
             },
         )
         return WatchResponse(

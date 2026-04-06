@@ -27,4 +27,4 @@ USER appuser
 
 EXPOSE 8080
 
-CMD ["python", "src/server.py"]
+CMD ["python", "-m", "src.server"]

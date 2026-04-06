@@ -71,9 +71,32 @@ def get_data_layer():
         return None
     try:
         from chainlit.data.sql_alchemy import SQLAlchemyDataLayer
+        from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+
+        layer = SQLAlchemyDataLayer(conninfo=DATABASE_URL)
+
+        # Replace the default engine with one configured for connection
+        # resilience.  pool_pre_ping=True makes SQLAlchemy test each pooled
+        # connection with a lightweight SELECT 1 before handing it to the
+        # application — stale/closed connections are transparently recycled.
+        # pool_recycle=300 forces connections to be refreshed every 5 minutes,
+        # preventing long-idle connections from being dropped by the database
+        # server or intermediate proxies.
+        engine = create_async_engine(
+            DATABASE_URL,
+            pool_pre_ping=True,
+            pool_recycle=300,
+            pool_size=5,
+            max_overflow=10,
+        )
+        layer.engine = engine
+        # Rebind the session factory to the new engine (Chainlit may use
+        # async_session internally for queries).
+        if hasattr(layer, "async_session"):
+            layer.async_session = async_sessionmaker(engine, expire_on_commit=False)
 
         log.info("history_enabled", backend="postgresql")
-        return SQLAlchemyDataLayer(conninfo=DATABASE_URL)
+        return layer
     except Exception as exc:
         log.error("history_init_failed", error=str(exc), exc_info=True)
         return None

@@ -18,77 +18,74 @@ x-versions:
   litellm:     &img-litellm     ghcr.io/berriai/litellm:main-v1.43.0
   otel:        &img-otel        otel/opentelemetry-collector-contrib:0.103.0
   opa:         &img-opa         openpolicyagent/opa:0.65.0-debug
-  loki:        &img-loki        grafana/loki:3.0.0
-  promtail:    &img-promtail    grafana/promtail:3.0.0
-  grafana:     &img-grafana     grafana/grafana:10.4.0
+  langfuse:     &img-langfuse     langfuse/langfuse:2
+  langfuse-db:  &img-langfuse-db  postgres:16-alpine
 
 # Shared environment injected into every service
 x-otel-env: &otel-env
   OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318/v1/traces
 
+x-langfuse-env: &langfuse-env
+  LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
+  LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
+  LANGFUSE_HOST: http://langfuse:3000
+
 services:
 
   # ============================================================
-  # OBSERVABILITY — Loki + Promtail + Grafana
+  # OBSERVABILITY — LangFuse (LLM tracing + prompt management)
   # ============================================================
-  loki:
-    image: *img-loki
-    container_name: ai-loki
-    volumes:
-      - ./platform/grafana/loki-local.yaml:/etc/loki/local-config.yaml:ro
-      - loki-data:/loki
-    command: -config.file=/etc/loki/local-config.yaml
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:3100/ready || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 20s
-    networks:
-      - ai-network
-    # Not exposed to host — accessed only via Grafana proxy on ai-network
-
-  promtail:
-    image: *img-promtail
-    container_name: ai-promtail
-    volumes:
-      - ./platform/grafana/promtail-local.yaml:/etc/promtail/config.yaml:ro
-      # Docker socket — lets Promtail discover containers and read their logs
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-    command: -config.file=/etc/promtail/config.yaml
-    depends_on:
-      loki:
-        condition: service_healthy
-    networks:
-      - ai-network
-
-  grafana:
-    image: *img-grafana
-    container_name: ai-grafana
+  langfuse-db:
+    image: *img-langfuse-db
+    container_name: ai-langfuse-db
     environment:
-      # No login required in local dev — open the UI and start exploring immediately
-      GF_AUTH_ANONYMOUS_ENABLED: "true"
-      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
-      GF_AUTH_DISABLE_LOGIN_FORM: "true"
-      GF_USERS_DEFAULT_THEME: dark
-      GF_SERVER_ROOT_URL: http://localhost:3001
-      GF_LOG_LEVEL: warn
+      POSTGRES_USER: langfuse
+      POSTGRES_PASSWORD: ${LANGFUSE_DB_PASSWORD:-langfuse-local-dev}
+      POSTGRES_DB: langfuse
     volumes:
-      - ./platform/grafana/provisioning:/etc/grafana/provisioning:ro
-      - grafana-data:/var/lib/grafana
-    depends_on:
-      loki:
-        condition: service_healthy
+      - langfuse-db-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/health || exit 1"]
+      test: ["CMD-SHELL", "pg_isready -U langfuse -d langfuse"]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 20s
+      start_period: 10s
+    networks:
+      - ai-network
+
+  langfuse:
+    image: *img-langfuse
+    container_name: ai-langfuse
+    environment:
+      DATABASE_URL: postgresql://langfuse:${LANGFUSE_DB_PASSWORD:-langfuse-local-dev}@langfuse-db:5432/langfuse
+      NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET:-langfuse-dev-secret-change-me}
+      NEXTAUTH_URL: http://localhost:3001
+      SALT: ${LANGFUSE_SALT:-langfuse-dev-salt-change-me}
+      TELEMETRY_ENABLED: "true"
+      LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES: "true"
+      # Auto-provision a project with deterministic API keys on startup.
+      # These must match LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY in .env
+      # so that agent services authenticate successfully after every restart.
+      LANGFUSE_INIT_PROJECT_NAME: "Enterprise AI"
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
+      LANGFUSE_INIT_USER_EMAIL: ${LANGFUSE_INIT_USER_EMAIL:-admin@local.dev}
+      LANGFUSE_INIT_USER_PASSWORD: ${LANGFUSE_INIT_USER_PASSWORD:-admin}
+      LANGFUSE_INIT_USER_NAME: "Admin"
+      LANGFUSE_INIT_ORG_NAME: "Enterprise AI Platform"
+    depends_on:
+      langfuse-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/public/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     networks:
       - ai-network
     ports:
-      - "127.0.0.1:3001:3000"    # Grafana UI — open http://localhost:3001
+      - "127.0.0.1:3001:3000"    # LangFuse UI — open http://localhost:3001
 
   # ============================================================
   # INFRASTRUCTURE
@@ -135,16 +132,11 @@ services:
   otel-collector:
     image: *img-otel
     container_name: ai-otel-collector
-    environment:
-      DYNATRACE_ENDPOINT: ${DYNATRACE_ENDPOINT:-}
-      DYNATRACE_API_TOKEN: ${DYNATRACE_API_TOKEN:-}
     volumes:
       - ./platform/otel/otel-local.yaml:/etc/otelcol-contrib/config.yaml:ro
     command: ["--config=/etc/otelcol-contrib/config.yaml"]
-    # No depends_on loki — the OTel Loki exporter retries the connection
-    # internally, so the collector can start immediately alongside other
-    # infrastructure.  Blocking here would delay all agents by ~20s while
-    # Loki's start_period elapses, causing OTLP export timeouts.
+    # No depends_on — the OTel collector starts immediately alongside other
+    # infrastructure with internal retry logic.
     ports:
       - "127.0.0.1:4317:4317"    # OTLP gRPC — loopback only in dev
       - "127.0.0.1:4318:4318"    # OTLP HTTP — loopback only in dev
@@ -235,7 +227,7 @@ services:
       REDIS_PASSWORD: ${REDIS_PASSWORD}    # Authenticated Redis
       ENABLE_TOOL_CACHE: "true"
       TOOL_CACHE_TTL: "300"                # 5 minutes — tune based on data freshness
-      <<: *otel-env
+      <<: [*otel-env, *langfuse-env]
     depends_on:
       pgvector:
         condition: service_healthy
@@ -277,7 +269,7 @@ services:
       ENABLE_COMPACTION: ${ENABLE_COMPACTION:-true}
       AGENT_CONTEXT_TOKEN_LIMIT: ${AGENT_CONTEXT_TOKEN_LIMIT:-6000}
       AGENT_RECURSION_LIMIT: ${AGENT_RECURSION_LIMIT:-10}
-      <<: *otel-env
+      <<: [*otel-env, *langfuse-env]
     depends_on:
       litellm:
         condition: service_healthy
@@ -325,7 +317,7 @@ services:
       ENABLE_COMPACTION: ${ENABLE_COMPACTION:-true}
       AGENT_CONTEXT_TOKEN_LIMIT: ${AGENT_CONTEXT_TOKEN_LIMIT:-6000}
       AGENT_RECURSION_LIMIT: ${AGENT_RECURSION_LIMIT:-10}
-      <<: *otel-env
+      <<: [*otel-env, *langfuse-env]
     depends_on:
       litellm:
         condition: service_healthy
@@ -370,7 +362,7 @@ services:
       REDIS_PASSWORD: ${REDIS_PASSWORD}
       ENABLE_TOOL_CACHE: "true"
       TOOL_CACHE_TTL: "1800"              # 30 minutes — CRM data is human-updated
-      <<: *otel-env
+      <<: [*otel-env, *langfuse-env]
     depends_on:
       pgvector:
         condition: service_healthy
@@ -415,7 +407,7 @@ services:
       REDIS_PASSWORD: ${REDIS_PASSWORD}
       ENABLE_TOOL_CACHE: "true"
       TOOL_CACHE_TTL: "3600"              # 1 hour — payments loaded in nightly batches
-      <<: *otel-env
+      <<: [*otel-env, *langfuse-env]
     depends_on:
       pgvector:
         condition: service_healthy
@@ -456,7 +448,7 @@ services:
       REDIS_PASSWORD: ${REDIS_PASSWORD}
       ENABLE_TOOL_CACHE: "true"
       TOOL_CACHE_TTL: "1800"              # 30 minutes — news is latency-tolerant
-      <<: *otel-env
+      <<: [*otel-env, *langfuse-env]
     depends_on:
       redis:
         condition: service_healthy
@@ -502,7 +494,7 @@ services:
       ENABLE_COMPACTION: ${ENABLE_COMPACTION:-true}
       AGENT_CONTEXT_TOKEN_LIMIT: ${AGENT_CONTEXT_TOKEN_LIMIT:-6000}
       AGENT_RECURSION_LIMIT: ${AGENT_RECURSION_LIMIT:-10}
-      <<: *otel-env
+      <<: [*otel-env, *langfuse-env]
     depends_on:
       litellm:
         condition: service_healthy
@@ -543,7 +535,7 @@ services:
       ENABLE_COMPACTION: ${ENABLE_COMPACTION:-true}
       AGENT_CONTEXT_TOKEN_LIMIT: ${AGENT_CONTEXT_TOKEN_LIMIT:-6000}
       AGENT_RECURSION_LIMIT: ${AGENT_RECURSION_LIMIT:-15}
-      <<: *otel-env
+      <<: [*otel-env, *langfuse-env]
     depends_on:
       litellm:
         condition: service_healthy
@@ -558,6 +550,104 @@ services:
       - ai-network
     ports:
       - "127.0.0.1:8004:8004"    # Loopback only in dev
+
+  # ============================================================
+  # ANALYTICS AGENT — Agentic analytics platform (LangGraph)
+  # ============================================================
+  analytics-agent:
+    build:
+      context: .                           # Build from monorepo root
+      dockerfile: agents/analytics-agent/Dockerfile
+    container_name: ai-analytics-agent
+    environment:
+      LITELLM_BASE_URL: http://litellm:4000/v1
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+      SERVICE_NAME: analytics-agent
+      # MCP server endpoints for data retrieval
+      DATA_MCP_URL: http://data-mcp:8080/sse
+      SALESFORCE_MCP_URL: http://salesforce-mcp:8081/sse
+      PAYMENTS_MCP_URL: http://payments-mcp:8082/sse
+      NEWS_MCP_URL: http://news-search-mcp:8083/sse
+      # Environment & security — controls orchestrator role and HMAC signing
+      ENVIRONMENT: ${ENVIRONMENT:-local}
+      JWT_SECRET: ${JWT_SECRET}
+      CONTEXT_HMAC_SECRET: ${CONTEXT_HMAC_SECRET}
+      # Agent behaviour — model tiering for analytics
+      ROUTER_MODEL_ROUTE: ${ROUTER_MODEL_ROUTE:-fast-routing}
+      SYNTHESIS_MODEL_ROUTE: ${SYNTHESIS_MODEL_ROUTE:-complex-routing}
+      ENABLE_COMPACTION: ${ENABLE_COMPACTION:-true}
+      AGENT_CONTEXT_TOKEN_LIMIT: ${AGENT_CONTEXT_TOKEN_LIMIT:-6000}
+      AGENT_RECURSION_LIMIT: ${AGENT_RECURSION_LIMIT:-10}
+      <<: [*otel-env, *langfuse-env]
+    depends_on:
+      litellm:
+        condition: service_healthy
+      data-mcp:
+        condition: service_healthy
+      salesforce-mcp:
+        condition: service_healthy
+      payments-mcp:
+        condition: service_healthy
+      news-search-mcp:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python3", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - ai-network
+    ports:
+      - "127.0.0.1:8086:8000"    # Analytics Agent API — loopback only in dev
+
+  # ============================================================
+  # ANALYTICS UI — React frontend for agentic analytics
+  # ============================================================
+  analytics-ui:
+    build:
+      context: frontends/analytics-ui
+      dockerfile: Dockerfile
+    container_name: ai-analytics-ui
+    depends_on:
+      analytics-agent:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:80/"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - ai-network
+    ports:
+      - "127.0.0.1:3002:80"    # Analytics UI — open http://localhost:3002 in your browser
+
+  # ============================================================
+  # ANALYTICS DASHBOARD — Next.js 15 + Shadcn/ui + Vercel AI SDK
+  # ============================================================
+  analytics-dashboard:
+    build:
+      context: frontends/analytics-dashboard
+      dockerfile: Dockerfile
+    container_name: ai-analytics-dashboard
+    environment:
+      ANALYTICS_AGENT_URL: http://analytics-agent:8000
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+    depends_on:
+      analytics-agent:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - ai-network
+    ports:
+      - "127.0.0.1:3003:3000"    # Analytics Dashboard — open http://localhost:3003
 
   # ============================================================
   # AGENT UI — React frontend (supports multiple agents)
@@ -595,5 +685,4 @@ networks:
 
 volumes:
   pgdata:
-  loki-data:
-  grafana-data:
+  langfuse-db-data:

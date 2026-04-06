@@ -46,12 +46,15 @@ dev-up: ## Start the stack without test fixtures (prod-schema only)
 	@echo "✅ Local stack is running (no test fixtures — salesforce/bankdw schemas absent)."
 	@echo "   Use 'make dev-test-up' to include Salesforce + bankdw test data."
 	@echo ""
-	@echo "   🌐 Chat UI       → http://localhost:8501"
-	@echo "   🤖 Agent API     → http://localhost:8000"
-	@echo "   🔀 LiteLLM Proxy → http://localhost:4000"
-	@echo "   🛠  Data MCP      → http://localhost:8080"
-	@echo "   📡 OTel Collector → http://localhost:4318"
-	@echo "   🗄  PostgreSQL    → localhost:5432"
+	@echo "   🌐 Chat UI        → http://localhost:8501"
+	@echo "   🤖 Agent API      → http://localhost:8000"
+	@echo "   📊 Analytics UI   → http://localhost:3002"
+	@echo "   📈 Analytics API  → http://localhost:8086"
+	@echo "   🔀 LiteLLM Proxy  → http://localhost:4000"
+	@echo "   🛠  Data MCP       → http://localhost:8080"
+	@echo "   📡 OTel Collector  → http://localhost:4318"
+	@echo "   📊 LangFuse       → http://localhost:3001"
+	@echo "   🗄  PostgreSQL     → localhost:5432"
 	@echo ""
 	@echo "   Run 'make dev-logs' to follow all logs."
 
@@ -63,12 +66,15 @@ dev-test-up: ## Start the full stack WITH Salesforce + bankdw test fixtures (use
 	@echo "✅ Local stack is running with test fixtures:"
 	@echo "   salesforce.* and bankdw.* schemas seeded from testdata/ CSVs."
 	@echo ""
-	@echo "   🌐 Chat UI       → http://localhost:8501  (SHOW_TEST_LOGIN=true)"
-	@echo "   🤖 Agent API     → http://localhost:8000"
-	@echo "   🔀 LiteLLM Proxy → http://localhost:4000"
-	@echo "   🛠  Data MCP      → http://localhost:8080"
-	@echo "   📡 OTel Collector → http://localhost:4318"
-	@echo "   🗄  PostgreSQL    → localhost:5432"
+	@echo "   🌐 Chat UI        → http://localhost:8501  (SHOW_TEST_LOGIN=true)"
+	@echo "   🤖 Agent API      → http://localhost:8000"
+	@echo "   📊 Analytics UI   → http://localhost:3002"
+	@echo "   📈 Analytics API  → http://localhost:8086"
+	@echo "   🔀 LiteLLM Proxy  → http://localhost:4000"
+	@echo "   🛠  Data MCP       → http://localhost:8080"
+	@echo "   📡 OTel Collector  → http://localhost:4318"
+	@echo "   📊 LangFuse       → http://localhost:3001"
+	@echo "   🗄  PostgreSQL     → localhost:5432"
 	@echo ""
 	@echo "   Run 'make dev-logs' to follow all logs."
 
@@ -115,6 +121,8 @@ install-all-deps: sdk-install ## Install ALL service + test dependencies (needed
 	@echo "→ Installing agents/rm-prep deps..."
 	$(PIP) install -r agents/rm-prep/requirements.txt \
 	               -r agents/rm-prep/requirements-test.txt --quiet
+	@echo "→ Installing agents/analytics-agent deps..."
+	$(PIP) install -r agents/analytics-agent/requirements.txt --quiet
 	@echo "→ Installing data-mcp deps..."
 	$(PIP) install -r tools/data-mcp/requirements.txt \
 	               -r tools/data-mcp/requirements-test.txt --quiet
@@ -255,7 +263,19 @@ format: sdk-install ## Auto-format all Python source
 build: ## Build all Docker images
 	docker build -f agents/Dockerfile -t enterprise-ai/ai-agents:local .
 	docker build -f agents/rm-prep/Dockerfile -t enterprise-ai/rm-prep-agent:local .
+	docker build -f agents/analytics-agent/Dockerfile -t enterprise-ai/analytics-agent:local .
 	docker build -f tools/data-mcp/Dockerfile -t enterprise-ai/data-mcp:local .
+
+test-analytics: sdk-install ## Run analytics-agent unit tests
+	@echo "→ Installing analytics-agent dependencies..."
+	$(PIP) install -r agents/analytics-agent/requirements.txt --quiet
+	@echo "→ Running analytics-agent tests..."
+	@mkdir -p test-results
+	$(PYTEST) agents/analytics-agent/tests/ -v --tb=short --color=yes \
+	  --junit-xml=test-results/analytics-agent.xml
+
+analytics-logs: ## Follow logs from analytics services only
+	$(COMPOSE_TEST) logs -f analytics-agent analytics-ui analytics-dashboard
 
 # ---- Kubernetes (Skaffold) ---------------------------------
 

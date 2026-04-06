@@ -1,0 +1,709 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Enterprise Agentic AI — Azure-Native Stack</title>
+        <style>* { box-sizing: border-box; margin: 0; padding: 0; } body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background: #F0F4F8; color: #1B2A47; padding: 28px 24px 32px; } .page-header { margin-bottom: 22px; display: flex; align-items: flex-end; justify-content: space-between; border-bottom: 3px solid #1B2A47; padding-bottom: 12px; } .page-header h1 { font-size: 21px; font-weight: 700; color: #1B2A47; letter-spacing: 0.3px; } .page-header p { font-size: 12px; color: #5A6A82; margin-top: 3px; } .meta { text-align: right; font-size: 11px; color: #8295AE; } .diagram-wrap { background: #fff; border: 1px solid #D0D7E2; border-radius: 10px; padding: 18px 18px 14px; box-shadow: 0 2px 12px rgba(27,42,71,0.07); overflow-x: auto; } .legend-row { display: flex; flex-wrap: wrap; gap: 18px; margin-top: 14px; padding: 12px 16px; background: #fff; border: 1px solid #D0D7E2; border-radius: 8px; } .legend-item { display: flex; align-items: center; gap: 7px; font-size: 11.5px; color: #3A4A60; } .ls { width: 20px; height: 12px; border-radius: 2px; flex-shrink: 0; }
+        /* Stack mapping table */
+        .stack-section { margin-top: 28px; } .stack-section h2 { font-size: 18px; font-weight: 700; color: #1B2A47; margin-bottom: 14px; border-bottom: 2px solid #D0D7E2; padding-bottom: 8px; } .stack-table { width: 100%; border-collapse: collapse; font-size: 13px; background: #fff; border: 1px solid #D0D7E2; border-radius: 8px; overflow: hidden; } .stack-table th { background: #1B2A47; color: #fff; padding: 10px 14px; text-align: left; font-weight: 600; font-size: 12px; letter-spacing: 0.3px; } .stack-table td { padding: 10px 14px; border-bottom: 1px solid #E8ECF0; vertical-align: top; line-height: 1.5; } .stack-table tr:last-child td { border-bottom: none; } .stack-table tr:nth-child(even) { background: #F8FAFC; } .stack-table .layer-tag { display: inline-block; background: #E8F4FD; color: #1A5276; padding: 2px 8px; border-radius: 3px; font-weight: 600; font-size: 11px; margin-right: 6px; } .stack-table .svc { font-family: 'SF Mono', 'Consolas', monospace; font-size: 12px; color: #0078D4; background: #EBF3FD; padding: 1px 5px; border-radius: 3px; } .stack-table .aws { font-family: 'SF Mono', 'Consolas', monospace; font-size: 12px; color: #C0392B; background: #FDF2F0; padding: 1px 5px; border-radius: 3px; } .note-box { margin-top: 18px; padding: 14px 18px; background: #EBF3FD; border: 1px solid #A0C4E8; border-radius: 8px; font-size: 12.5px; line-height: 1.6; color: #1A5276; } .note-box strong { color: #0078D4; }
+        </style>
+    </head>
+    <body>
+        <div class="page-header">
+            <div>
+                <h1>Enterprise Agentic AI — Technology Stack (Azure-Native)</h1>
+                <p>Financial Services &middot; Multi-Agent, MCP-native, Policy-enforced &middot; Production-grade deployment on Microsoft Azure</p>
+            </div>
+            <div class="meta">March 2026 · v1.0<br>CONFIDENTIAL — Internal Use Only</div>
+        </div>
+        <div class="diagram-wrap">
+            <svg viewBox="0 0 1260 1260" xmlns="http://www.w3.org/2000/svg" style="width:100%;min-width:980px;display:block;">
+                <defs>
+                    <marker id="a0" markerWidth="8" markerHeight="8" refX="7" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7 Z" fill="#8295AE"/></marker>
+                    <filter id="sh" x="-5%" y="-5%" width="110%" height="115%"><feDropShadow dx="0" dy="1" stdDeviation="2" flood-color="#1B2A47" flood-opacity="0.12"/></filter>
+                    <filter id="sh2" x="-5%" y="-5%" width="110%" height="115%"><feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#1B2A47" flood-opacity="0.18"/></filter>
+                    <linearGradient id="g-client" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" style="stop-color:#E8F4FD"/><stop offset="100%" style="stop-color:#D6EAF8"/></linearGradient>
+                    <linearGradient id="g-gw" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" style="stop-color:#E1F0FF"/><stop offset="100%" style="stop-color:#CCE4FF"/></linearGradient>
+                    <linearGradient id="g-agent" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" style="stop-color:#E8F8F5"/><stop offset="100%" style="stop-color:#D5F5E3"/></linearGradient>
+                    <linearGradient id="g-sdk" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" style="stop-color:#F4ECF7"/><stop offset="100%" style="stop-color:#E8DAEF"/></linearGradient>
+                    <linearGradient id="g-mcp" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" style="stop-color:#FEFBD8"/><stop offset="100%" style="stop-color:#FCF3CF"/></linearGradient>
+                    <linearGradient id="g-data" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" style="stop-color:#EAF2FF"/><stop offset="100%" style="stop-color:#D6E8FF"/></linearGradient>
+                    <linearGradient id="g-infra" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" style="stop-color:#F2F3F4"/><stop offset="100%" style="stop-color:#E5E8EB"/></linearGradient>
+                    <linearGradient id="g-security" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" style="stop-color:#FDEDEC"/><stop offset="100%" style="stop-color:#FADBD8"/></linearGradient>
+                    <linearGradient id="g-observe" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" style="stop-color:#F3EFFD"/><stop offset="100%" style="stop-color:#E8DAEF"/></linearGradient>
+                    <linearGradient id="g-model" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" style="stop-color:#FDECEA"/><stop offset="100%" style="stop-color:#FAD9C8"/></linearGradient>
+                </defs>
+
+                <!-- OUTER CHROME -->
+                <rect x="8" y="8" width="1244" height="1248" rx="8" fill="#FAFBFC" stroke="#CBD5E0" stroke-width="1.5"/>
+
+                <!-- Left: Security cross-cut column -->
+                <rect x="14" y="14" width="86" height="1232" rx="6" fill="url(#g-security)" stroke="#E74C3C" stroke-width="1.5" opacity="0.9"/>
+                <text x="57" y="30" text-anchor="middle" font-size="11" font-weight="700" fill="#C0392B">Security</text>
+                <text x="57" y="44" text-anchor="middle" font-size="9" fill="#C0392B">Zero-Trust</text>
+
+                <!-- Right: Observability cross-cut column -->
+                <rect x="1160" y="14" width="86" height="1232" rx="6" fill="url(#g-observe)" stroke="#6C5CE7" stroke-width="1.5" opacity="0.9"/>
+                <text x="1203" y="30" text-anchor="middle" font-size="11" font-weight="700" fill="#6C5CE7">Observability</text>
+                <text x="1203" y="44" text-anchor="middle" font-size="9" fill="#6C5CE7">Azure Monitor</text>
+
+                <!-- ═══════════════════════════════════════════════════
+                     HORIZONTAL LAYER BANDS (8 layers)
+                ═══════════════════════════════════════════════════ -->
+                <rect x="108" y="18" width="1044" height="108" rx="5" fill="url(#g-client)" stroke="#2E86C1" stroke-width="1.5"/>
+                <text x="118" y="34" font-size="10" font-weight="700" fill="#1A5276" letter-spacing="0.8">L1  ·  CLIENT &amp; CONSUMER LAYER</text>
+
+                <rect x="108" y="134" width="1044" height="100" rx="5" fill="url(#g-gw)" stroke="#0078D4" stroke-width="1.5"/>
+                <text x="118" y="150" font-size="10" font-weight="700" fill="#0053A6" letter-spacing="0.8">L2  ·  API GATEWAY &amp; IDENTITY LAYER  (Azure-Native)</text>
+
+                <rect x="108" y="242" width="1044" height="154" rx="5" fill="url(#g-agent)" stroke="#1ABC9C" stroke-width="1.5"/>
+                <text x="118" y="258" font-size="10" font-weight="700" fill="#0E6655" letter-spacing="0.8">L3  ·  AGENT ORCHESTRATION LAYER  (Azure Container Apps)</text>
+
+                <rect x="108" y="404" width="1044" height="86" rx="5" fill="url(#g-sdk)" stroke="#8E44AD" stroke-width="1.5"/>
+                <text x="118" y="420" font-size="10" font-weight="700" fill="#6C3483" letter-spacing="0.8">L4  ·  SHARED PLATFORM SERVICES  (SDK)</text>
+
+                <rect x="108" y="498" width="1044" height="200" rx="5" fill="url(#g-mcp)" stroke="#D4AC0D" stroke-width="1.5"/>
+                <text x="118" y="514" font-size="10" font-weight="700" fill="#7D6608" letter-spacing="0.8">L5  ·  TOOL &amp; INTEGRATION LAYER  (MCP / SSE  ·  Container Apps)</text>
+
+                <rect x="108" y="706" width="1044" height="100" rx="5" fill="url(#g-data)" stroke="#2980B9" stroke-width="1.5"/>
+                <text x="118" y="722" font-size="10" font-weight="700" fill="#1A5276" letter-spacing="0.8">L6  ·  DATA &amp; CACHE LAYER  (Azure Managed)</text>
+
+                <rect x="108" y="814" width="1044" height="156" rx="5" fill="url(#g-infra)" stroke="#7F8C8D" stroke-width="1.5"/>
+                <text x="118" y="830" font-size="10" font-weight="700" fill="#2C3E50" letter-spacing="0.8">L7  ·  INFRASTRUCTURE &amp; DEPLOYMENT LAYER  (Azure)</text>
+
+                <rect x="108" y="980" width="1044" height="258" rx="5" fill="url(#g-model)" stroke="#E67E22" stroke-width="1.5"/>
+                <text x="118" y="996" font-size="10" font-weight="700" fill="#784212" letter-spacing="0.8">L8  ·  MODEL LAYER  (Azure OpenAI Service  ·  AI Foundry  ·  Content Safety)</text>
+
+                <!-- ═══════════════════════════════════════════════════
+                     LAYER 1 — CLIENT COMPONENTS
+                ═══════════════════════════════════════════════════ -->
+                <rect x="126" y="44" width="160" height="68" rx="6" fill="#2E86C1" filter="url(#sh)"/>
+                <text x="206" y="68" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">Web Application</text>
+                <text x="206" y="84" text-anchor="middle" font-size="10" fill="#AED6F1">React / Vite · Front Door</text>
+                <text x="206" y="98" text-anchor="middle" font-size="10" fill="#AED6F1">Entra ID MSAL PKCE</text>
+
+                <rect x="304" y="44" width="160" height="68" rx="6" fill="#2874A6" filter="url(#sh)"/>
+                <text x="384" y="68" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">Conversational UI</text>
+                <text x="384" y="84" text-anchor="middle" font-size="10" fill="#AED6F1">Chainlit · Container Apps</text>
+                <text x="384" y="98" text-anchor="middle" font-size="10" fill="#AED6F1">Session persistence</text>
+
+                <rect x="482" y="44" width="160" height="68" rx="6" fill="#21618C" filter="url(#sh)"/>
+                <text x="562" y="68" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">API Consumer</text>
+                <text x="562" y="84" text-anchor="middle" font-size="10" fill="#AED6F1">REST / Server-Sent Events</text>
+                <text x="562" y="98" text-anchor="middle" font-size="10" fill="#AED6F1">Entra ID Bearer token</text>
+
+                <rect x="660" y="44" width="160" height="68" rx="6" fill="#1A5276" filter="url(#sh)"/>
+                <text x="740" y="68" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">Mobile / Desktop</text>
+                <text x="740" y="84" text-anchor="middle" font-size="10" fill="#AED6F1">MSAL native SDKs</text>
+                <text x="740" y="98" text-anchor="middle" font-size="10" fill="#AED6F1">Code + PKCE</text>
+
+                <rect x="838" y="44" width="160" height="68" rx="6" fill="#154360" filter="url(#sh)"/>
+                <text x="918" y="68" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">CI / Test Runner</text>
+                <text x="918" y="84" text-anchor="middle" font-size="10" fill="#AED6F1">pytest · M2M token</text>
+                <text x="918" y="98" text-anchor="middle" font-size="10" fill="#AED6F1">Entra ID client_credentials</text>
+
+                <!-- ═══════════════════════════════════════════════════
+                     LAYER 2 — API GATEWAY & IDENTITY (Azure-native)
+                ═══════════════════════════════════════════════════ -->
+                <rect x="126" y="158" width="188" height="68" rx="6" fill="#0078D4" filter="url(#sh)"/>
+                <text x="220" y="178" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">Azure Entra ID</text>
+                <text x="220" y="194" text-anchor="middle" font-size="10" fill="#B4D8F0">SSO · MFA · Conditional Access</text>
+                <text x="220" y="210" text-anchor="middle" font-size="10" fill="#B4D8F0">App Registrations · OIDC</text>
+
+                <rect x="330" y="158" width="188" height="68" rx="6" fill="#005A9E" filter="url(#sh)"/>
+                <text x="424" y="178" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">Azure API Management</text>
+                <text x="424" y="194" text-anchor="middle" font-size="10" fill="#B4D8F0">REST + WebSocket policies</text>
+                <text x="424" y="210" text-anchor="middle" font-size="10" fill="#B4D8F0">Rate limit · JWT validation · CORS</text>
+
+                <rect x="534" y="158" width="188" height="68" rx="6" fill="#003F72" filter="url(#sh)"/>
+                <text x="628" y="178" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">Token Enrichment</text>
+                <text x="628" y="194" text-anchor="middle" font-size="10" fill="#B4D8F0">Entra ID custom claims provider</text>
+                <text x="628" y="210" text-anchor="middle" font-size="10" fill="#B4D8F0">role · book · clearance claims</text>
+
+                <rect x="738" y="158" width="188" height="68" rx="6" fill="#002050" filter="url(#sh)"/>
+                <text x="832" y="178" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">Service Auth</text>
+                <text x="832" y="194" text-anchor="middle" font-size="10" fill="#B4D8F0">Managed Identity (M2M)</text>
+                <text x="832" y="210" text-anchor="middle" font-size="10" fill="#B4D8F0">Workload Identity Federation</text>
+
+                <!-- ═══════════════════════════════════════════════════
+                     LAYER 3 — AGENT ORCHESTRATION (Container Apps)
+                ═══════════════════════════════════════════════════ -->
+                <rect x="126" y="268" width="194" height="116" rx="6" fill="#1ABC9C" filter="url(#sh)"/>
+                <text x="223" y="291" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">ReAct Agent</text>
+                <text x="223" y="308" text-anchor="middle" font-size="10" fill="#D5F5E3">Generic chat · Container Apps</text>
+                <text x="223" y="324" text-anchor="middle" font-size="10" fill="#D5F5E3">create_react_agent()</text>
+                <text x="223" y="340" text-anchor="middle" font-size="10" fill="#D5F5E3">MCPBridge → StructuredTool</text>
+                <text x="223" y="356" text-anchor="middle" font-size="10" fill="#D5F5E3">Dynamic tool discovery</text>
+                <rect x="130" y="360" width="186" height="20" rx="3" fill="#0E8070"/>
+                <text x="223" y="374" text-anchor="middle" font-size="9" fill="#A9DFBF">Pattern: Tool-use loop (ReAct)</text>
+
+                <rect x="336" y="268" width="194" height="116" rx="6" fill="#17A589" filter="url(#sh)"/>
+                <text x="433" y="291" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">Orchestration Agent</text>
+                <text x="433" y="308" text-anchor="middle" font-size="10" fill="#D5F5E3">RM Prep · Container Apps</text>
+                <text x="433" y="324" text-anchor="middle" font-size="10" fill="#D5F5E3">StateGraph + parallel nodes</text>
+                <text x="433" y="340" text-anchor="middle" font-size="10" fill="#D5F5E3">parse → route → [gather‖ + RAG]</text>
+                <text x="433" y="356" text-anchor="middle" font-size="10" fill="#D5F5E3">→ synthesize → format</text>
+                <rect x="340" y="360" width="186" height="20" rx="3" fill="#0E8070"/>
+                <text x="433" y="374" text-anchor="middle" font-size="9" fill="#A9DFBF">Pattern: Deterministic StateGraph</text>
+
+                <rect x="546" y="268" width="194" height="116" rx="6" fill="#117A65" filter="url(#sh)"/>
+                <text x="643" y="287" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">DeepAgent</text>
+                <text x="643" y="302" text-anchor="middle" font-size="10" fill="#D5F5E3">Goal-oriented · Container Apps</text>
+                <text x="643" y="316" text-anchor="middle" font-size="10" fill="#D5F5E3">Task planning · Subagent-spawning</text>
+                <text x="643" y="330" text-anchor="middle" font-size="10" fill="#D5F5E3">File system context · Long-term memory</text>
+                <text x="643" y="344" text-anchor="middle" font-size="10" fill="#D5F5E3">Capability registry · Agent harness</text>
+                <rect x="550" y="358" width="186" height="20" rx="3" fill="#0E8070"/>
+                <text x="643" y="372" text-anchor="middle" font-size="9" fill="#A9DFBF">Pattern: Agentic harness loop</text>
+
+                <rect x="756" y="268" width="194" height="116" rx="6" fill="#0E6655" filter="url(#sh)"/>
+                <text x="853" y="291" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">LLM Gateway</text>
+                <text x="853" y="308" text-anchor="middle" font-size="10" fill="#D5F5E3">LiteLLM → Azure OpenAI</text>
+                <text x="853" y="324" text-anchor="middle" font-size="10" fill="#D5F5E3">Haiku routing  → fast</text>
+                <text x="853" y="340" text-anchor="middle" font-size="10" fill="#D5F5E3">Sonnet routing → balanced</text>
+                <text x="853" y="356" text-anchor="middle" font-size="10" fill="#D5F5E3">Opus routing   → complex</text>
+                <rect x="760" y="360" width="186" height="20" rx="3" fill="#0E4A3E"/>
+                <text x="853" y="374" text-anchor="middle" font-size="9" fill="#A9DFBF">AOAI multi-region smart routing</text>
+
+                <rect x="966" y="268" width="178" height="52" rx="6" fill="#0A5140" filter="url(#sh)"/>
+                <text x="1055" y="289" text-anchor="middle" font-size="11" font-weight="700" fill="#fff">Prompt Templates</text>
+                <text x="1055" y="305" text-anchor="middle" font-size="10" fill="#A9DFBF">Jinja2 · Blob versioned</text>
+
+                <rect x="966" y="330" width="178" height="54" rx="6" fill="#0A5140" filter="url(#sh)"/>
+                <text x="1055" y="351" text-anchor="middle" font-size="11" font-weight="700" fill="#fff">Context &amp; Memory</text>
+                <text x="1055" y="367" text-anchor="middle" font-size="10" fill="#A9DFBF">Checkpointer → Azure PG</text>
+                <text x="1055" y="381" text-anchor="middle" font-size="9" fill="#7DC9AE">Compaction · token budget</text>
+
+                <!-- ═══════════════════════════════════════════════════
+                     LAYER 4 — PLATFORM SDK
+                ═══════════════════════════════════════════════════ -->
+                <rect x="126" y="422" width="126" height="56" rx="5" fill="#7D3C98" filter="url(#sh)"/>
+                <text x="189" y="443" text-anchor="middle" font-size="11" font-weight="700" fill="#fff">Auth Context</text>
+                <text x="189" y="458" text-anchor="middle" font-size="10" fill="#D2B4DE">AgentContext · Entra ID</text>
+                <text x="189" y="472" text-anchor="middle" font-size="9" fill="#C39BD3">auth.py</text>
+
+                <rect x="264" y="422" width="126" height="56" rx="5" fill="#6C3483" filter="url(#sh)"/>
+                <text x="327" y="443" text-anchor="middle" font-size="11" font-weight="700" fill="#fff">Security</text>
+                <text x="327" y="458" text-anchor="middle" font-size="10" fill="#D2B4DE">OpaClient · API key</text>
+                <text x="327" y="472" text-anchor="middle" font-size="9" fill="#C39BD3">security.py</text>
+
+                <rect x="402" y="422" width="126" height="56" rx="5" fill="#5B2C6F" filter="url(#sh)"/>
+                <text x="465" y="443" text-anchor="middle" font-size="11" font-weight="700" fill="#fff">Cache</text>
+                <text x="465" y="458" text-anchor="middle" font-size="10" fill="#D2B4DE">@cached_tool · Azure Redis</text>
+                <text x="465" y="472" text-anchor="middle" font-size="9" fill="#C39BD3">cache.py</text>
+
+                <rect x="540" y="422" width="126" height="56" rx="5" fill="#4A235A" filter="url(#sh)"/>
+                <text x="603" y="443" text-anchor="middle" font-size="11" font-weight="700" fill="#fff">Config</text>
+                <text x="603" y="458" text-anchor="middle" font-size="10" fill="#D2B4DE">AgentConfig · MCPConfig</text>
+                <text x="603" y="472" text-anchor="middle" font-size="9" fill="#C39BD3">config.py</text>
+
+                <rect x="678" y="422" width="126" height="56" rx="5" fill="#6C3483" filter="url(#sh)"/>
+                <text x="741" y="443" text-anchor="middle" font-size="11" font-weight="700" fill="#fff">Telemetry</text>
+                <text x="741" y="458" text-anchor="middle" font-size="10" fill="#D2B4DE">OTel → App Insights</text>
+                <text x="741" y="472" text-anchor="middle" font-size="9" fill="#C39BD3">telemetry.py</text>
+
+                <rect x="816" y="422" width="126" height="56" rx="5" fill="#7D3C98" filter="url(#sh)"/>
+                <text x="879" y="443" text-anchor="middle" font-size="11" font-weight="700" fill="#fff">Logging</text>
+                <text x="879" y="458" text-anchor="middle" font-size="10" fill="#D2B4DE">structlog → Log Analytics</text>
+                <text x="879" y="472" text-anchor="middle" font-size="9" fill="#C39BD3">logging.py</text>
+
+                <rect x="954" y="422" width="130" height="56" rx="5" fill="#5B2C6F" filter="url(#sh)"/>
+                <text x="1019" y="443" text-anchor="middle" font-size="11" font-weight="700" fill="#fff">MCP Bridge</text>
+                <text x="1019" y="458" text-anchor="middle" font-size="10" fill="#D2B4DE">SSE · StructuredTool</text>
+                <text x="1019" y="472" text-anchor="middle" font-size="9" fill="#C39BD3">mcp_bridge.py</text>
+
+                <!-- ═══════════════════════════════════════════════════
+                     LAYER 5 — MCP TOOL SERVERS (Container Apps)
+                ═══════════════════════════════════════════════════ -->
+                <rect x="126" y="518" width="1018" height="22" rx="4" fill="#E67E22"/>
+                <text x="635" y="533" text-anchor="middle" font-size="10" font-weight="700" fill="#fff">POLICY ENFORCEMENT POINT  ·  OPA on Container Apps  ·  Fail-closed default deny  ·  Blob policy bundles</text>
+
+                <rect x="126" y="542" width="1018" height="10" rx="3" fill="#27AE60" opacity="0.85"/>
+                <text x="635" y="550" text-anchor="middle" font-size="8.5" font-weight="700" fill="#fff">AGENT SKILLS &amp; WORKFLOWS  ·  Callable Python functions registered as LangGraph tools  ·  Composable across agents</text>
+
+                <!-- data-mcp -->
+                <rect x="126" y="566" width="192" height="120" rx="6" fill="#F0B429" filter="url(#sh)"/>
+                <text x="222" y="589" text-anchor="middle" font-size="11.5" font-weight="700" fill="#1A0A00">SQL Database MCP</text>
+                <text x="222" y="606" text-anchor="middle" font-size="9.5" fill="#5D4037">data-mcp · Container Apps</text>
+                <text x="222" y="622" text-anchor="middle" font-size="9.5" fill="#5D4037">execute_read_query(sql)</text>
+                <text x="222" y="638" text-anchor="middle" font-size="9.5" fill="#5D4037">asyncpg → Azure PG Flex</text>
+                <text x="222" y="654" text-anchor="middle" font-size="9.5" fill="#5D4037">Row filter · Col mask</text>
+                <rect x="130" y="658" width="184" height="24" rx="3" fill="#D4A017"/>
+                <text x="222" y="674" text-anchor="middle" font-size="8.5" fill="#1A0A00">FastMCP / SSE · 15KB cap</text>
+
+                <!-- CRM MCP -->
+                <rect x="328" y="566" width="192" height="120" rx="6" fill="#E6A817" filter="url(#sh)"/>
+                <text x="424" y="589" text-anchor="middle" font-size="11.5" font-weight="700" fill="#1A0A00">CRM MCP</text>
+                <text x="424" y="606" text-anchor="middle" font-size="9.5" fill="#5D4037">salesforce-mcp · Container Apps</text>
+                <text x="424" y="622" text-anchor="middle" font-size="9.5" fill="#5D4037">get_salesforce_summary()</text>
+                <text x="424" y="638" text-anchor="middle" font-size="9.5" fill="#5D4037">Fuzzy match · PII mask</text>
+                <text x="424" y="654" text-anchor="middle" font-size="9.5" fill="#5D4037">Contacts / Opps / Tasks</text>
+                <rect x="332" y="658" width="184" height="24" rx="3" fill="#C49010"/>
+                <text x="424" y="674" text-anchor="middle" font-size="8.5" fill="#1A0A00">TTL cache 30m · Azure Redis</text>
+
+                <!-- Payments MCP -->
+                <rect x="530" y="566" width="192" height="120" rx="6" fill="#D4981A" filter="url(#sh)"/>
+                <text x="626" y="589" text-anchor="middle" font-size="11.5" font-weight="700" fill="#1A0A00">Payments MCP</text>
+                <text x="626" y="606" text-anchor="middle" font-size="9.5" fill="#5D4037">payments-mcp · Container Apps</text>
+                <text x="626" y="622" text-anchor="middle" font-size="9.5" fill="#5D4037">get_payment_summary()</text>
+                <text x="626" y="638" text-anchor="middle" font-size="9.5" fill="#5D4037">TX volumes · corridors</text>
+                <text x="626" y="654" text-anchor="middle" font-size="9.5" fill="#5D4037">Counterparty analysis</text>
+                <rect x="534" y="658" width="184" height="24" rx="3" fill="#B8830A"/>
+                <text x="626" y="674" text-anchor="middle" font-size="8.5" fill="#1A0A00">Row-filtered · AML masked</text>
+
+                <!-- Knowledge MCP (RAG) -->
+                <rect x="732" y="566" width="192" height="120" rx="6" fill="#B8860B" filter="url(#sh)"/>
+                <text x="828" y="589" text-anchor="middle" font-size="11.5" font-weight="700" fill="#fff">Knowledge MCP</text>
+                <text x="828" y="606" text-anchor="middle" font-size="9.5" fill="#FFF8DC">knowledge-mcp · Container Apps</text>
+                <text x="828" y="622" text-anchor="middle" font-size="9.5" fill="#FFF8DC">search_knowledge(query)</text>
+                <text x="828" y="638" text-anchor="middle" font-size="9.5" fill="#FFF8DC">AOAI text-embedding-3-large</text>
+                <text x="828" y="654" text-anchor="middle" font-size="9.5" fill="#FFF8DC">pgvector cosine on Azure PG</text>
+                <rect x="736" y="658" width="184" height="24" rx="3" fill="#8B6914"/>
+                <text x="828" y="674" text-anchor="middle" font-size="8.5" fill="#FFF8DC">RAG · chunk + embed + retrieve</text>
+
+                <!-- News MCP -->
+                <rect x="934" y="566" width="210" height="120" rx="6" fill="#C48910" filter="url(#sh)"/>
+                <text x="1039" y="589" text-anchor="middle" font-size="11.5" font-weight="700" fill="#1A0A00">Web Intelligence MCP</text>
+                <text x="1039" y="606" text-anchor="middle" font-size="9.5" fill="#5D4037">news-search-mcp · Container Apps</text>
+                <text x="1039" y="622" text-anchor="middle" font-size="9.5" fill="#5D4037">search_company_news()</text>
+                <text x="1039" y="638" text-anchor="middle" font-size="9.5" fill="#5D4037">Tavily API · NAT Gateway</text>
+                <text x="1039" y="654" text-anchor="middle" font-size="9.5" fill="#5D4037">httpx async · retry</text>
+                <rect x="938" y="658" width="202" height="24" rx="3" fill="#A87800"/>
+                <text x="1039" y="674" text-anchor="middle" font-size="8.5" fill="#1A0A00">VNet egress · Private Endpoint</text>
+
+                <!-- ═══════════════════════════════════════════════════
+                     LAYER 6 — DATA (Azure Managed)
+                ═══════════════════════════════════════════════════ -->
+                <rect x="126" y="726" width="240" height="72" rx="6" fill="#0078D4" filter="url(#sh)"/>
+                <text x="246" y="750" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">Azure PG Flexible Server</text>
+                <text x="246" y="767" text-anchor="middle" font-size="10" fill="#B4D8F0">PG 16 + pgvector · Zone-redundant</text>
+                <text x="246" y="782" text-anchor="middle" font-size="10" fill="#B4D8F0">CRM · Payments · Embeddings</text>
+
+                <rect x="382" y="726" width="220" height="72" rx="6" fill="#005A9E" filter="url(#sh)"/>
+                <text x="492" y="750" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">Azure Cache for Redis</text>
+                <text x="492" y="767" text-anchor="middle" font-size="10" fill="#B4D8F0">Enterprise tier · TLS + AAD auth</text>
+                <text x="492" y="782" text-anchor="middle" font-size="10" fill="#B4D8F0">Tool results · LLM cache</text>
+
+                <rect x="618" y="726" width="220" height="72" rx="6" fill="#003F72" filter="url(#sh)"/>
+                <text x="728" y="750" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">Azure Blob Storage</text>
+                <text x="728" y="767" text-anchor="middle" font-size="10" fill="#B4D8F0">OPA bundles · Prompt templates</text>
+                <text x="728" y="782" text-anchor="middle" font-size="10" fill="#B4D8F0">RAG documents · Artifacts</text>
+
+                <rect x="854" y="726" width="290" height="72" rx="6" fill="#002050" filter="url(#sh)"/>
+                <text x="999" y="750" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">Azure Key Vault</text>
+                <text x="999" y="767" text-anchor="middle" font-size="10" fill="#B4D8F0">API keys · JWT_SECRET · HMAC</text>
+                <text x="999" y="782" text-anchor="middle" font-size="10" fill="#B4D8F0">Auto-rotation · Managed Identity</text>
+
+                <!-- ═══════════════════════════════════════════════════
+                     LAYER 7 — INFRASTRUCTURE (Azure)
+                ═══════════════════════════════════════════════════ -->
+                <rect x="126" y="838" width="196" height="120" rx="6" fill="#0078D4" filter="url(#sh)"/>
+                <text x="224" y="860" text-anchor="middle" font-size="11" font-weight="700" fill="#fff">Azure Container Apps</text>
+                <text x="224" y="877" text-anchor="middle" font-size="10" fill="#B4D8F0">Serverless containers</text>
+                <text x="224" y="893" text-anchor="middle" font-size="10" fill="#B4D8F0">Per-service revision configs</text>
+                <text x="224" y="909" text-anchor="middle" font-size="10" fill="#B4D8F0">KEDA auto-scaling</text>
+                <text x="224" y="925" text-anchor="middle" font-size="10" fill="#B4D8F0">Built-in Dapr service discovery</text>
+                <rect x="130" y="929" width="188" height="24" rx="3" fill="#005A9E"/>
+                <text x="224" y="945" text-anchor="middle" font-size="9" fill="#fff">No K8s mgmt · consumption billing</text>
+
+                <rect x="336" y="838" width="196" height="120" rx="6" fill="#566573" filter="url(#sh)"/>
+                <text x="434" y="860" text-anchor="middle" font-size="11" font-weight="700" fill="#fff">CI / CD Pipeline</text>
+                <text x="434" y="877" text-anchor="middle" font-size="10" fill="#D5D8DC">GitHub Actions → ACR push</text>
+                <text x="434" y="893" text-anchor="middle" font-size="10" fill="#D5D8DC">Azure DevOps (optional)</text>
+                <text x="434" y="909" text-anchor="middle" font-size="10" fill="#D5D8DC">Build → Test → Deploy ACA</text>
+                <text x="434" y="925" text-anchor="middle" font-size="10" fill="#D5D8DC">ACR image scanning (Defender)</text>
+                <rect x="340" y="929" width="188" height="24" rx="3" fill="#4D5656"/>
+                <text x="434" y="945" text-anchor="middle" font-size="9" fill="#E8EAEB">Bicep / Terraform for IaC</text>
+
+                <rect x="546" y="838" width="196" height="120" rx="6" fill="#4D5656" filter="url(#sh)"/>
+                <text x="644" y="860" text-anchor="middle" font-size="11" font-weight="700" fill="#fff">Infrastructure as Code</text>
+                <text x="644" y="877" text-anchor="middle" font-size="10" fill="#D5D8DC">Bicep · infra/bicep/</text>
+                <text x="644" y="893" text-anchor="middle" font-size="10" fill="#D5D8DC">Azure PG · ACA · Redis</text>
+                <text x="644" y="909" text-anchor="middle" font-size="10" fill="#D5D8DC">Blob state · Table lock</text>
+                <text x="644" y="925" text-anchor="middle" font-size="10" fill="#D5D8DC">Per-env parameter files</text>
+                <rect x="550" y="929" width="188" height="24" rx="3" fill="#3D4849"/>
+                <text x="644" y="945" text-anchor="middle" font-size="9" fill="#E8EAEB">Terraform AzureRM alternative</text>
+
+                <rect x="756" y="838" width="196" height="120" rx="6" fill="#424949" filter="url(#sh)"/>
+                <text x="854" y="860" text-anchor="middle" font-size="11" font-weight="700" fill="#fff">Networking &amp; Security</text>
+                <text x="854" y="877" text-anchor="middle" font-size="10" fill="#D5D8DC">Azure VNet · Private Endpoints</text>
+                <text x="854" y="893" text-anchor="middle" font-size="10" fill="#D5D8DC">NSG microsegmentation</text>
+                <text x="854" y="909" text-anchor="middle" font-size="10" fill="#D5D8DC">Azure Firewall (hub-spoke)</text>
+                <text x="854" y="925" text-anchor="middle" font-size="10" fill="#D5D8DC">ExpressRoute to on-prem</text>
+                <rect x="760" y="929" width="188" height="24" rx="3" fill="#363B3B"/>
+                <text x="854" y="945" text-anchor="middle" font-size="9" fill="#E8EAEB">No public endpoints for data tier</text>
+
+                <rect x="966" y="838" width="178" height="120" rx="6" fill="#E74C3C" filter="url(#sh)"/>
+                <text x="1055" y="860" text-anchor="middle" font-size="11" font-weight="700" fill="#fff">Policy Engine</text>
+                <text x="1055" y="877" text-anchor="middle" font-size="10" fill="#FADBD8">OPA v0.65 · ACA sidecar</text>
+                <text x="1055" y="893" text-anchor="middle" font-size="10" fill="#FADBD8">tool_auth.rego</text>
+                <text x="1055" y="909" text-anchor="middle" font-size="10" fill="#FADBD8">rm_prep_authz.rego</text>
+                <text x="1055" y="925" text-anchor="middle" font-size="10" fill="#FADBD8">Blob bundle server</text>
+                <rect x="970" y="929" width="170" height="24" rx="3" fill="#C0392B"/>
+                <text x="1055" y="945" text-anchor="middle" font-size="9" fill="#FADBD8">Log Analytics audit log</text>
+
+                <!-- ═══════════════════════════════════════════════════
+                     SECURITY CROSS-CUT COMPONENTS (left column)
+                ═══════════════════════════════════════════════════ -->
+                <rect x="18" y="50" width="76" height="44" rx="4" fill="#0078D4"/>
+                <text x="59" y="68" text-anchor="middle" font-size="9" font-weight="700" fill="#fff">Entra ID SSO</text>
+                <text x="59" y="82" text-anchor="middle" font-size="8" fill="#B4D8F0">MSAL / PKCE</text>
+
+                <rect x="18" y="162" width="76" height="44" rx="4" fill="#005A9E"/>
+                <text x="59" y="180" text-anchor="middle" font-size="9" font-weight="700" fill="#fff">Entra JWT</text>
+                <text x="59" y="194" text-anchor="middle" font-size="8" fill="#B4D8F0">role · accounts</text>
+
+                <rect x="18" y="297" width="76" height="44" rx="4" fill="#A93226"/>
+                <text x="59" y="315" text-anchor="middle" font-size="9" font-weight="700" fill="#fff">HMAC-SHA256</text>
+                <text x="59" y="329" text-anchor="middle" font-size="8" fill="#FADBD8">X-Agent-Context</text>
+
+                <rect x="18" y="429" width="76" height="36" rx="4" fill="#922B21"/>
+                <text x="59" y="444" text-anchor="middle" font-size="9" font-weight="700" fill="#fff">AgentContext</text>
+                <text x="59" y="458" text-anchor="middle" font-size="8" fill="#FADBD8">immutable / frozen</text>
+
+                <rect x="18" y="576" width="76" height="44" rx="4" fill="#7B241C"/>
+                <text x="59" y="593" text-anchor="middle" font-size="9" font-weight="700" fill="#fff">Row Filter</text>
+                <text x="59" y="607" text-anchor="middle" font-size="8" fill="#FADBD8">+ Col Mask</text>
+
+                <rect x="18" y="738" width="76" height="36" rx="4" fill="#641E16"/>
+                <text x="57" y="753" text-anchor="middle" font-size="9" font-weight="700" fill="#fff">PG TLS +</text>
+                <text x="57" y="767" text-anchor="middle" font-size="8" fill="#FADBD8">CMK encrypt</text>
+
+                <rect x="18" y="870" width="76" height="44" rx="4" fill="#4D0E09"/>
+                <text x="57" y="888" text-anchor="middle" font-size="9" font-weight="700" fill="#fff">Key Vault</text>
+                <text x="57" y="902" text-anchor="middle" font-size="8" fill="#FADBD8">MI · rotation</text>
+
+                <!-- ═══════════════════════════════════════════════════
+                     OBSERVABILITY CROSS-CUT (right column)
+                ═══════════════════════════════════════════════════ -->
+                <rect x="1166" y="50" width="76" height="44" rx="4" fill="#6C5CE7"/>
+                <text x="1207" y="68" text-anchor="middle" font-size="9" font-weight="700" fill="#fff">Entra Logs</text>
+                <text x="1207" y="82" text-anchor="middle" font-size="8" fill="#E8DAEF">sign-in audit</text>
+
+                <rect x="1166" y="164" width="76" height="40" rx="4" fill="#5A4BD4"/>
+                <text x="1207" y="181" text-anchor="middle" font-size="9" font-weight="700" fill="#fff">APIM Analytics</text>
+                <text x="1207" y="195" text-anchor="middle" font-size="8" fill="#E8DAEF">deny / allow</text>
+
+                <rect x="1166" y="297" width="76" height="44" rx="4" fill="#4A3BB8"/>
+                <text x="1207" y="314" text-anchor="middle" font-size="9" font-weight="700" fill="#fff">App Insights</text>
+                <text x="1207" y="328" text-anchor="middle" font-size="8" fill="#E8DAEF">OTel → OTLP</text>
+
+                <rect x="1166" y="429" width="76" height="36" rx="4" fill="#5A4BD4"/>
+                <text x="1207" y="444" text-anchor="middle" font-size="9" font-weight="700" fill="#fff">Log Analytics</text>
+                <text x="1207" y="458" text-anchor="middle" font-size="8" fill="#E8DAEF">structlog JSON</text>
+
+                <rect x="1166" y="576" width="76" height="44" rx="4" fill="#6C5CE7"/>
+                <text x="1207" y="593" text-anchor="middle" font-size="9" font-weight="700" fill="#fff">Cache Metrics</text>
+                <text x="1207" y="607" text-anchor="middle" font-size="8" fill="#E8DAEF">Azure Redis</text>
+
+                <rect x="1166" y="738" width="76" height="36" rx="4" fill="#4A3BB8"/>
+                <text x="1205" y="753" text-anchor="middle" font-size="9" font-weight="700" fill="#fff">PG Metrics</text>
+                <text x="1205" y="767" text-anchor="middle" font-size="8" fill="#E8DAEF">QPI + Monitor</text>
+
+                <rect x="1166" y="870" width="76" height="44" rx="4" fill="#5A4BD4"/>
+                <text x="1205" y="888" text-anchor="middle" font-size="9" font-weight="700" fill="#fff">AOAI Metrics</text>
+                <text x="1205" y="902" text-anchor="middle" font-size="8" fill="#E8DAEF">usage + latency</text>
+
+                <!-- ═══════════════════════════════════════════════════
+                     LAYER 8 — MODEL LAYER (Azure OpenAI + AI Foundry)
+                ═══════════════════════════════════════════════════ -->
+                <rect x="126" y="1004" width="1018" height="22" rx="4" fill="#C0392B"/>
+                <text x="635" y="1019" text-anchor="middle" font-size="10" font-weight="700" fill="#fff">AZURE AI CONTENT SAFETY  ·  Content filters · PII redaction · Jailbreak detection · Prompt shield  ·  Applied to all AOAI deployments</text>
+
+                <!-- Azure OpenAI — Claude models -->
+                <rect x="126" y="1034" width="292" height="140" rx="6" fill="#4A235A" filter="url(#sh)"/>
+                <text x="272" y="1057" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">Anthropic Claude (AOAI)</text>
+                <text x="272" y="1073" text-anchor="middle" font-size="10" fill="#D2B4DE">Claude Haiku 3.5  ·  routing / specialists  ·  fast</text>
+                <text x="272" y="1088" text-anchor="middle" font-size="10" fill="#D2B4DE">Claude Sonnet 4  ·  default agent LLM  ·  balanced</text>
+                <text x="272" y="1103" text-anchor="middle" font-size="10" fill="#D2B4DE">Claude Opus 4  ·  complex reasoning  ·  synthesis</text>
+                <text x="272" y="1118" text-anchor="middle" font-size="10" fill="#D2B4DE">Global deployment · provisioned throughput</text>
+                <rect x="130" y="1142" width="284" height="22" rx="3" fill="#3B1A4A"/>
+                <text x="272" y="1157" text-anchor="middle" font-size="9" fill="#E8DAEF">Primary LLM  ·  Azure OpenAI API  ·  via LiteLLM</text>
+
+                <!-- Azure OpenAI — GPT + Embeddings -->
+                <rect x="430" y="1034" width="228" height="140" rx="6" fill="#0B5E6D" filter="url(#sh)"/>
+                <text x="544" y="1057" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">Azure OpenAI GPT</text>
+                <text x="544" y="1073" text-anchor="middle" font-size="10" fill="#A2D9CE">text-embedding-3-large  ·  RAG</text>
+                <text x="544" y="1088" text-anchor="middle" font-size="10" fill="#A2D9CE">GPT-4o  ·  multimodal  ·  tool use</text>
+                <text x="544" y="1103" text-anchor="middle" font-size="10" fill="#A2D9CE">GPT-4o-mini  ·  lightweight tasks</text>
+                <text x="544" y="1118" text-anchor="middle" font-size="10" fill="#A2D9CE">o1 / o3 reasoning  ·  planning</text>
+                <rect x="434" y="1142" width="220" height="22" rx="3" fill="#084E5B"/>
+                <text x="544" y="1157" text-anchor="middle" font-size="9" fill="#A2D9CE">Embedding + fallback  ·  AOAI Service</text>
+
+                <!-- AI Foundry Models -->
+                <rect x="670" y="1034" width="164" height="140" rx="6" fill="#7E5109" filter="url(#sh)"/>
+                <text x="752" y="1057" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">AI Foundry Catalog</text>
+                <text x="752" y="1076" text-anchor="middle" font-size="10" fill="#FAD7A0">Meta Llama 3.3</text>
+                <text x="752" y="1091" text-anchor="middle" font-size="10" fill="#FAD7A0">Mistral Large 2</text>
+                <text x="752" y="1106" text-anchor="middle" font-size="10" fill="#FAD7A0">Cohere Command R+</text>
+                <text x="752" y="1121" text-anchor="middle" font-size="10" fill="#FAD7A0">Phi-4 (Microsoft)</text>
+                <rect x="674" y="1142" width="156" height="22" rx="3" fill="#6E4506"/>
+                <text x="752" y="1157" text-anchor="middle" font-size="9" fill="#FAD7A0">Serverless API / MaaS</text>
+
+                <!-- Guardrails & Safety -->
+                <rect x="846" y="1034" width="298" height="140" rx="6" fill="#7B241C" filter="url(#sh)"/>
+                <text x="995" y="1057" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">Safety &amp; Evaluation</text>
+                <text x="995" y="1073" text-anchor="middle" font-size="10" fill="#FADBD8">Azure AI Content Safety  ·  filters</text>
+                <text x="995" y="1088" text-anchor="middle" font-size="10" fill="#FADBD8">Prompt Shield  ·  jailbreak detection</text>
+                <text x="995" y="1103" text-anchor="middle" font-size="10" fill="#FADBD8">Groundedness detection  ·  PII redaction</text>
+                <text x="995" y="1118" text-anchor="middle" font-size="10" fill="#FADBD8">AI Foundry Evaluations  ·  quality metrics</text>
+                <rect x="850" y="1142" width="290" height="22" rx="3" fill="#641E16"/>
+                <text x="995" y="1157" text-anchor="middle" font-size="9" fill="#FADBD8">Automated eval pipeline  ·  human review  ·  App Insights</text>
+
+                <!-- Security L8 -->
+                <rect x="18" y="1063" width="76" height="44" rx="4" fill="#3D0A06"/>
+                <text x="57" y="1081" text-anchor="middle" font-size="9" font-weight="700" fill="#fff">AOAI RBAC</text>
+                <text x="57" y="1095" text-anchor="middle" font-size="8" fill="#FADBD8">Managed Identity</text>
+
+                <!-- Observability L8 -->
+                <rect x="1166" y="1063" width="76" height="44" rx="4" fill="#3A2FA8"/>
+                <text x="1205" y="1081" text-anchor="middle" font-size="9" font-weight="700" fill="#fff">GenAI Traces</text>
+                <text x="1205" y="1095" text-anchor="middle" font-size="8" fill="#E8DAEF">latency · cost · tokens</text>
+            </svg>
+        </div>
+
+        <!-- Legend -->
+        <div class="legend-row">
+            <span style="font-size:11px;font-weight:700;color:#1B2A47;margin-right:4px;">LAYERS:</span>
+            <div class="legend-item"><div class="ls" style="background:#D6EAF8;border:1.5px solid #2E86C1"></div>L1 Client</div>
+            <div class="legend-item"><div class="ls" style="background:#CCE4FF;border:1.5px solid #0078D4"></div>L2 Gateway (Azure)</div>
+            <div class="legend-item"><div class="ls" style="background:#D5F5E3;border:1.5px solid #1ABC9C"></div>L3 Agents (Container Apps)</div>
+            <div class="legend-item"><div class="ls" style="background:#E8DAEF;border:1.5px solid #8E44AD"></div>L4 Platform SDK</div>
+            <div class="legend-item"><div class="ls" style="background:#FCF3CF;border:1.5px solid #D4AC0D"></div>L5 MCP Tools (Container Apps)</div>
+            <div class="legend-item"><div class="ls" style="background:#D6E8FF;border:1.5px solid #2980B9"></div>L6 Data (Azure Managed)</div>
+            <div class="legend-item"><div class="ls" style="background:#E5E8EB;border:1.5px solid #7F8C8D"></div>L7 Infrastructure</div>
+            <div class="legend-item"><div class="ls" style="background:#FDECEA;border:1.5px solid #E67E22"></div>L8 Models (Azure OpenAI)</div>
+            <span style="font-size:11px;font-weight:700;color:#1B2A47;margin-left:12px;margin-right:4px;">PLATFORM:</span>
+            <div class="legend-item"><div class="ls" style="background:#0078D4"></div>Microsoft Azure</div>
+        </div>
+
+        <!-- ═══════════════════════════════════════════════════
+             TECHNOLOGY STACK MAPPING TABLE
+        ═══════════════════════════════════════════════════ -->
+        <div class="stack-section">
+            <h2>Technology Stack — AWS to Azure Service Mapping</h2>
+
+            <table class="stack-table">
+                <thead>
+                    <tr>
+                        <th style="width:13%">Layer</th>
+                        <th style="width:20%">Component</th>
+                        <th style="width:22%">Azure Service</th>
+                        <th style="width:22%">Replaces (AWS Stack)</th>
+                        <th style="width:23%">Design Justification</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <!-- L1 -->
+                    <tr>
+                        <td><span class="layer-tag">L1</span> Client</td>
+                        <td>Static hosting / CDN</td>
+                        <td><span class="svc">Azure Front Door</span> + <span class="svc">Blob Storage</span> (static website)</td>
+                        <td><span class="aws">CloudFront</span> + <span class="aws">S3</span></td>
+                        <td>Front Door provides global load balancing, WAF, and edge caching. React SPA hosted on Blob static website with custom domain via Azure DNS.</td>
+                    </tr>
+                    <tr>
+                        <td><span class="layer-tag">L1</span> Client</td>
+                        <td>Auth flow (browser)</td>
+                        <td><span class="svc">Azure Entra ID</span> + <span class="svc">MSAL.js</span></td>
+                        <td><span class="aws">EntraID</span> → <span class="aws">Cognito</span> federation</td>
+                        <td>No federation layer needed — Entra ID issues tokens directly. MSAL.js handles PKCE flow. Eliminates Cognito entirely, reducing complexity and latency.</td>
+                    </tr>
+
+                    <!-- L2 -->
+                    <tr>
+                        <td><span class="layer-tag">L2</span> Gateway</td>
+                        <td>Identity Provider</td>
+                        <td><span class="svc">Azure Entra ID</span></td>
+                        <td><span class="aws">Entra ID</span> + <span class="aws">Amazon Cognito</span></td>
+                        <td>Entra ID is the single IdP — SSO, MFA, Conditional Access, App Registrations. No Cognito equivalent needed since Entra ID is Azure-native.</td>
+                    </tr>
+                    <tr>
+                        <td><span class="layer-tag">L2</span> Gateway</td>
+                        <td>API Gateway</td>
+                        <td><span class="svc">Azure API Management</span> (v2 / consumption tier)</td>
+                        <td><span class="aws">AWS API Gateway</span> + <span class="aws">WAF</span></td>
+                        <td>APIM provides REST + WebSocket policies, JWT validation (Entra ID), rate limiting, request transformation, and built-in developer portal. WAF via Front Door integration.</td>
+                    </tr>
+                    <tr>
+                        <td><span class="layer-tag">L2</span> Gateway</td>
+                        <td>Token enrichment</td>
+                        <td><span class="svc">Entra ID</span> custom claims provider (API-based)</td>
+                        <td><span class="aws">Cognito</span> pre-token Lambda</td>
+                        <td>Entra ID custom claims provider calls an Azure Function to inject <code>role</code>, <code>assigned_account_ids</code>, <code>compliance_clearance</code> into tokens at issuance. No Cognito needed.</td>
+                    </tr>
+                    <tr>
+                        <td><span class="layer-tag">L2</span> Gateway</td>
+                        <td>Service-to-service auth</td>
+                        <td><span class="svc">Managed Identity</span> + <span class="svc">Workload Identity Federation</span></td>
+                        <td><span class="aws">IAM roles</span> + <span class="aws">Cognito M2M</span></td>
+                        <td>Container Apps use system-assigned Managed Identity for Azure service access (Key Vault, Blob, PG). No secrets needed for service-to-service. HMAC X-Agent-Context header unchanged.</td>
+                    </tr>
+
+                    <!-- L3 -->
+                    <tr>
+                        <td><span class="layer-tag">L3</span> Agents</td>
+                        <td>Container runtime</td>
+                        <td><span class="svc">Azure Container Apps</span> (ACA)</td>
+                        <td><span class="aws">AWS Fargate</span> on <span class="aws">ECS</span></td>
+                        <td>ACA is serverless Kubernetes without the K8s management. Built-in KEDA autoscaling, Dapr service discovery, revision-based deployments. Each agent is a Container App with its own scaling rules.</td>
+                    </tr>
+                    <tr>
+                        <td><span class="layer-tag">L3</span> Agents</td>
+                        <td>LLM routing</td>
+                        <td><span class="svc">LiteLLM</span> → <span class="svc">Azure OpenAI Service</span></td>
+                        <td><span class="aws">LiteLLM</span> → <span class="aws">AWS Bedrock</span></td>
+                        <td>LiteLLM's Azure provider (<code>azure/gpt-4o</code>, <code>azure/claude-3-5-haiku</code>). AOAI Global Deployment for multi-region smart routing. Provisioned Throughput Units (PTU) for latency SLAs.</td>
+                    </tr>
+                    <tr>
+                        <td><span class="layer-tag">L3</span> Agents</td>
+                        <td>Orchestration framework</td>
+                        <td><span class="svc">LangGraph</span> StateGraph (unchanged)</td>
+                        <td>Same</td>
+                        <td>No change to LangGraph code. Checkpointer targets Azure PG Flexible Server. Config reads from Key Vault via Managed Identity.</td>
+                    </tr>
+
+                    <!-- L4 -->
+                    <tr>
+                        <td><span class="layer-tag">L4</span> SDK</td>
+                        <td>Platform SDK</td>
+                        <td><span class="svc">platform_sdk</span> (unchanged)</td>
+                        <td>Same</td>
+                        <td>SDK is cloud-agnostic. Config reads env vars injected by ACA revision secrets. <code>auth.py</code> validates Entra ID JWTs (same RS256 logic, different JWKS endpoint).</td>
+                    </tr>
+                    <tr>
+                        <td><span class="layer-tag">L4</span> SDK</td>
+                        <td>Telemetry export</td>
+                        <td><span class="svc">OTel SDK</span> → <span class="svc">Azure Monitor</span> / <span class="svc">Application Insights</span></td>
+                        <td><span class="aws">OTel</span> → <span class="aws">Dynatrace</span></td>
+                        <td>Azure Monitor OpenTelemetry Distro auto-configures OTel export to Application Insights. GenAI traces for LLM calls. Log Analytics workspace for structured log aggregation and KQL queries.</td>
+                    </tr>
+
+                    <!-- L5 -->
+                    <tr>
+                        <td><span class="layer-tag">L5</span> MCP Tools</td>
+                        <td>Tool servers</td>
+                        <td><span class="svc">FastMCP</span> on <span class="svc">Container Apps</span> (SSE)</td>
+                        <td><span class="aws">FastMCP</span> on <span class="aws">Fargate</span></td>
+                        <td>Each MCP server is a Container App. Internal ingress for service-to-service SSE. VNet integration for private access to PG and Redis.</td>
+                    </tr>
+                    <tr>
+                        <td><span class="layer-tag">L5</span> MCP Tools</td>
+                        <td>Knowledge / RAG</td>
+                        <td><span class="svc">knowledge-mcp</span> + <span class="svc">AOAI text-embedding-3-large</span> + <span class="svc">Azure PG pgvector</span></td>
+                        <td><span class="aws">Bedrock Titan Embeddings</span> + <span class="aws">RDS pgvector</span></td>
+                        <td>Documents embedded via AOAI text-embedding-3-large (3072-dim), stored in Azure PG pgvector. Alternatively: Azure AI Search with integrated vectorization for fully managed RAG.</td>
+                    </tr>
+                    <tr>
+                        <td><span class="layer-tag">L5</span> MCP Tools</td>
+                        <td>Policy enforcement</td>
+                        <td><span class="svc">OPA</span> as ACA sidecar, <span class="svc">Blob Storage</span> bundle server</td>
+                        <td><span class="aws">OPA</span> Fargate sidecar + <span class="aws">S3</span></td>
+                        <td>OPA pulls policy bundles from Blob Storage. Decision audit logs stream to Log Analytics. Azure Policy for infrastructure-level compliance (separate from app-layer OPA).</td>
+                    </tr>
+
+                    <!-- L6 -->
+                    <tr>
+                        <td><span class="layer-tag">L6</span> Data</td>
+                        <td>Relational + Vector DB</td>
+                        <td><span class="svc">Azure Database for PostgreSQL</span> Flexible Server + pgvector</td>
+                        <td><span class="aws">Amazon RDS PostgreSQL</span></td>
+                        <td>Zone-redundant HA, automated backups, Query Performance Insight. pgvector for RAG embeddings. No separate proxy needed — PG Flexible Server handles connection pooling natively (PgBouncer built-in).</td>
+                    </tr>
+                    <tr>
+                        <td><span class="layer-tag">L6</span> Data</td>
+                        <td>Cache</td>
+                        <td><span class="svc">Azure Cache for Redis</span> (Enterprise tier)</td>
+                        <td><span class="aws">Amazon ElastiCache</span></td>
+                        <td>Enterprise tier for Redis 7.x features. Entra ID authentication (no password management). TLS in-transit. Used for @cached_tool results and LiteLLM semantic cache.</td>
+                    </tr>
+                    <tr>
+                        <td><span class="layer-tag">L6</span> Data</td>
+                        <td>Object storage</td>
+                        <td><span class="svc">Azure Blob Storage</span></td>
+                        <td><span class="aws">Amazon S3</span></td>
+                        <td>OPA policy bundles, Jinja2 prompt templates, RAG source documents. Versioning enabled, customer-managed key encryption. Accessed via Managed Identity (no storage keys).</td>
+                    </tr>
+                    <tr>
+                        <td><span class="layer-tag">L6</span> Data</td>
+                        <td>Secrets</td>
+                        <td><span class="svc">Azure Key Vault</span></td>
+                        <td><span class="aws">AWS Secrets Manager</span></td>
+                        <td>JWT_SECRET, HMAC secret, DB credentials, API keys. Automatic rotation via Key Vault rotation policies + Azure Functions. Container Apps access via Managed Identity — zero secrets in env vars.</td>
+                    </tr>
+
+                    <!-- L7 -->
+                    <tr>
+                        <td><span class="layer-tag">L7</span> Infra</td>
+                        <td>Compute</td>
+                        <td><span class="svc">Azure Container Apps</span></td>
+                        <td><span class="aws">AWS Fargate / ECS</span></td>
+                        <td>Serverless containers with KEDA autoscaling. Consumption billing. Built-in Dapr sidecars for service invocation and state. For enterprises requiring K8s: same images deploy to AKS.</td>
+                    </tr>
+                    <tr>
+                        <td><span class="layer-tag">L7</span> Infra</td>
+                        <td>Networking</td>
+                        <td><span class="svc">Azure VNet</span> + <span class="svc">Private Endpoints</span> + <span class="svc">Azure Firewall</span></td>
+                        <td><span class="aws">Cisco Cloud APIC</span> + <span class="aws">AWS VPC</span></td>
+                        <td>Hub-spoke VNet topology. All data services accessed via Private Endpoints (no public IPs). Azure Firewall for L3-L7 inspection. ExpressRoute for on-prem connectivity. NSG microsegmentation for agent → MCP → DB flows.</td>
+                    </tr>
+                    <tr>
+                        <td><span class="layer-tag">L7</span> Infra</td>
+                        <td>IaC</td>
+                        <td><span class="svc">Bicep</span> (or <span class="svc">Terraform AzureRM</span>)</td>
+                        <td><span class="aws">Terraform</span> / <span class="aws">CDK</span></td>
+                        <td>Bicep is Azure-native IaC with first-class support for all services. Alternatively, same Terraform modules with AzureRM provider. State in Blob Storage + Table Storage lock.</td>
+                    </tr>
+                    <tr>
+                        <td><span class="layer-tag">L7</span> Infra</td>
+                        <td>CI/CD</td>
+                        <td><span class="svc">GitHub Actions</span> → <span class="svc">ACR</span> → <span class="svc">ACA deploy</span></td>
+                        <td><span class="aws">GitHub Actions</span> → <span class="aws">ECR</span> → <span class="aws">ECS</span></td>
+                        <td>Docker build → ACR push → ACA revision deploy. Microsoft Defender for Containers scans ACR images. Optional: Azure DevOps Pipelines for approval gates and RBAC.</td>
+                    </tr>
+
+                    <!-- L8 -->
+                    <tr>
+                        <td><span class="layer-tag">L8</span> Models</td>
+                        <td>Primary LLM</td>
+                        <td><span class="svc">Anthropic Claude</span> via <span class="svc">Azure OpenAI Service</span></td>
+                        <td><span class="aws">Claude</span> via <span class="aws">AWS Bedrock</span></td>
+                        <td>Claude Haiku (specialists), Sonnet (default), Opus (synthesis). AOAI Global Deployment for multi-region smart routing. Model access controlled by Azure RBAC + Managed Identity.</td>
+                    </tr>
+                    <tr>
+                        <td><span class="layer-tag">L8</span> Models</td>
+                        <td>Embeddings</td>
+                        <td><span class="svc">AOAI text-embedding-3-large</span></td>
+                        <td><span class="aws">Titan Text Embeddings v2</span></td>
+                        <td>3072-dim vectors (or 1536-dim via text-embedding-3-small). Invoked from knowledge-mcp via AOAI API. Output stored in Azure PG pgvector.</td>
+                    </tr>
+                    <tr>
+                        <td><span class="layer-tag">L8</span> Models</td>
+                        <td>Guardrails</td>
+                        <td><span class="svc">Azure AI Content Safety</span> + <span class="svc">Prompt Shield</span></td>
+                        <td><span class="aws">Bedrock Guardrails</span></td>
+                        <td>Content filters, PII detection, jailbreak/prompt-injection detection, groundedness checks. Applied as content filter configurations on AOAI deployments — every invocation is screened.</td>
+                    </tr>
+                    <tr>
+                        <td><span class="layer-tag">L8</span> Models</td>
+                        <td>Evaluation</td>
+                        <td><span class="svc">Azure AI Foundry Evaluations</span> + custom pytest evals</td>
+                        <td><span class="aws">Bedrock Evaluations</span></td>
+                        <td>AI Foundry provides built-in evaluation metrics (coherence, groundedness, relevance, fluency). Existing pytest eval suite runs against AOAI endpoints unchanged. Results logged to App Insights.</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Key architectural decisions -->
+        <div class="note-box">
+            <strong>Key Architectural Decisions — Azure-Native:</strong><br><br>
+            <strong>1. Entra ID as Unified Identity (No Cognito Equivalent):</strong> Unlike the AWS stack which requires Cognito federation with Entra ID, the Azure stack uses Entra ID natively for everything: user SSO, M2M service auth (Managed Identity), API gateway JWT validation, and Key Vault access. This eliminates an entire identity federation layer, reducing latency by ~200ms per auth flow and removing a class of token-mapping bugs. The platform SDK's <code>auth.py</code> validates Entra ID JWTs with the same RS256 logic — only the JWKS endpoint changes.<br><br>
+            <strong>2. Container Apps over AKS:</strong> Azure Container Apps eliminates Kubernetes cluster management while providing the same serverless container experience as Fargate. KEDA autoscaling handles event-driven scaling (HTTP traffic, queue depth), and built-in Dapr sidecars replace Cloud Map service discovery. For enterprises already on K8s, the same Docker images deploy to AKS with minimal config changes — the agent code is runtime-agnostic.<br><br>
+            <strong>3. Managed Identity Everywhere:</strong> Every Container App uses a system-assigned Managed Identity to access Azure services (Key Vault, Blob Storage, Azure PG, Azure OpenAI). Zero passwords, connection strings, or API keys in environment variables. Key Vault references in ACA secrets resolve at runtime. This is a significant security improvement over the AWS model where IAM role assumption requires additional STS calls.<br><br>
+            <strong>4. Azure OpenAI Service as Unified LLM Layer:</strong> All LLM calls route through Azure OpenAI Service, providing a single billing surface, RBAC-based model access, built-in content safety filters, and Azure Monitor telemetry. AOAI's Global Deployment feature handles multi-region smart routing automatically (vs. manual cross-region inference profiles in Bedrock). PTU (Provisioned Throughput Units) provide guaranteed latency SLAs for production agents.<br><br>
+            <strong>5. Azure PG Flexible Server with Built-in PgBouncer:</strong> Azure Database for PostgreSQL Flexible Server includes a built-in PgBouncer connection pooler, eliminating the need for RDS Proxy or a separate pgBouncer sidecar. Combined with pgvector for RAG embeddings, this keeps the data layer simple: one managed database for relational data, vector search, and LangGraph checkpoints.<br><br>
+            <strong>6. Observability via Azure Monitor + Application Insights:</strong> The OTel SDK exports traces via the Azure Monitor OpenTelemetry Distro, which auto-configures Application Insights with GenAI-specific trace enrichment (LLM call latency, token counts, model versions). Log Analytics provides KQL-powered querying across all services. For enterprises on Dynatrace, the OTel → Dynatrace export path still works unchanged.
+        </div>
+    </body>
+</html>

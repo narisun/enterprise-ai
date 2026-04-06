@@ -19,17 +19,17 @@ from langchain_core.messages import HumanMessage
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
-from platform_sdk import AgentConfig, AgentContext, MCPConfig, configure_logging, get_logger, make_api_key_verifier, setup_telemetry
+from platform_sdk import AgentContext, configure_logging, get_langfuse_callback_handler, make_api_key_verifier, setup_telemetry
 from platform_sdk.testing import TEST_PERSONAS
 from .lifespan import build_rm_orchestrator_with_bridges, orchestrator_lifespan
+from .RmPrepAgentService import RmPrepAgentService
 
 configure_logging()
-_mcp_config = MCPConfig.from_env()
-setup_telemetry(_mcp_config.service_name)
-log = get_logger(__name__)
+_service = RmPrepAgentService()
+setup_telemetry(_service.mcp_config.service_name)
+log = _service.logger
 
 verify_api_key = make_api_key_verifier()
-_agent_config = AgentConfig.from_env()
 
 _PROGRESS_LABELS = {
     "conversation_router":       "Understanding your request...",
@@ -59,7 +59,6 @@ _STRUCTURED_OUTPUT_NODES = {"conversation_router", "synthesize", "refine_brief"}
 _TEST_PERSONAS = TEST_PERSONAS
 
 from platform_sdk.auth import _get_jwt_secret, _DEFAULT_DEV_SECRET
-_ENV        = _mcp_config.environment
 
 # Simple in-memory rate limiter for test token endpoint
 import time as _time
@@ -68,13 +67,9 @@ _TOKEN_RATE_WINDOW = 60.0     # window in seconds
 _token_requests: list[float] = []
 
 
-def _is_dev_env() -> bool:
-    return _ENV in ("local", "dev")
-
-
 def _require_dev_env(endpoint: str) -> None:
     """Raise 403 if we are not in a development environment."""
-    if not _is_dev_env():
+    if not _service.is_dev_env():
         raise HTTPException(
             status_code=403,
             detail=f"{endpoint} is only available in local/dev environments.",
@@ -129,7 +124,7 @@ app = FastAPI(
 
 
 class BriefRequest(BaseModel):
-    prompt: str = Field(..., min_length=5, max_length=_agent_config.max_message_length,
+    prompt: str = Field(..., min_length=5, max_length=_service.agent_config.max_message_length,
                         description="RM's natural language request, e.g. 'Prepare me for my meeting with Acme Manufacturing'")
     rm_id: str = Field(default="RM", max_length=64, description="RM identifier for personalisation and audit")
     session_id: str = Field(default="default", max_length=128,
@@ -278,6 +273,8 @@ async def get_brief_streaming(
                     "data": json.dumps({"message": f"Running as persona: {effective_rm_id}…"}),
                 }
 
+            _lf_handler = get_langfuse_callback_handler()
+            _callbacks = [_lf_handler] if _lf_handler else []
             async for event in orchestrator.astream_events(
                 {
                     "messages": [HumanMessage(content=body.prompt)],
@@ -291,7 +288,8 @@ async def get_brief_streaming(
                 },
                 config={
                     "configurable": {"thread_id": body.session_id},
-                    "recursion_limit": _agent_config.recursion_limit,
+                    "recursion_limit": _service.agent_config.recursion_limit,
+                    "callbacks": _callbacks,
                 },
                 version="v2",
             ):
@@ -454,6 +452,8 @@ async def get_brief_sync(
     """Synchronous brief generation — for testing and non-streaming clients."""
     orchestrator = request.app.state.orchestrator
     try:
+        _lf_handler = get_langfuse_callback_handler()
+        _callbacks = [_lf_handler] if _lf_handler else []
         result = await orchestrator.ainvoke(
             {
                 "messages": [HumanMessage(content=body.prompt)],
@@ -467,7 +467,8 @@ async def get_brief_sync(
             },
             config={
                 "configurable": {"thread_id": body.session_id},
-                "recursion_limit": _agent_config.recursion_limit,
+                "recursion_limit": _service.agent_config.recursion_limit,
+                "callbacks": _callbacks,
             },
         )
         return BriefResponse(
@@ -617,6 +618,8 @@ async def get_brief_with_persona(
             raise HTTPException(status_code=503, detail=f"Failed to connect to MCP servers: {exc}")
 
         try:
+            _lf_handler = get_langfuse_callback_handler()
+            _callbacks = [_lf_handler] if _lf_handler else []
             result = await orchestrator.ainvoke(
                 {
                     "messages":        [HumanMessage(content=body.prompt)],
@@ -628,6 +631,7 @@ async def get_brief_with_persona(
                 config={
                     "configurable": {"thread_id": body.session_id},
                     "recursion_limit": config.recursion_limit,
+                    "callbacks": _callbacks,
                 },
             )
         except Exception as exc:
@@ -647,6 +651,8 @@ async def get_brief_with_persona(
     orchestrator = request.app.state.orchestrator
     config       = request.app.state.config
     try:
+        _lf_handler = get_langfuse_callback_handler()
+        _callbacks = [_lf_handler] if _lf_handler else []
         result = await orchestrator.ainvoke(
             {
                 "messages":        [HumanMessage(content=body.prompt)],
@@ -658,6 +664,7 @@ async def get_brief_with_persona(
             config={
                 "configurable": {"thread_id": body.session_id},
                 "recursion_limit": config.recursion_limit,
+                "callbacks": _callbacks,
             },
         )
         return BriefResponse(

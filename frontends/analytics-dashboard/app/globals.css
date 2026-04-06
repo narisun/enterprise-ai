@@ -1,0 +1,152 @@
+@import "tailwindcss";
+
+/* Dark theme (default) */
+.dark {
+  --color-background: #0f0f14;
+  --color-surface: #18181f;
+  --color-surface-2: #222230;
+  --color-border: #2e2e3e;
+  --color-text: #e8e8f0;
+  --color-text-muted: #8a8aa0;
+  --color-accent: #818cf8;
+  --color-accent-2: #22d3ee;
+  --color-success: #34d399;
+  --color-warning: #fbbf24;
+  --color-danger: #f87171;
+}
+
+/* Light theme */
+.light {
+  --color-background: #f9fafb;
+  --color-surface: #ffffff;
+  --color-surface-2: #f3f4f6;
+  --color-border: #e5e7eb;
+  --color-text: #111827;
+  --color-text-muted: #6b7280;
+  --color-accent: #6366f1;
+  --color-accent-2: #0891b2;
+  --color-success: #10b981;
+  --color-warning: #f59e0b;
+  --color-danger: #ef4444;
+}
+
+/* Theme tokens */
+@theme {
+  --color-background: var(--color-background);
+  --color-surface: var(--color-surface);
+  --color-surface-2: var(--color-surface-2);
+  --color-border: var(--color-border);
+  --color-text: var(--color-text);
+  --color-text-muted: var(--color-text-muted);
+  --color-accent: var(--color-accent);
+  --color-accent-2: var(--color-accent-2);
+  --color-success: var(--color-success);
+  --color-warning: var(--color-warning);
+  --color-danger: var(--color-danger);
+}
+
+/* Base styles */
+
+body {
+  background: var(--color-background);
+  color: var(--color-text);
+  font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Scrollbar */
+
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-muted);
+}
+
+/* Animations */
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-in {
+  animation: fadeIn 250ms ease-out;
+}
+
+@keyframes pulse-subtle {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.animate-pulse-subtle {
+  animation: pulse-subtle 1.5s ease-in-out infinite;
+}
+
+/* Collapsible transitions */
+
+[data-state="open"] .collapsible-content {
+  animation: slideDown 200ms ease-out;
+}
+[data-state="closed"] .collapsible-content {
+  animation: slideUp 200ms ease-out;
+}
+
+@keyframes slideDown {
+  from { height: 0; opacity: 0; }
+  to { height: var(--radix-collapsible-content-height); opacity: 1; }
+}
+@keyframes slideUp {
+  from { height: var(--radix-collapsible-content-height); opacity: 1; }
+  to { height: 0; opacity: 0; }
+}
+
+/* Thinking block scrollbar */
+
+.thinking-scroll-area {
+  scrollbar-width: auto;
+  scrollbar-color: var(--color-accent) var(--color-surface);
+  overflow-y: scroll !important;
+}
+
+.thinking-scroll-area::-webkit-scrollbar {
+  width: 8px;
+  display: block !important;
+}
+.thinking-scroll-area::-webkit-scrollbar-track {
+  background: var(--color-surface);
+  border-radius: 4px;
+}
+.thinking-scroll-area::-webkit-scrollbar-thumb {
+  background: var(--color-accent);
+  border-radius: 4px;
+  min-height: 40px;
+}
+.thinking-scroll-area::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--color-accent) 80%, white);
+}
+
+/* Prose overrides for markdown */
+
+.prose p {
+  margin-bottom: 0.5em;
+  line-height: 1.7;
+}
+
+.prose p:last-child {
+  margin-bottom: 0;
+}
+
+.prose ul, .prose ol {
+  margin-top: 0.25em;
+  margin-bottom: 0.5em;
+}
