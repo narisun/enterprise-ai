@@ -38,7 +38,7 @@ ragas>=0.2.0,<0.3.0
 # HuggingFace datasets still needed for result inspection helpers
 datasets>=2.20.0
 
-# ── Guard pins — keep aligned with agents/rm-prep/requirements.txt ──────────
+# ── Guard pins ────────────────────────────────────────────────────────────────
 # These prevent ragas/datasets transitive deps from upgrading to incompatible versions.
 langchain-core>=0.2.0,<0.3.0
 langchain-openai>=0.1.8,<0.3.0

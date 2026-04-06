@@ -51,7 +51,6 @@ env:
   POSTGRES_PASSWORD:    ${{ secrets.POSTGRES_PASSWORD }}
   REDIS_PASSWORD:       ${{ secrets.REDIS_PASSWORD }}
   ENVIRONMENT:          "local"
-  AGENT_ROLE:           "rm_prep_agent"
 
   DB_HOST:              "localhost"
   DB_PORT:              "5432"
@@ -59,7 +58,6 @@ env:
   DB_PASS:              ${{ secrets.POSTGRES_PASSWORD }}
   DB_NAME:              "ai_memory"
   OPA_URL:              "http://localhost:8181"
-  RM_PREP_URL:          "http://localhost:8003"
 
   # LLM configuration — uses LiteLLM proxy (Azure/OpenAI behind it)
   LITELLM_BASE_URL:     "http://localhost:4000"
@@ -116,7 +114,6 @@ jobs:
           INTERNAL_API_KEY=${{ secrets.INTERNAL_API_KEY }}
           ENVIRONMENT=local
           LITELLM_BASE_URL=http://litellm:4000
-          AGENT_ROLE=rm_prep_agent
           AZURE_API_KEY=${{ secrets.AZURE_API_KEY }}
           AZURE_API_BASE=${{ secrets.AZURE_API_BASE }}
           AZURE_API_VERSION=2024-10-21
@@ -124,11 +121,12 @@ jobs:
 
       - name: Start full stack
         run: |
-          docker compose -f docker-compose.yml -f docker-compose.test.yml \
+          # Start infra first
+          docker compose -f docker-compose.infra.yml -f docs/docker-compose.infra-test.yml up -d
+          # Then start app services
+          docker compose -f docker-compose.yml -f docs/docker-compose.test.yml \
             up --build -d \
-            pgvector redis opa litellm \
-            payments-mcp salesforce-mcp news-search-mcp \
-            rm-prep-agent
+            payments-mcp salesforce-mcp news-search-mcp
 
       - name: Wait for all services
         run: |
@@ -146,14 +144,13 @@ jobs:
 
           # PostgreSQL (use exec since no HTTP endpoint)
           for i in $(seq 1 30); do
-            docker compose exec -T pgvector pg_isready -U admin -d ai_memory && break
+            docker compose -f docker-compose.infra.yml -f docs/docker-compose.infra-test.yml exec -T pgvector pg_isready -U admin -d ai_memory && break
             sleep 2
           done
-          docker compose exec -T pgvector pg_isready -U admin -d ai_memory \
+          docker compose -f docker-compose.infra.yml -f docs/docker-compose.infra-test.yml exec -T pgvector pg_isready -U admin -d ai_memory \
             || { echo "ERROR: PostgreSQL never became ready"; exit 1; }
 
           wait_for_service "http://localhost:4000/health" 30
-          wait_for_service "http://localhost:8003/health" 40
 
       # ── Python setup ──────────────────────────────────────────────────────
       - name: Set up Python
@@ -165,8 +162,6 @@ jobs:
       - name: Install dependencies
         run: |
           pip install -e platform-sdk/ --quiet
-          pip install -r agents/rm-prep/requirements.txt \
-                      -r agents/rm-prep/requirements-test.txt --quiet
           pip install -r tests/requirements.txt --quiet
 
       # ── Run specialist fidelity evals ─────────────────────────────────────
@@ -282,13 +277,13 @@ jobs:
       - name: Collect service logs on failure
         if: failure()
         run: |
-          echo "=== rm-prep-agent logs ==="
-          docker compose logs rm-prep-agent --tail=100
           echo "=== payments-mcp logs ==="
-          docker compose logs payments-mcp --tail=50
+          docker compose -f docker-compose.yml -f docs/docker-compose.test.yml logs payments-mcp --tail=50
           echo "=== litellm logs ==="
-          docker compose logs litellm --tail=50
+          docker compose -f docker-compose.infra.yml -f docs/docker-compose.infra-test.yml logs litellm --tail=50
 
       - name: Tear down
         if: always()
-        run: docker compose -f docker-compose.yml -f docker-compose.test.yml down -v
+        run: |
+          docker compose -f docker-compose.yml -f docs/docker-compose.test.yml down
+          docker compose -f docker-compose.infra.yml -f docs/docker-compose.infra-test.yml down -v

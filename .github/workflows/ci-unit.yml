@@ -40,8 +40,6 @@ jobs:
       - name: Install test dependencies
         run: |
           pip install -r tests/requirements.txt --quiet
-          pip install -r agents/rm-prep/requirements.txt \
-                      -r agents/rm-prep/requirements-test.txt --quiet
 
       - name: Run unit tests
         env:
@@ -57,7 +55,6 @@ jobs:
             --color=yes \
             --junit-xml=test-results/unit-py${{ matrix.python-version }}.xml \
             --cov=platform_sdk \
-            --cov=agents/rm-prep/src \
             --cov-report=xml:test-results/coverage-py${{ matrix.python-version }}.xml \
             --cov-report=term-missing \
             --cov-fail-under=80 \

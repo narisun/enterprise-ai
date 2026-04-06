@@ -14,7 +14,7 @@ pytestmark = [pytest.mark.integration, pytest.mark.asyncio(loop_scope="session")
 
 _OPA_PATH = "/v1/data/mcp/tools/allow"
 
-_AUTHORIZED_AGENT = "rm_prep_agent"
+_AUTHORIZED_AGENT = "analytics_agent"
 _UNAUTHORIZED_AGENT = "rogue_agent"
 _VALID_SESSION = "550e8400-e29b-41d4-a716-446655440000"
 _INVALID_SESSION = "not-a-uuid"
@@ -53,7 +53,7 @@ class TestAuthorizedAgent:
         assert await _decide(opa_client, "search_company_news", _AUTHORIZED_AGENT) is True
 
     async def test_all_whitelisted_agents_allowed(self, opa_client):
-        for role in ["commercial_banking_agent", "data_analyst_agent", "compliance_agent", "rm_prep_agent"]:
+        for role in ["commercial_banking_agent", "data_analyst_agent", "compliance_agent", "analytics_agent"]:
             result = await _decide(opa_client, "get_payment_summary", role)
             assert result is True, f"Expected allow for role={role}"
 

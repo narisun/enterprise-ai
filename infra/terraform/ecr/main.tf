@@ -41,7 +41,6 @@ locals {
   # One entry per Dockerfile in the monorepo
   repositories = [
     "ai-agents",
-    "rm-prep-agent",
     "data-mcp",
     "payments-mcp",
     "salesforce-mcp",

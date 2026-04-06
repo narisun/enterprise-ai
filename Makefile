@@ -1,7 +1,8 @@
 # ============================================================
 # enterprise-ai — Developer Commands
 # ============================================================
-.PHONY: help dev-up dev-test-up dev-down dev-reset dev-restart dev-logs dev-status \
+.PHONY: help infra-up infra-down infra-reset infra-status infra-logs \
+        dev-up dev-test-up dev-down dev-reset dev-restart dev-logs dev-status \
         test test-unit test-agents test-mcp test-policies \
         test-integration test-evals test-evals-fidelity test-evals-synthesis \
         test-evals-faithfulness test-all test-all-unit \
@@ -32,78 +33,140 @@ help:  ## Show available commands
 	  awk 'BEGIN {FS = ":.*##"}; {printf "  \033[36m%-22s\033[0m %s\n", $$1, $$2}'
 
 # ---- Local Development (Docker Compose) --------------------
+#
+# Two-tier architecture:
+#   INFRA  = databases, caches, proxies, observability, policy engine
+#            Started once with `make infra-up`, left running across dev cycles.
+#   APP    = agents, MCP tools, frontends — rebuilt frequently.
+#
+# First-time setup:
+#   make infra-up      # start infrastructure (once)
+#   make dev-test-up   # start app services with test data
+#
+# Day-to-day:
+#   make dev-reset     # tear down + restart app services only
 
-# Both compose files used consistently everywhere — prevents partial stack
-# scenarios where services defined in the test overlay are missed.
-COMPOSE_BASE := docker compose -f docker-compose.yml
-COMPOSE_TEST := docker compose -f docker-compose.yml -f docker-compose.test.yml
+COMPOSE_INFRA      := docker compose -f docker-compose.infra.yml
+COMPOSE_INFRA_TEST := docker compose -f docker-compose.infra.yml -f docs/docker-compose.infra-test.yml
+COMPOSE_BASE       := docker compose -f docker-compose.yml
+COMPOSE_TEST       := docker compose -f docker-compose.yml -f docs/docker-compose.test.yml
 
-dev-up: ## Start the stack without test fixtures (prod-schema only)
+# ---- Infrastructure targets ----
+
+infra-up: ## Start infrastructure (no test data — prod schema only)
 	@echo "→ Checking for .env file..."
 	@test -f .env || (echo "ERROR: .env not found. Run: cp .env.example .env" && exit 1)
+	$(COMPOSE_INFRA) up -d
+	@echo ""
+	@echo "✅ Infrastructure is running (no test data):"
+	@echo "   🗄  PostgreSQL     → localhost:5432"
+	@echo "   🔀 LiteLLM Proxy  → http://localhost:4000"
+	@echo "   📊 LangFuse       → http://localhost:3001"
+	@echo "   📡 OTel Collector  → http://localhost:4318"
+	@echo "   🛡  OPA            → http://localhost:8181"
+	@echo ""
+	@echo "   Run 'make dev-up' to start app services."
+
+infra-test-up: ## Start infrastructure WITH Salesforce + bankdw test data (recommended for local dev)
+	@echo "→ Checking for .env file..."
+	@test -f .env || (echo "ERROR: .env not found. Run: cp .env.example .env" && exit 1)
+	$(COMPOSE_INFRA_TEST) up -d
+	@echo ""
+	@echo "✅ Infrastructure is running with test fixtures:"
+	@echo "   salesforce.* and bankdw.* schemas seeded from testdata/ CSVs."
+	@echo ""
+	@echo "   🗄  PostgreSQL     → localhost:5432"
+	@echo "   🔀 LiteLLM Proxy  → http://localhost:4000"
+	@echo "   📊 LangFuse       → http://localhost:3001"
+	@echo "   📡 OTel Collector  → http://localhost:4318"
+	@echo "   🛡  OPA            → http://localhost:8181"
+	@echo ""
+	@echo "   Run 'make dev-test-up' to start app services."
+
+infra-down: ## Stop infrastructure services (preserves volumes)
+	$(COMPOSE_INFRA_TEST) down
+
+infra-reset: ## Wipe infrastructure volumes and restart with test data
+	@echo "→ Stopping infrastructure and removing volumes..."
+	$(COMPOSE_INFRA_TEST) down -v
+	@echo "→ Pulling latest LangFuse image (needed for headless key init)..."
+	$(COMPOSE_INFRA_TEST) pull langfuse || true
+	@echo "→ Restarting infrastructure with test data..."
+	$(COMPOSE_INFRA_TEST) up -d
+	@echo ""
+	@echo "✅ Infrastructure reset complete (with test fixtures)."
+
+infra-status: ## Show infrastructure container health
+	$(COMPOSE_INFRA_TEST) ps
+
+infra-logs: ## Follow logs from infrastructure services
+	$(COMPOSE_INFRA_TEST) logs -f
+
+# ---- Application targets ----
+
+dev-up: ## Start app services without test fixtures (requires infra-up first)
+	@echo "→ Checking for .env file..."
+	@test -f .env || (echo "ERROR: .env not found. Run: cp .env.example .env" && exit 1)
+	@echo "→ Verifying infrastructure is running..."
+	@docker inspect ai-pgvector --format='{{.State.Health.Status}}' 2>/dev/null | grep -q healthy \
+	  || (echo "ERROR: Infrastructure not running. Run 'make infra-up' first." && exit 1)
 	$(COMPOSE_BASE) up --build -d
 	@echo ""
-	@echo "✅ Local stack is running (no test fixtures — salesforce/bankdw schemas absent)."
+	@echo "✅ App services are running (no test fixtures)."
 	@echo "   Use 'make dev-test-up' to include Salesforce + bankdw test data."
 	@echo ""
 	@echo "   🌐 Chat UI        → http://localhost:8501"
 	@echo "   🤖 Agent API      → http://localhost:8000"
-	@echo "   📊 Analytics UI   → http://localhost:3002"
 	@echo "   📈 Analytics API  → http://localhost:8086"
-	@echo "   🔀 LiteLLM Proxy  → http://localhost:4000"
+	@echo "   📊 Analytics Dash → http://localhost:3003"
 	@echo "   🛠  Data MCP       → http://localhost:8080"
-	@echo "   📡 OTel Collector  → http://localhost:4318"
-	@echo "   📊 LangFuse       → http://localhost:3001"
-	@echo "   🗄  PostgreSQL     → localhost:5432"
 	@echo ""
 	@echo "   Run 'make dev-logs' to follow all logs."
 
-dev-test-up: ## Start the full stack WITH Salesforce + bankdw test fixtures (use for local dev)
+dev-test-up: ## Start app services WITH Salesforce + bankdw test fixtures (use for local dev)
 	@echo "→ Checking for .env file..."
 	@test -f .env || (echo "ERROR: .env not found. Run: cp .env.example .env" && exit 1)
+	@echo "→ Verifying infrastructure is running..."
+	@docker inspect ai-pgvector --format='{{.State.Health.Status}}' 2>/dev/null | grep -q healthy \
+	  || (echo "ERROR: Infrastructure not running. Run 'make infra-up' first." && exit 1)
 	$(COMPOSE_TEST) up --build -d
 	@echo ""
-	@echo "✅ Local stack is running with test fixtures:"
+	@echo "✅ App services running with test fixtures:"
 	@echo "   salesforce.* and bankdw.* schemas seeded from testdata/ CSVs."
 	@echo ""
 	@echo "   🌐 Chat UI        → http://localhost:8501  (SHOW_TEST_LOGIN=true)"
 	@echo "   🤖 Agent API      → http://localhost:8000"
-	@echo "   📊 Analytics UI   → http://localhost:3002"
 	@echo "   📈 Analytics API  → http://localhost:8086"
-	@echo "   🔀 LiteLLM Proxy  → http://localhost:4000"
+	@echo "   📊 Analytics Dash → http://localhost:3003"
 	@echo "   🛠  Data MCP       → http://localhost:8080"
-	@echo "   📡 OTel Collector  → http://localhost:4318"
-	@echo "   📊 LangFuse       → http://localhost:3001"
-	@echo "   🗄  PostgreSQL     → localhost:5432"
 	@echo ""
 	@echo "   Run 'make dev-logs' to follow all logs."
 
-dev-down: ## Stop and remove all containers (works for both dev-up and dev-test-up)
+dev-down: ## Stop app services (infrastructure keeps running)
 	$(COMPOSE_TEST) down
 
-dev-reset: ## Wipe the pgdata volume and restart with test fixtures (required after first dev-up)
-	@echo "→ Stopping containers and removing pgdata volume..."
-	$(COMPOSE_TEST) down -v
+dev-reset: ## Tear down app services and restart with test fixtures (infra untouched)
+	@echo "→ Verifying infrastructure is running..."
+	@docker inspect ai-pgvector --format='{{.State.Health.Status}}' 2>/dev/null | grep -q healthy \
+	  || (echo "ERROR: Infrastructure not running. Run 'make infra-up' first." && exit 1)
+	@echo "→ Stopping app containers..."
+	$(COMPOSE_TEST) down
 	@echo "→ Rebuilding and starting with test fixtures..."
 	$(COMPOSE_TEST) up --build -d
 	@echo ""
-	@echo "✅ Fresh stack with test fixtures:"
-	@echo "   salesforce.* and bankdw.* schemas seeded from testdata/ CSVs."
-	@echo ""
+	@echo "✅ App services restarted with test fixtures."
 	@echo "   🌐 Chat UI  → http://localhost:8501  (SHOW_TEST_LOGIN=true)"
-	@echo "   🗄  PostgreSQL → localhost:5432"
 
-dev-restart: ## Restart all containers
+dev-restart: ## Restart app containers (no rebuild)
 	$(COMPOSE_TEST) restart
 
-# Explicitly specify compose files so test-overlay service logs are always included.
-dev-logs: ## Follow logs from all services
+dev-logs: ## Follow logs from app services
 	$(COMPOSE_TEST) logs -f
 
 ui-logs: ## Follow logs from the Chat UI only
 	$(COMPOSE_TEST) logs -f chat-ui
 
-dev-status: ## Show container health status
+dev-status: ## Show app container health status
 	$(COMPOSE_TEST) ps
 
 # ---- Dependency Installation ----------------------------------------
@@ -118,9 +181,6 @@ install-all-deps: sdk-install ## Install ALL service + test dependencies (needed
 	@echo "→ Installing agents deps..."
 	$(PIP) install -r agents/requirements.txt \
 	               -r agents/requirements-test.txt --quiet
-	@echo "→ Installing agents/rm-prep deps..."
-	$(PIP) install -r agents/rm-prep/requirements.txt \
-	               -r agents/rm-prep/requirements-test.txt --quiet
 	@echo "→ Installing agents/analytics-agent deps..."
 	$(PIP) install -r agents/analytics-agent/requirements.txt --quiet
 	@echo "→ Installing data-mcp deps..."
@@ -153,7 +213,6 @@ test-all-unit: install-all-deps ## Run ALL unit tests across every service in on
 	  --junit-xml=test-results/all-unit.xml \
 	  --cov=platform_sdk \
 	  --cov=agents/src \
-	  --cov=agents/rm-prep/src \
 	  --cov=tools/data-mcp/src \
 	  --cov=tools/payments-mcp/src \
 	  --cov=tools/salesforce-mcp/src \
@@ -164,8 +223,6 @@ test-all-unit: install-all-deps ## Run ALL unit tests across every service in on
 test-unit: sdk-install ## Run Layer 1 unit tests (auth, cache, brief rendering — no Docker)
 	@echo "→ Installing test + agent dependencies..."
 	$(PIP) install -r tests/requirements.txt --quiet
-	$(PIP) install -r agents/rm-prep/requirements.txt \
-	               -r agents/rm-prep/requirements-test.txt --quiet
 	@echo "→ Running unit tests..."
 	@mkdir -p test-results
 	$(PYTEST) tests/unit/ -m unit -v --tb=short --color=yes \
@@ -212,8 +269,6 @@ test-integration: sdk-install ## Run Layer 2 integration tests (requires dev-tes
 test-evals: sdk-install ## Run Layer 3 LLM-in-the-loop evals (requires full stack + LLM creds)
 	@echo "→ Installing test dependencies..."
 	$(PIP) install -r tests/requirements.txt --quiet
-	$(PIP) install -r agents/rm-prep/requirements.txt \
-	               -r agents/rm-prep/requirements-test.txt --quiet
 	@echo "→ Running eval tests..."
 	@echo "   (requires 'make dev-test-up' + LLM credentials)"
 	@mkdir -p test-results
@@ -223,8 +278,6 @@ test-evals: sdk-install ## Run Layer 3 LLM-in-the-loop evals (requires full stac
 
 test-evals-fidelity: sdk-install ## Run specialist fidelity evals only (faster)
 	$(PIP) install -r tests/requirements.txt --quiet
-	$(PIP) install -r agents/rm-prep/requirements.txt \
-	               -r agents/rm-prep/requirements-test.txt --quiet
 	@mkdir -p test-results
 	$(PYTEST) tests/evals/test_specialist_fidelity.py -m eval -v --tb=short --timeout=120 \
 	  --junit-xml=test-results/evals-fidelity.xml
@@ -262,7 +315,6 @@ format: sdk-install ## Auto-format all Python source
 
 build: ## Build all Docker images
 	docker build -f agents/Dockerfile -t enterprise-ai/ai-agents:local .
-	docker build -f agents/rm-prep/Dockerfile -t enterprise-ai/rm-prep-agent:local .
 	docker build -f agents/analytics-agent/Dockerfile -t enterprise-ai/analytics-agent:local .
 	docker build -f tools/data-mcp/Dockerfile -t enterprise-ai/data-mcp:local .
 
@@ -275,7 +327,7 @@ test-analytics: sdk-install ## Run analytics-agent unit tests
 	  --junit-xml=test-results/analytics-agent.xml
 
 analytics-logs: ## Follow logs from analytics services only
-	$(COMPOSE_TEST) logs -f analytics-agent analytics-ui analytics-dashboard
+	$(COMPOSE_TEST) logs -f analytics-agent analytics-dashboard
 
 # ---- Kubernetes (Skaffold) ---------------------------------
 

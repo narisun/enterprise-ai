@@ -1,9 +1,8 @@
 # ============================================================
 # CI — Integration Tests
 #
-# Starts the full Docker Compose test stack (DB + OPA + MCP servers
-# + rm-prep agent), waits for health checks, then runs the
-# integration test suite.
+# Starts the full Docker Compose test stack (DB + OPA + MCP servers),
+# waits for health checks, then runs the integration test suite.
 #
 # Trigger:
 #   - Push to main, develop, release/*
@@ -32,7 +31,6 @@ env:
   POSTGRES_PASSWORD:      "ci-integration-pg-password"
   REDIS_PASSWORD:         "ci-integration-redis-password"
   ENVIRONMENT:            "local"
-  AGENT_ROLE:             "rm_prep_agent"
 
   # Service URLs (docker-compose publishes to localhost on the runner)
   DB_HOST:                "localhost"
@@ -41,7 +39,6 @@ env:
   DB_PASS:                "ci-integration-pg-password"
   DB_NAME:                "ai_memory"
   OPA_URL:                "http://localhost:8181"
-  RM_PREP_URL:            "http://localhost:8003"
   PAYMENTS_MCP_URL:       "http://localhost:8082"
 
 jobs:
@@ -65,24 +62,22 @@ jobs:
           INTERNAL_API_KEY=ci-integration-api-key
           ENVIRONMENT=local
           LITELLM_BASE_URL=http://litellm:4000
-          AGENT_ROLE=rm_prep_agent
           EOF
 
       - name: Start infrastructure (DB + OPA + Redis)
         run: |
-          docker compose -f docker-compose.yml -f docker-compose.test.yml \
-            up --build -d \
-            pgvector redis opa
+          # Start infra first
+          docker compose -f docker-compose.infra.yml -f docs/docker-compose.infra-test.yml up -d
 
       - name: Wait for PostgreSQL
         run: |
           for i in $(seq 1 30); do
-            docker compose exec -T pgvector pg_isready -U admin -d ai_memory && break
+            docker compose -f docker-compose.infra.yml -f docs/docker-compose.infra-test.yml exec -T pgvector pg_isready -U admin -d ai_memory && break
             echo "Waiting for PostgreSQL... ($i/30)"
             sleep 2
           done
           # Hard fail if PostgreSQL never became ready
-          docker compose exec -T pgvector pg_isready -U admin -d ai_memory \
+          docker compose -f docker-compose.infra.yml -f docs/docker-compose.infra-test.yml exec -T pgvector pg_isready -U admin -d ai_memory \
             || { echo "ERROR: PostgreSQL never became ready"; exit 1; }
 
       - name: Wait for OPA
@@ -97,15 +92,10 @@ jobs:
 
       - name: Start MCP servers
         run: |
-          docker compose -f docker-compose.yml -f docker-compose.test.yml \
+          # Start app services (infrastructure already running)
+          docker compose -f docker-compose.yml -f docs/docker-compose.test.yml \
             up --build -d \
             payments-mcp salesforce-mcp news-search-mcp
-
-      - name: Start rm-prep agent
-        run: |
-          docker compose -f docker-compose.yml -f docker-compose.test.yml \
-            up --build -d \
-            rm-prep-agent
 
       - name: Wait for MCP servers to be healthy
         run: |
@@ -123,16 +113,6 @@ jobs:
           wait_for_service "http://localhost:8082/health"
           wait_for_service "http://localhost:8081/health"
           wait_for_service "http://localhost:8083/health"
-
-      - name: Wait for rm-prep-agent to be healthy
-        run: |
-          for i in $(seq 1 30); do
-            curl -sf http://localhost:8003/health && break || true
-            echo "Waiting for rm-prep-agent... ($i/30)"
-            sleep 3
-          done
-          curl -sf http://localhost:8003/health \
-            || { echo "ERROR: rm-prep-agent never became healthy"; exit 1; }
 
       # ── Run tests ─────────────────────────────────────────────────────────
       - name: Set up Python
@@ -161,27 +141,18 @@ jobs:
             -v --tb=short --timeout=20 --color=yes \
             --junit-xml=test-results/integration-opa.xml
 
-      - name: Run integration tests — rm-prep server
-        run: |
-          python -m pytest tests/integration/test_rm_prep_server.py \
-            -m integration \
-            -v --tb=short --timeout=30 --color=yes \
-            --junit-xml=test-results/integration-rm-prep.xml
-
       # ── Collect logs on failure ────────────────────────────────────────────
       - name: Collect service logs on failure
         if: failure()
         run: |
           echo "=== pgvector logs ==="
-          docker compose logs pgvector --tail=50
+          docker compose -f docker-compose.infra.yml -f docs/docker-compose.infra-test.yml logs pgvector --tail=50
           echo "=== payments-mcp logs ==="
-          docker compose logs payments-mcp --tail=100
+          docker compose -f docker-compose.yml -f docs/docker-compose.test.yml logs payments-mcp --tail=100
           echo "=== salesforce-mcp logs ==="
-          docker compose logs salesforce-mcp --tail=50
-          echo "=== rm-prep-agent logs ==="
-          docker compose logs rm-prep-agent --tail=100
+          docker compose -f docker-compose.yml -f docs/docker-compose.test.yml logs salesforce-mcp --tail=50
           echo "=== opa logs ==="
-          docker compose logs opa --tail=50
+          docker compose -f docker-compose.infra.yml -f docs/docker-compose.infra-test.yml logs opa --tail=50
 
       - name: Upload test results
         if: always()
@@ -192,4 +163,6 @@ jobs:
 
       - name: Tear down
         if: always()
-        run: docker compose -f docker-compose.yml -f docker-compose.test.yml down -v
+        run: |
+          docker compose -f docker-compose.yml -f docs/docker-compose.test.yml down
+          docker compose -f docker-compose.infra.yml -f docs/docker-compose.infra-test.yml down -v

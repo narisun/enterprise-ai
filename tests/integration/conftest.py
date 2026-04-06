@@ -5,11 +5,10 @@ Services expected (from docker-compose.test.yml):
   pgvector    → DB_HOST:DB_PORT  (default: localhost:5432)
   opa         → OPA_URL          (default: http://localhost:8181)
   payments-mcp→ PAYMENTS_MCP_URL (default: http://localhost:8082)
-  rm-prep     → RM_PREP_URL      (default: http://localhost:8003)
 
 Environment variables (match .env.example):
   DB_HOST, DB_PORT, DB_USER, DB_PASS, DB_NAME
-  OPA_URL, RM_PREP_URL, PAYMENTS_MCP_URL
+  OPA_URL, PAYMENTS_MCP_URL
   INTERNAL_API_KEY, JWT_SECRET
 """
 import os
@@ -40,11 +39,6 @@ def opa_url() -> str:
 
 
 @pytest.fixture(scope="session")
-def rm_prep_url() -> str:
-    return os.environ.get("RM_PREP_URL", "http://localhost:8003")
-
-
-@pytest.fixture(scope="session")
 def api_key() -> str:
     return os.environ.get("INTERNAL_API_KEY", "test-key")
 
@@ -68,13 +62,6 @@ async def db_pool(db_dsn):
 @pytest_asyncio.fixture(scope="session", loop_scope="session")
 async def opa_client(opa_url):
     async with httpx.AsyncClient(base_url=opa_url, timeout=10.0) as client:
-        yield client
-
-
-@pytest_asyncio.fixture(scope="session", loop_scope="session")
-async def rm_prep_client(rm_prep_url, api_key):
-    headers = {"Authorization": f"Bearer {api_key}"}
-    async with httpx.AsyncClient(base_url=rm_prep_url, headers=headers, timeout=120.0) as client:
         yield client
 
 

@@ -106,16 +106,6 @@ jobs:
           cache-from: type=registry,ref=${{ steps.ecr-login.outputs.registry }}/enterprise-ai/ai-agents:cache
           cache-to:   type=registry,ref=${{ steps.ecr-login.outputs.registry }}/enterprise-ai/ai-agents:cache,mode=max
 
-      - name: Build and push — rm-prep-agent
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: agents/rm-prep/Dockerfile
-          push: true
-          tags: ${{ steps.ecr-login.outputs.registry }}/enterprise-ai/rm-prep-agent:${{ steps.meta.outputs.image_tag }}
-          cache-from: type=registry,ref=${{ steps.ecr-login.outputs.registry }}/enterprise-ai/rm-prep-agent:cache
-          cache-to:   type=registry,ref=${{ steps.ecr-login.outputs.registry }}/enterprise-ai/rm-prep-agent:cache,mode=max
-
       - name: Build and push — data-mcp
         uses: docker/build-push-action@v5
         with:

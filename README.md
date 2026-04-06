@@ -11,11 +11,10 @@ Enterprise AI is an agentic platform for regulated financial-services workflows.
 
 This repository currently includes:
 
-- `rm-prep-agent`: builds client meeting briefs from CRM, payments, and news
-- `portfolio-watch-agent`: scans a book of business and produces a verified risk report
 - `ai-agents`: a generic chat agent backed by a secure SQL MCP server
-- `agent-ui`: the React frontend for the RM Prep and Portfolio Watch agents
 - `chat-ui`: a Chainlit frontend for the generic chat agent
+- `analytics-agent`: analytics and insights agent backed by secure data sources
+- `analytics-dashboard`: dashboarding and visualization frontend
 
 ## Contents
 
@@ -35,16 +34,15 @@ This repository currently includes:
 
 | Service | Purpose | Default local URL |
 |---|---|---|
-| `rm-prep-agent` | Generates pre-meeting briefs from CRM, payments, and news | `http://localhost:8003` |
-| `portfolio-watch-agent` | Produces portfolio monitoring reports with generator/evaluator verification | `http://localhost:8004` |
 | `ai-agents` | Generic secure chat agent for SQL-backed workflows | `http://localhost:8000` |
+| `analytics-agent` | Analytics and insights agent | `http://localhost:8005` |
 
 ### Main frontends
 
 | Frontend | Purpose | Default local URL |
 |---|---|---|
-| `agent-ui` | React UI for RM Prep and Portfolio Watch | `http://localhost:3000` |
 | `chat-ui` | Chainlit UI for the generic chat agent | `http://localhost:8501` |
+| `analytics-dashboard` | Dashboard and visualization frontend | `http://localhost:3001` |
 
 ### MCP tool servers
 
@@ -109,46 +107,30 @@ make sdk-install
 
 This creates `.venv/` and installs `platform-sdk` in editable mode.
 
-### 3. Start the full local stack
+### 3. Start infrastructure (once)
+
+```bash
+make infra-test-up
+```
+
+This starts the long-lived infrastructure services (PostgreSQL, Redis, LiteLLM, LangFuse, OPA, OTel) with test data. You only need to run this once — infrastructure survives across `dev-reset` cycles.
+
+### 4. Start application services
 
 ```bash
 make dev-test-up
 ```
 
-Use `make dev-test-up` for the recommended local setup. It starts the full stack and seeds:
+This builds and starts agents, MCP tools, and frontends. Use `make dev-up` instead if you don't need CRM/payments test fixtures.
 
-- `salesforce.*` test CRM schema
-- `bankdw.*` test payments schema
-- RM Prep persona-testing support
-
-If you only want the generic chat path without CRM and payments fixtures:
+### 5. Watch logs if something looks stuck
 
 ```bash
-make dev-up
-```
-
-### 4. Watch logs if something looks stuck
-
-```bash
-make dev-logs
+make dev-logs       # app service logs
+make infra-logs     # infrastructure logs
 ```
 
 ## Verify It Works
-
-### Fastest path
-
-1. Open [http://localhost:3000](http://localhost:3000)
-2. Select the RM Prep worker
-3. Enter a company name such as `Microsoft Corp.` or `Ford Motor Company`
-4. Run the workflow
-5. Confirm you receive a generated markdown brief
-
-### Portfolio Watch path
-
-1. Open [http://localhost:3000](http://localhost:3000)
-2. Select the Portfolio Watch worker
-3. Run the default scan
-4. Confirm you receive a report plus fact-check status updates
 
 ### Generic chat path
 
@@ -160,19 +142,17 @@ make dev-logs
 
 ```bash
 curl http://localhost:8000/health
-curl http://localhost:8003/health
-curl http://localhost:8004/health
+curl http://localhost:8005/health
 ```
 
 ## Local Endpoints
 
 | Interface | URL | Notes |
 |---|---|---|
-| Agent UI | `http://localhost:3000` | React UI for RM Prep and Portfolio Watch |
 | Chat UI | `http://localhost:8501` | Chainlit UI for the generic chat agent |
+| Analytics Dashboard | `http://localhost:3001` | Analytics and visualization frontend |
 | Generic Agent API | `http://localhost:8000` | FastAPI service for `ai-agents` |
-| RM Prep Agent API | `http://localhost:8003` | FastAPI service for brief generation |
-| Portfolio Watch API | `http://localhost:8004` | FastAPI service for portfolio reports |
+| Analytics Agent API | `http://localhost:8005` | FastAPI service for `analytics-agent` |
 | LiteLLM Proxy | `http://localhost:4000` | Shared model routing layer |
 | OPA | `http://localhost:8181` | Policy engine |
 | Data MCP | `http://localhost:8080` | Generic secure SQL |
@@ -185,12 +165,17 @@ curl http://localhost:8004/health
 
 | Command | What it does |
 |---|---|
-| `make dev-up` | Start the stack without CRM/payments test fixtures |
-| `make dev-test-up` | Start the full stack with seeded CRM and payments data |
-| `make dev-down` | Stop all containers |
-| `make dev-reset` | Reset the DB volume and restart with test fixtures |
-| `make dev-logs` | Follow all container logs |
-| `make dev-status` | Show container and health status |
+| `make infra-up` | Start infrastructure without test data |
+| `make infra-test-up` | Start infrastructure with CRM/payments test data |
+| `make infra-down` | Stop infrastructure (preserves volumes) |
+| `make infra-reset` | Wipe infrastructure volumes and restart with test data |
+| `make infra-logs` | Follow infrastructure logs |
+| `make dev-up` | Start app services without test fixtures |
+| `make dev-test-up` | Start app services with test config |
+| `make dev-down` | Stop app services (infrastructure keeps running) |
+| `make dev-reset` | Tear down and restart app services |
+| `make dev-logs` | Follow app service logs |
+| `make dev-status` | Show app container health status |
 | `make test` | Run fast local checks: unit tests + OPA policy tests |
 | `make test-unit` | Run unit tests only |
 | `make test-integration` | Run integration tests against the Docker stack |
@@ -219,7 +204,7 @@ Browser / API Client
 
 Cross-cutting concerns (applied at every layer)
   └─> platform-sdk   — AgentContext propagation, OPA checks, cache helpers, telemetry
-  └─> OPA            — fail-closed policy evaluation (tool_auth.rego · rm_prep_authz.rego)
+  └─> OPA            — fail-closed policy evaluation (authz.rego)
   └─> Redis          — tool-result cache, rate-limit counters, session state
   └─> OpenTelemetry  — distributed traces and spans → Dynatrace APM
 ```
@@ -268,32 +253,7 @@ All agents follow a two-tier pattern: an **orchestrator** drives the workflow, a
 | Agent | Orchestrator pattern | Specialist nodes | MCP tools called |
 |---|---|---|---|
 | `ai-agents` | ReAct tool-call loop | Single node per tool call | `data-mcp` |
-| `rm-prep-agent` | Deterministic `StateGraph` | `gather_crm`, `gather_payments`, `gather_news` (run in parallel) | `salesforce-mcp`, `payments-mcp`, `news-search-mcp` |
-| `portfolio-watch-agent` | Generator / evaluator loop | `gather_data`, `generate_report`, `evaluate_report` | `data-mcp`, `news-search-mcp` |
-
-### RM Prep flow
-
-```text
-conversation_router
-  -> route (new_task)
-  -> gather_crm ─┐
-  -> gather_payments ─┤ (parallel)
-  -> gather_news ─────┘
-  -> synthesize
-  -> format_brief
-
-Multi-turn branches:
-  conversation_router -> conversational_responder   (follow_up)
-  conversation_router -> refine_brief -> format_brief (refinement)
-  conversation_router -> clarify_intent              (clarification)
-```
-
-Why this matters:
-
-- CRM, payments, and news run in parallel
-- the brief always checks the required domains
-- the output shape is predictable
-- multi-turn conversation allows follow-up questions, brief refinement, and clarification without restarting the workflow
+| `analytics-agent` | ReAct tool-call loop | Single node per tool call | `data-mcp` |
 
 ### Security model
 
@@ -378,11 +338,10 @@ Focus:
 enterprise-ai/
 ├── agents/
 │   ├── src/                  # Generic chat agent service
-│   ├── rm-prep/              # RM Prep agent (StateGraph, multi-turn)
-│   └── portfolio-watch/      # Portfolio Watch agent (generator/evaluator)
+│   └── analytics/            # Analytics agent service
 ├── frontends/
-│   ├── agent-ui/             # React frontend (Vite + Tailwind)
-│   └── chat-ui/              # Chainlit frontend
+│   ├── chat-ui/              # Chainlit frontend
+│   └── analytics-dashboard/  # Analytics visualization frontend
 ├── tools/
 │   ├── data-mcp/             # Secure SQL MCP
 │   ├── salesforce-mcp/       # CRM MCP
@@ -395,8 +354,10 @@ enterprise-ai/
 ├── testdata/                 # Synthetic CRM and payments fixtures
 ├── .github/workflows/        # CI: unit, integration, evals, deploy
 ├── infra/terraform/          # Terraform modules (RDS, ECS, networking)
-├── docker-compose.yml
-├── docker-compose.test.yml
+├── docker-compose.infra.yml             # Infrastructure services (DB, Redis, LiteLLM, LangFuse, OPA, OTel)
+├── docker-compose.yml                   # Application services (agents, MCP tools, frontends)
+├── docs/docker-compose.infra-test.yml   # Test data overlay for infrastructure
+├── docs/docker-compose.test.yml         # Test config overlay for app services
 └── Makefile
 ```
 
@@ -405,9 +366,11 @@ enterprise-ai/
 If the stack is not behaving as expected:
 
 ```bash
-make dev-status
-make dev-logs
-make dev-reset
+make infra-status    # check infrastructure health
+make dev-status      # check app service health
+make dev-logs        # follow app logs
+make infra-logs      # follow infrastructure logs
+make dev-reset       # restart app services (infra untouched)
 ```
 
 Useful checks:
@@ -422,7 +385,6 @@ For deeper troubleshooting, see [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
 ## Further Reading
 
 - [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md) for adding new agents and MCP servers
-- [RM_PREP_AGENT_ARCHITECTURE.md](RM_PREP_AGENT_ARCHITECTURE.md) for RM Prep design details
 - [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for common issues and recovery steps
 - [architecture.html](architecture.html) for an interactive layered architecture diagram
 - [`docs/`](docs/) for additional architecture and design notes

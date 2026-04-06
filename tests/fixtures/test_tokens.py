@@ -160,7 +160,7 @@ def get_token(persona_name: str, ttl_seconds: int = 3600) -> str:
     claims.update({
         "iat": now,
         "exp": now + ttl_seconds,
-        "iss": "rm-prep-test",
+        "iss": "analytics-test",
     })
     return jwt.encode(claims, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
@@ -174,7 +174,7 @@ def get_expired_token(persona_name: str = "alice_rm") -> str:
 
     claims = dict(PERSONAS[persona_name])
     now = int(time.time())
-    claims.update({"iat": now - 7200, "exp": now - 3600, "iss": "rm-prep-test"})
+    claims.update({"iat": now - 7200, "exp": now - 3600, "iss": "analytics-test"})
     return jwt.encode(claims, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
 
@@ -190,7 +190,7 @@ def get_tampered_token(persona_name: str = "alice_rm") -> str:
 
     claims = dict(PERSONAS[persona_name])
     now = int(time.time())
-    claims.update({"iat": now, "exp": now + 3600, "iss": "rm-prep-test"})
+    claims.update({"iat": now, "exp": now + 3600, "iss": "analytics-test"})
     return jwt.encode(claims, "WRONG-SECRET", algorithm=JWT_ALGORITHM)
 
 

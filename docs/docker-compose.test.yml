@@ -1,0 +1,32 @@
+# docker-compose.test.yml
+# ─────────────────────────────────────────────────────────────────────────────
+# Test-mode overlay for docker-compose.yml (application services).
+#
+# What it does:
+#   1. Adds JWT + HMAC secrets to MCP servers for authenticated test calls
+#
+# The test data (salesforce.* / bankdw.* schemas) is loaded by the
+# infrastructure test overlay: docs/docker-compose.infra-test.yml
+#
+# Usage:
+#   make infra-test-up   # infrastructure with test data
+#   make dev-test-up     # app services with test config
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  # ── MCP servers — add CONTEXT_HMAC_SECRET for signed header verification ──
+  salesforce-mcp:
+    environment:
+      JWT_SECRET: ${JWT_SECRET:-test-secret-change-in-prod}
+      CONTEXT_HMAC_SECRET: ${CONTEXT_HMAC_SECRET:-test-context-secret-change-in-prod}
+
+  payments-mcp:
+    environment:
+      JWT_SECRET: ${JWT_SECRET:-test-secret-change-in-prod}
+      CONTEXT_HMAC_SECRET: ${CONTEXT_HMAC_SECRET:-test-context-secret-change-in-prod}
+
+  news-search-mcp:
+    environment:
+      JWT_SECRET: ${JWT_SECRET:-test-secret-change-in-prod}
+      CONTEXT_HMAC_SECRET: ${CONTEXT_HMAC_SECRET:-test-context-secret-change-in-prod}
