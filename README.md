@@ -1,7 +1,5 @@
 # Enterprise AI — Agentic Platform
 
-![Enterprise AI Intelligence Team](enterprise-ai.png)
-
 Enterprise AI is an agentic platform for regulated financial-services workflows. It combines:
 
 - Secure agent services built with LangGraph and FastAPI
@@ -57,25 +55,32 @@ This repository currently includes:
 
 ### Prerequisites
 
-- Docker Desktop
-- Python 3.11+
-- Make
-- OPA CLI
+This project is developed on **Windows with WSL2** (Windows Subsystem for Linux). All commands must be run inside your WSL terminal, not PowerShell or CMD.
 
-Example install commands:
+Required tools:
+
+- **Docker Desktop for Windows** with the WSL2 backend enabled (Settings → Resources → WSL Integration → enable your distro)
+- Python 3.11+ (installed inside WSL)
+- Make (installed inside WSL)
+- OPA CLI (installed inside WSL)
+
+Install Python, Make, and OPA inside your WSL terminal:
 
 ```bash
-# macOS
-brew install python@3.11 opa
+# Inside WSL (Ubuntu/Debian)
+sudo apt update && sudo apt install python3-full python3-pip make -y
 
-# Linux / WSL
-sudo apt install python3-full make
+# Install OPA CLI
 curl -L -o opa https://github.com/open-policy-agent/opa/releases/download/v0.65.0/opa_linux_amd64_static
 chmod +x opa
 sudo mv opa /usr/local/bin/opa
 ```
 
+> **Note:** Docker Desktop must be running on Windows before you start the stack. Containers are managed via Docker Desktop's WSL2 integration — you do not need to install Docker separately inside WSL.
+
 ### 1. Create local config
+
+Run this inside your WSL terminal from the project root:
 
 ```bash
 cp .env.example .env
@@ -134,11 +139,13 @@ make infra-logs     # infrastructure logs
 
 ### Generic chat path
 
-1. Open [http://localhost:8501](http://localhost:8501)
+1. Open [http://localhost:8501](http://localhost:8501) in your Windows browser — Docker Desktop forwards WSL2 ports to Windows automatically
 2. Sign in with any username in local development
 3. Send a prompt that requires SQL-backed reasoning
 
 ### Health checks
+
+Run from your WSL terminal:
 
 ```bash
 curl http://localhost:8000/health
@@ -386,12 +393,10 @@ Useful checks:
 - Confirm LiteLLM can reach your model provider
 - Confirm the database was seeded if you expect CRM/payments test data
 
-For deeper troubleshooting, see [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
+If the above steps do not resolve the issue, review the service logs in detail and check that Docker Desktop is running and the WSL2 integration is active for your distro.
 
 ## Further Reading
 
-- [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for Azure cloud deployment
-- [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md) for adding new agents and MCP servers
-- [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for common issues and recovery steps
-- [architecture.html](architecture.html) for an interactive layered architecture diagram
+- [docs/DEPLOY.md](docs/DEPLOY.md) for Azure cloud deployment
+- [docs/DEVELOPER_GUIDE.md](docs/DEVELOPER_GUIDE.md) for adding new agents and MCP servers
 - [`docs/`](docs/) for additional architecture and design notes
