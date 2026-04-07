@@ -7,46 +7,42 @@ RAGAS context_precision and context_recall metrics.  The verdict
 (pass / fail) is consumed by CI/CD to promote or reject a new
 embedding checkpoint.
 
-All heavy dependencies (LangFuse, RAGAS, embedding model) are injected.
+Observability: Uses OpenTelemetry spans (vendor-agnostic). The OTel
+Collector routes traces to the configured backend (LangFuse, Datadog, etc).
 """
 
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Protocol, Sequence
+from typing import TYPE_CHECKING, Sequence
 
+from opentelemetry import trace
 from src.domain.models import GateVerdict, GoldenSetEntry
 
 if TYPE_CHECKING:
     from src.config import PipelineSettings
 
 logger = logging.getLogger(__name__)
-
-
-class LangfuseProtocol(Protocol):
-    def trace(self, **kwargs):
-        ...
+tracer = trace.get_tracer(__name__)
 
 
 class RAGASGate:
     """
     Run RAGAS benchmarks and emit a pass/fail ``GateVerdict``.
 
+    Observability is handled via OpenTelemetry spans (vendor-agnostic).
+
     Parameters
     ----------
     settings : PipelineSettings
         Thresholds and golden-set path.
-    langfuse_client : LangfuseProtocol
-        Observability tracer.
     """
 
     def __init__(
         self,
         settings: PipelineSettings,
-        langfuse_client: LangfuseProtocol,
     ) -> None:
         self._settings = settings
-        self._langfuse = langfuse_client
 
     # Public API
 
@@ -116,15 +112,11 @@ class RAGASGate:
             details=dict(ragas_result),
         )
 
-        self._langfuse.trace(
-            name="ragas_deployment_gate",
-            metadata={
-                "context_precision": cp,
-                "context_recall": cr,
-                "passed": passed,
-                "num_samples": len(golden_set),
-            },
-        )
+        with tracer.start_as_current_span("ragas_deployment_gate") as span:
+            span.set_attribute("ragas.context_precision", cp)
+            span.set_attribute("ragas.context_recall", cr)
+            span.set_attribute("ragas.passed", passed)
+            span.set_attribute("ragas.num_samples", len(golden_set))
 
         log_fn = logger.info if passed else logger.warning
         log_fn(

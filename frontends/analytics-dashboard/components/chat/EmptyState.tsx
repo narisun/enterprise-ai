@@ -2,6 +2,8 @@
 
 import type { RefObject } from "react";
 import { BarChart3 } from "lucide-react";
+import { useUser } from "@auth0/nextjs-auth0/client";
+import { getUserDisplayName } from "@/lib/utils";
 import { ChatInput } from "./ChatInput";
 import { SuggestionChips } from "./SuggestionChips";
 
@@ -22,20 +24,22 @@ export function EmptyState({
   onSuggestionSelect,
   formRef,
 }: EmptyStateProps) {
+  const { user } = useUser();
+  const displayFirstName = getUserDisplayName(user?.name, user?.email).split(" ")[0];
+
   return (
-    <div className="flex flex-1 flex-col items-center justify-center px-6">
-      <div className="w-full max-w-2xl space-y-8">
-        <div className="space-y-2">
-          <div className="flex items-center gap-2 mb-1">
-            <BarChart3 size={24} className="text-accent" />
+    <div className="flex flex-1 flex-col items-center justify-center px-6 -mt-8">
+      <div className="w-full max-w-[49rem] space-y-10">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2.5 mb-2">
+            <BarChart3 size={22} className="text-accent/70" />
           </div>
-          {/* TODO: Pull user name from auth context for multi-user deployments */}
-          <h1 className="text-3xl font-medium">
+          <h1 className="text-[28px] font-medium leading-tight">
             <span className="bg-gradient-to-r from-accent to-accent-2 bg-clip-text text-transparent">
-              Hi Sundar
+              Hi {displayFirstName}
             </span>
           </h1>
-          <p className="text-2xl text-text-muted font-light">
+          <p className="text-[22px] text-text-muted/70 font-light tracking-[-0.01em]">
             What would you like to analyze?
           </p>
         </div>

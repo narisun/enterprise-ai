@@ -20,6 +20,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy service source
 COPY tools/data-mcp/src/ /app/src/
+# Shared MCP utilities (AgentContextMiddleware, verify_auth_context)
+COPY tools/shared/ /app/tools_shared/
 
 # Non-root user
 RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app

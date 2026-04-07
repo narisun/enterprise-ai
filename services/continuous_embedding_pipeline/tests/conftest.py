@@ -2,9 +2,11 @@
 Test Fixtures & DI Overrides — continuous_embedding_pipeline
 =============================================================
 
-Safely replaces every heavy external dependency (GPU model, pgvector,
-LangFuse) with lightweight mocks so the full test suite runs in
-< 2 seconds with zero network/GPU/database calls.
+Safely replaces every heavy external dependency (GPU model, pgvector)
+with lightweight mocks so the full test suite runs in < 2 seconds
+with zero network/GPU/database calls.
+
+Observability is handled via OpenTelemetry — no vendor-specific mocks needed.
 """
 
 from __future__ import annotations
@@ -102,17 +104,6 @@ def mock_sentence_transformer() -> MagicMock:
     model.fit = MagicMock(return_value=None)
     model.encode = MagicMock(return_value=[[0.1, 0.2, 0.3]])
     return model
-
-
-# ── Mock LangFuse client ─────────────────────────────────────────────────
-
-
-@pytest.fixture()
-def mock_langfuse() -> MagicMock:
-    """A mock LangFuse client that records trace calls without I/O."""
-    client = MagicMock()
-    client.trace = MagicMock(return_value=None)
-    return client
 
 
 # ── Sample training pairs ────────────────────────────────────────────────

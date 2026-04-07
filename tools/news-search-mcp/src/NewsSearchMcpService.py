@@ -16,6 +16,7 @@ from platform_sdk import MCPConfig, configure_logging, get_logger, make_error
 from platform_sdk.base import McpService
 from platform_sdk.cache import make_cache_key
 from platform_sdk.protocols import Authorizer, CacheStore
+from tools_shared.mcp_auth import verify_auth_context
 
 from .NewsSearchService import NewsSearchService
 
@@ -91,7 +92,7 @@ class NewsSearchMcpService(McpService):
         svc = self
 
         @mcp.tool()
-        async def search_company_news(company_name: str) -> str:
+        async def search_company_news(company_name: str, auth_context: str = "") -> str:
             """
             Search for recent news about a company.
 
@@ -103,6 +104,7 @@ class NewsSearchMcpService(McpService):
 
             Args:
                 company_name: Company name to search for.
+                auth_context: HMAC-signed auth token (system-injected, do not set).
 
             Returns:
                 JSON string with articles list and aggregate signal summary.
@@ -112,9 +114,12 @@ class NewsSearchMcpService(McpService):
                 return make_error("invalid_input", "company_name must not be empty.")
             company_name = company_name.strip()[:256]
 
+            # Extract verified user identity from HMAC-signed auth context
+            user_ctx = verify_auth_context(auth_context)
+
             # OPA authorization (resolved at request time)
             is_authorized = await svc.authorizer.authorize(
-                "search_company_news", {"company_name": company_name}
+                "search_company_news", {"company_name": company_name, "user_role": user_ctx.user_role}
             )
             if not is_authorized:
                 log.warning("opa_denied", tool="search_company_news")

@@ -187,8 +187,8 @@ export function ChatContainer({ chatId, onNewMessage }: ChatContainerProps) {
         isStreaming={isStreaming}
       />
 
-      <div className="px-6 pb-4 pt-2">
-        <div className="w-full max-w-[56rem] mx-auto">
+      <div className="px-6 pb-5 pt-2">
+        <div className="w-full max-w-[65rem] mx-auto">
           <ChatInput
             input={input}
             onInputChange={handleInputChange}
@@ -198,7 +198,7 @@ export function ChatContainer({ chatId, onNewMessage }: ChatContainerProps) {
             variant="floating"
             formRef={formRef}
           />
-          <p className="text-[10px] text-text-muted/40 text-center mt-2">
+          <p className="text-[11px] text-text-muted/35 text-center mt-2.5 tracking-wide">
             Analytics AI can make mistakes. Verify important data.
           </p>
         </div>

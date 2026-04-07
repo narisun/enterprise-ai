@@ -183,6 +183,10 @@ curl http://localhost:8005/health
 | `make test-policies` | Run OPA policy tests only |
 | `make lint` | Run Ruff |
 | `make format` | Auto-format Python source |
+| `make cloud-infra` | Provision Azure VM + networking + WAF (Terraform) |
+| `make cloud-deploy VM_IP=<ip>` | Deploy to Azure VM via rsync + docker compose |
+| `make cloud-status VM_IP=<ip>` | Check service health on Azure VM |
+| `make cloud-logs VM_IP=<ip>` | Follow logs on Azure VM |
 | `make clean` | Remove local Python caches and `.venv` |
 
 ## How It Works
@@ -206,7 +210,7 @@ Cross-cutting concerns (applied at every layer)
   └─> platform-sdk   — AgentContext propagation, OPA checks, cache helpers, telemetry
   └─> OPA            — fail-closed policy evaluation (authz.rego)
   └─> Redis          — tool-result cache, rate-limit counters, session state
-  └─> OpenTelemetry  — distributed traces and spans → Dynatrace APM
+  └─> OpenTelemetry  — distributed traces and spans → OTel Collector → LangFuse / Datadog / etc.
 ```
 
 Orchestrator agents own the workflow and routing logic. They never call data sources directly — they delegate to specialist nodes, each of which calls a single MCP tool server. MCP servers enforce row-level restrictions, column masking, and audit boundaries before touching any backend.
@@ -349,13 +353,15 @@ enterprise-ai/
 │   ├── news-search-mcp/      # News MCP
 │   └── shared/               # Shared MCP auth helpers
 ├── platform-sdk/             # Shared SDK (auth, OPA, cache, resilience, prompts, telemetry)
-├── platform/                 # DB schema, seed data, LiteLLM, OTel config
+├── platform/                 # DB schema, seed data, LiteLLM, OTel, Nginx config
 ├── tests/                    # Unit, integration, and eval tests
 ├── testdata/                 # Synthetic CRM and payments fixtures
+├── scripts/                  # Deployment and operational scripts
 ├── .github/workflows/        # CI: unit, integration, evals, deploy
-├── infra/terraform/          # Terraform modules (RDS, ECS, networking)
-├── docker-compose.infra.yml             # Infrastructure services (DB, Redis, LiteLLM, LangFuse, OPA, OTel)
-├── docker-compose.yml                   # Application services (agents, MCP tools, frontends)
+├── infra/azure/              # Terraform for Azure VM + VNet + NSG + App Gateway with WAF
+├── docker-compose.infra.yml             # Infrastructure services (local dev)
+├── docker-compose.yml                   # Application services (local dev)
+├── docker-compose.cloud.yml             # Combined infra + app for Azure VM deployment
 ├── docs/docker-compose.infra-test.yml   # Test data overlay for infrastructure
 ├── docs/docker-compose.test.yml         # Test config overlay for app services
 └── Makefile
@@ -384,6 +390,7 @@ For deeper troubleshooting, see [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
 
 ## Further Reading
 
+- [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for Azure cloud deployment
 - [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md) for adding new agents and MCP servers
 - [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for common issues and recovery steps
 - [architecture.html](architecture.html) for an interactive layered architecture diagram

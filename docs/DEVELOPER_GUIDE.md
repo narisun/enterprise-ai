@@ -100,7 +100,7 @@ make infra-test-up
 
 This starts the long-lived infrastructure tier: PostgreSQL, Redis, LiteLLM, LangFuse, OPA, and OpenTelemetry collector. The `infra-test-up` variant seeds CRM and payments test data (recommended). You only run this once — infrastructure survives across `dev-reset` cycles.
 
-On first start, Docker will pull images and LangFuse runs Prisma migrations (this can take 2–3 minutes on WSL). If you see the health check fail for `langfuse`, just wait and check `make infra-logs`.
+On first start, Docker will pull images and LangFuse runs Prisma migrations (2–5 minutes on WSL). Once LangFuse is ready, open [http://localhost:3001](http://localhost:3001), create your account and project, then copy the API keys from **Settings > API Keys** into `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` in your `.env` file.
 
 **Infrastructure services:**
 
@@ -525,7 +525,7 @@ log.info("tool_called", client=name, duration_ms=42, cached=False)
 # → {"event": "tool_called", "client": "...", "duration_ms": 42, "cached": false, "timestamp": "..."}
 ```
 
-Call `configure_logging()` and `setup_telemetry()` at module level in every service's `server.py`. The OTel SDK auto-instruments FastAPI, asyncpg, and httpx calls — no manual span creation needed for standard I/O.
+Call `configure_logging()` and `setup_telemetry()` at startup (e.g. in `lifespan()`). `setup_telemetry()` initialises the OTel SDK and auto-instruments LangChain/LangGraph and OpenAI calls via OpenLLMetry. All traces flow through the OTel Collector which exports to the configured backend (LangFuse by default, but swappable to Datadog, Honeycomb, etc. by editing `platform/otel/otel-local.yaml` — no application code changes). The LangFuse SDK is retained only for prompt management via `get_langfuse()`. Do **not** use `get_langfuse_callback_handler()` — it is deprecated and returns `None`.
 
 ---
 
@@ -1472,7 +1472,7 @@ Client → POST /chat (Bearer INTERNAL_API_KEY)
   → Final answer → {"content": "...", "session_id": "..."}
 ```
 
-Every step emits an OTel span. Full trace visible in your OTel backend (Dynatrace, Jaeger, etc.) with per-hop latency for agent → LiteLLM → MCP → OPA → DB.
+Every step emits an OTel span. Full trace visible in your OTel backend (LangFuse at http://localhost:3001, or any OTLP-compatible backend) with per-hop latency for agent → LiteLLM → MCP → OPA → DB.
 
 ### Agent Request Flow
 

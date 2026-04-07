@@ -236,6 +236,40 @@ class SalesforceService:
                     account_id,
                 )
 
+        # Representative SQL for transparency / UI display
+        _sql_queries = [
+            (
+                f'-- Account lookup (fuzzy match)\n'
+                f'SELECT "Id", "Name", "Industry", "Type", "AnnualRevenue", "Rating"\n'
+                f'FROM salesforce."Account"\n'
+                f"WHERE \"Name\" ILIKE '%{client_name}%'\n"
+                f'ORDER BY CASE WHEN lower("Name") = lower(\'{client_name}\') THEN 0 ELSE 1 END\n'
+                f'LIMIT 1'
+            ),
+            (
+                f'-- Open opportunities\n'
+                f'SELECT "Name", "StageName", "Amount", "CloseDate", "Probability"\n'
+                f'FROM salesforce."Opportunity"\n'
+                f"WHERE \"AccountId\" = '{account_id}'\n"
+                f"  AND \"StageName\" NOT IN ('Closed Won', 'Closed Lost')\n"
+                f'ORDER BY "Amount" DESC'
+            ),
+            (
+                f'-- Key contacts\n'
+                f'SELECT "FirstName", "LastName", "Title", "Department"\n'
+                f'FROM salesforce."Contact"\n'
+                f"WHERE \"AccountId\" = '{account_id}'\n"
+                f'ORDER BY "Title" NULLS LAST\nLIMIT 5'
+            ),
+            (
+                f'-- Open service cases\n'
+                f'SELECT "CaseNumber", "Subject", "Status", "Priority"\n'
+                f'FROM salesforce."Case"\n'
+                f"WHERE \"AccountId\" = '{account_id}' AND \"Status\" != 'Closed'\n"
+                f'ORDER BY "Priority", "CreatedDate" DESC\nLIMIT 4'
+            ),
+        ]
+
         result = {
             "account_id": account_id,
             "account_name": account_name,
@@ -315,5 +349,6 @@ class SalesforceService:
                 for c in contracts
             ],
             "retrieved_at": datetime.now(timezone.utc).isoformat(),
+            "_sql_queries": _sql_queries,
         }
         return json.dumps(result, default=str)

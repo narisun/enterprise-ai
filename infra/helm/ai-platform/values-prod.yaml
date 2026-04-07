@@ -1,8 +1,0 @@
-# Production overrides — full HA
-litellm:
-  replicaCount: 3
-  hpa:
-    minReplicas: 3
-    maxReplicas: 12
-otelCollector:
-  replicaCount: 2

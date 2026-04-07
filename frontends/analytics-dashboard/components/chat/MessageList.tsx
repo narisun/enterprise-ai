@@ -32,7 +32,7 @@ export function MessageList({
 
   return (
     <ScrollArea className="flex-1">
-      <div className="w-full max-w-[56rem] mx-auto px-6 py-6 space-y-6">
+      <div className="w-full max-w-[65rem] mx-auto px-6 py-6 space-y-6">
         {messages.map((message, idx) => {
           const isLastAssistant =
             idx === messages.length - 1 && message.role === "assistant";

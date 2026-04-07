@@ -19,12 +19,20 @@ workspace with their full schema prefix.
   salesforce."Account"     Id, Name, Type, Industry, AccountNumber, Ownership,
                            Phone, Website, BillingCity, BillingState,
                            BillingCountry, AnnualRevenue, NumberOfEmployees, Rating
+    — Type values: 'Customer - Direct', 'Customer - Channel', 'Technology Partner'
+    — Industry values: 'Banking Client', 'Technology', 'Healthcare', 'Energy', 'Manufacturing'
+    — Rating values: 'Hot', 'Warm', 'Cold'
 
   salesforce."Contact"     Id, AccountId, FirstName, LastName, Email, Phone,
                            Title, Department, LeadSource
 
   salesforce."Opportunity" Id, AccountId, Name, StageName, Amount, CloseDate,
                            Probability, ForecastCategoryName, NextStep
+    — StageName values: 'Prospecting', 'Qualification', 'Needs Analysis',
+      'Value Proposition', 'Proposal/Price Quote', 'Negotiation/Review',
+      'Closed Won', 'Closed Lost'
+    — ForecastCategoryName: 'Pipeline', 'Best Case', 'Commit', 'Omitted', 'Closed'
+    — Amount = deal value in USD
 
   salesforce."Task"        Id, WhoId, WhatId, Subject, ActivityDate, Status,
                            Priority, Type, Description
@@ -34,44 +42,98 @@ workspace with their full schema prefix.
 
   salesforce."Case"        Id, AccountId, ContactId, CaseNumber, Subject,
                            Status, Priority, Origin, Type, CreatedDate, ClosedDate
+    — Status values: 'New', 'Working', 'Escalated', 'Closed'
+    — Priority values: 'High', 'Medium', 'Low'
 
   salesforce."Contract"    Id, AccountId, ContractNumber, StartDate, EndDate,
                            Status, ContractTerm, SpecialTerms
+    — Status values: 'Draft', 'In Approval Process', 'Activated'
 
   salesforce."Lead"        Id, FirstName, LastName, Company, Title, Email,
                            Phone, Status, Industry, AnnualRevenue
+    — Status values: 'Open - Not Contacted', 'Working - Contacted',
+      'Closed - Converted', 'Closed - Not Converted'
+
+  salesforce."Campaign"    Id, Name, Type, Status, StartDate, EndDate,
+                           BudgetedCost, ActualCost, ExpectedRevenue, IsActive
+  salesforce."Product2"    Id, Name, ProductCode, Family, IsActive, Description
+  salesforce."OpportunityLineItem"  Id, OpportunityId, PricebookEntryId,
+                           Quantity, UnitPrice, TotalPrice, ServiceDate
+  salesforce."OpportunityContactRole"  Id, OpportunityId, ContactId, Role, IsPrimary
+  salesforce."CampaignMember"  Id, CampaignId, ContactId, LeadId, Status, HasResponded
+  salesforce."Pricebook2"  Id, Name, IsActive, Description
+  salesforce."PricebookEntry"  Id, Pricebook2Id, Product2Id, UnitPrice, IsActive
 
 ── BANK DATA WAREHOUSE  →  schema prefix: bankdw."TableName" ───────────────
-  bankdw."fact_payments"   TransactionID, TransactionDate, PayorName,
-                           PayorBank, PayorAccountNumber, PayorRoutingNumber,
-                           PayeeName, PayeeBank, PayeeAccountNumber,
+  bankdw.fact_payments     TransactionID, TransactionDate, PayorName,
+                           PayorAccountNumber, PayorBank, PayorRoutingNumber,
+                           PayeeName, PayeeAccountNumber, PayeeBank,
                            PayeeRoutingNumber, TransactionType, Amount,
                            Currency, Status
+    — Central fact table for ALL payment transactions
+    — TRANSACTION MODEL: Every transaction has TWO parties:
+        • PayorName = the SENDER (company sending money)
+        • PayeeName = the RECEIVER (company receiving money)
+      Both join to dim_party.PartyName AND salesforce.Account.Name.
+      IMPORTANT: When user says "party", "counterparty", "client", or "company"
+      in a transaction context, consider BOTH PayorName AND PayeeName unless
+      user specifically says "sender"/"payor" or "receiver"/"payee".
+      Use: WHERE ("PayorName" ILIKE '%X%' OR "PayeeName" ILIKE '%X%')
+    — PayorBank/PayeeBank joins to dim_bank.BankName
+    — TransactionType values: 'ACH Credit', 'ACH Debit', 'Wire Transfer',
+      'RTP Credit', 'Check Payment', 'ACH Return', 'Wire Return'
+    — Status values: 'Completed', 'Pending', 'Failed', 'Returned', 'Reversed'
+    — Amount = transaction value in USD
 
-  bankdw."dim_party"       PartyKey, PartyID, PartyName, PartyRoleType,
+  bankdw.dim_party         PartyKey, PartyID, PartyName, PartyRoleType,
                            PartyType, CustomerSegment, KYCStatus, RiskRating,
                            AMLRiskCategory, SanctionsScreeningStatus, PEPFlag,
                            IndustrySector, CountryCode, CustomerStatus,
                            RelationshipStartDate, FraudMonitoringSegment
+    — PartyName is the KEY JOIN column to fact_payments and salesforce.Account.Name
+    — CustomerSegment values: 'Retail', 'Commercial', 'Corporate', 'Institutional'
+    — RiskRating values: 'Low', 'Medium', 'Elevated', 'High'
 
-  bankdw."dim_bank"        BankKey, BankID, BankName, BankRoleType,
+  bankdw.dim_bank          BankKey, BankID, BankName, BankRoleType,
                            RoutingNumber, SWIFTBIC, BankType, CountryCode,
                            BSAAMLProgramRating, SanctionsComplianceStatus
+    — BankName is the KEY JOIN column to fact_payments.PayorBank/PayeeBank
 
-  bankdw."bridge_party_account"
+  bankdw.bridge_party_account
                            PartyAccountKey, PartyName, AccountNumber, BankName,
                            RoutingNumber, AccountType, AccountStatus
 
-  bankdw."dim_product"     ProductKey, ProductName, ProductCategory,
+  bankdw.dim_product       ProductKey, ProductName, ProductCategory,
                            ProductFamily, PaymentRail, SettlementMethod,
                            RiskLevel, ComplianceConsiderations
+    — ProductCategory values: 'Credit Transfer', 'Debit Transfer', 'Check', 'Real-Time'
+
+── JOIN RELATIONSHIPS ──────────────────────────────────────────────────────
+  Within bankdw (text-based — values must match exactly):
+    fact_payments."PayorName"  = dim_party."PartyName"
+    fact_payments."PayeeName"  = dim_party."PartyName"
+    fact_payments."PayorBank"  = dim_bank."BankName"
+    fact_payments."PayeeBank"  = dim_bank."BankName"
+    bridge_party_account."PartyID" = dim_party."PartyID"  (FK)
+    bridge_party_account."BankID"  = dim_bank."BankID"    (FK)
+
+  Cross-schema (salesforce ↔ bankdw):
+    salesforce."Account"."Name" = bankdw.dim_party."PartyName"
+    salesforce."Account"."Name" = bankdw.fact_payments."PayorName"
+    salesforce."Account"."Name" = bankdw.fact_payments."PayeeName"
+
+  Within salesforce (FK-based):
+    "Opportunity"."AccountId"  = "Account"."Id"
+    "Contact"."AccountId"      = "Account"."Id"
+    "Case"."AccountId"         = "Account"."Id"
+    "Contract"."AccountId"     = "Account"."Id"
 
 ── EXAMPLE CORRECT QUERIES ──────────────────────────────────────────────────
-  -- All payment transactions for a client (last 90 days):
+  -- All payment transactions for a client (last 90 days, both sides):
   SELECT "TransactionDate", "TransactionType", "Amount", "Currency",
-         "PayeeName", "PayeeBank", "Status"
-  FROM bankdw."fact_payments"
-  WHERE "PayorName" = 'Acme Manufacturing'
+         "PayorName", "PayeeName", "Status"
+  FROM bankdw.fact_payments
+  WHERE ("PayorName" ILIKE '%Acme%' OR "PayeeName" ILIKE '%Acme%')
     AND "Status" = 'Completed'
     AND "TransactionDate" >= CURRENT_DATE - INTERVAL '90 days'
   ORDER BY "TransactionDate" DESC
@@ -88,13 +150,40 @@ workspace with their full schema prefix.
   WHERE a."Name" ILIKE '%acme%'
     AND o."StageName" NOT IN ('Closed Won', 'Closed Lost')
 
+  -- Cross-schema: payment volumes for top accounts by pipeline:
+  SELECT a."Name", SUM(o."Amount") AS pipeline_value,
+         SUM(fp."Amount") AS payment_volume
+  FROM salesforce."Account" a
+  JOIN salesforce."Opportunity" o ON o."AccountId" = a."Id"
+  JOIN bankdw.fact_payments fp ON fp."PayorName" = a."Name"
+  WHERE fp."Status" = 'Completed'
+  GROUP BY a."Name"
+  ORDER BY pipeline_value DESC LIMIT 10
+
+  -- Payment breakdown by transaction type:
+  SELECT "TransactionType", COUNT(*) AS txn_count,
+         SUM("Amount") AS total_amount
+  FROM bankdw.fact_payments
+  WHERE "Status" = 'Completed'
+  GROUP BY "TransactionType"
+  ORDER BY total_amount DESC
+
 IMPORTANT SQL RULES:
 - ALL column names in salesforce.* and bankdw.* are quoted mixed-case (e.g. "TransactionDate").
   Never reference them unquoted or in lowercase — they won't match.
 - Never invent table names. If you are unsure, check information_schema.tables first.
-- Use bankdw."fact_payments" for payment transactions — there is NO table called
+- Use bankdw.fact_payments for payment transactions — there is NO table called
   "transactions", "payments", or "payment_transactions".
 - Always include LIMIT when exploring tables to avoid returning thousands of rows.
+- MANDATORY TOOL ROUTING: When the user asks about a SPECIFIC client/company:
+  → Payment/transaction data: ALWAYS use get_payment_summary (NOT raw SQL)
+  → CRM/account data: ALWAYS use get_salesforce_summary (NOT raw SQL)
+  These tools handle fuzzy name matching (e.g. "Pepsi" → "PepsiCo Inc.").
+  Only use execute_read_query for aggregate queries across all clients,
+  or multi-client relationship queries (e.g. "transactions between X and Y").
+- When you DO use raw SQL with client/company name filters, ALWAYS use ILIKE with % wildcards:
+  ✅ WHERE "PayorName" ILIKE '%Google%'
+  ❌ WHERE "PayorName" = 'Google'
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 STRICT RULES

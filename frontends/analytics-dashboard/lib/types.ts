@@ -20,7 +20,7 @@ export interface ChartMetadata {
   confidence_score: number;
   x_label?: string;
   y_label?: string;
-  format_hint?: "currency" | "percent" | "number" | "compact";
+  format_hint?: "currency" | "percent" | "number" | "compact" | "date" | "datetime";
 }
 
 export interface ChartDataPoint {

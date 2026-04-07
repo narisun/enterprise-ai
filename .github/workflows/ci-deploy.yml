@@ -1,21 +1,18 @@
 # ============================================================
-# CI — Deploy to EKS
+# CI — Deploy to Azure VM
 #
 # Triggers:
-#   • Automatically after ci-integration passes on main
-#   • Manual dispatch (for hotfixes or re-deploys without a code change)
+#   - Automatically after integration tests pass on main
+#   - Manual dispatch for hotfixes or re-deploys
 #
-# GitHub repository variables required (Settings → Variables → Actions):
-#   AWS_REGION          us-east-1
-#   AWS_ACCOUNT_ID      123456789012
-#   AWS_DEPLOY_ROLE_ARN arn:aws:iam::123456789012:role/enterprise-ai-github-deploy
-#   EKS_CLUSTER_NAME    enterprise-ai-prod
-#   DEPLOY_ENV          prod   (controls which Helm values overlay is used)
+# GitHub repository secrets required (Settings > Secrets > Actions):
+#   VM_SSH_PRIVATE_KEY    SSH private key for the Azure VM
 #
-# No AWS_ACCESS_KEY_ID or AWS_SECRET_ACCESS_KEY — authentication is via OIDC.
-# The deploy role is created by infra/terraform/iam/main.tf.
+# GitHub repository variables required (Settings > Variables > Actions):
+#   VM_IP                 Azure VM public IP address
+#   VM_SSH_USER           SSH username (default: azureuser)
 # ============================================================
-name: Deploy to EKS
+name: Deploy to Azure VM
 
 on:
   workflow_run:
@@ -23,228 +20,94 @@ on:
     branches: [main]
     types: [completed]
 
-  workflow_dispatch:
-    inputs:
-      environment:
-        description: "Target environment (dev | prod)"
-        required: true
-        default: "prod"
-        type: choice
-        options: [dev, prod]
-      image_tag:
-        description: "Image tag to deploy (default: latest main SHA)"
-        required: false
-        default: ""
+  workflow_dispatch: {}
 
 env:
-  AWS_REGION:       ${{ vars.AWS_REGION }}
-  AWS_ACCOUNT_ID:   ${{ vars.AWS_ACCOUNT_ID }}
-  EKS_CLUSTER_NAME: ${{ vars.EKS_CLUSTER_NAME }}
-  DEPLOY_ENV:       ${{ inputs.environment || vars.DEPLOY_ENV || 'prod' }}
+  VM_IP:       ${{ vars.VM_IP }}
+  VM_SSH_USER: ${{ vars.VM_SSH_USER || 'azureuser' }}
+  DEPLOY_DIR:  /opt/enterprise-ai
 
 jobs:
-  # ---- Guard — only deploy when integration tests passed ----------------
+  # Guard — only deploy when integration tests passed
   check-trigger:
     runs-on: ubuntu-latest
     if: |
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
     steps:
-      - name: Integration tests passed
-        run: echo "Integration tests passed — proceeding with deploy"
+      - run: echo "Proceeding with deploy"
 
-  # ---- Build and push Docker images to ECR ------------------------------
-  build-and-push:
+  deploy:
     needs: check-trigger
     runs-on: ubuntu-latest
-    permissions:
-      id-token: write   # Required for OIDC
-      contents: read
-    outputs:
-      image_tag: ${{ steps.meta.outputs.image_tag }}
-      ecr_registry: ${{ steps.ecr-login.outputs.registry }}
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set image tag
-        id: meta
-        run: |
-          # Use manually specified tag, or the triggering workflow's SHA, or current SHA
-          if [[ -n "${{ inputs.image_tag }}" ]]; then
-            TAG="${{ inputs.image_tag }}"
-          elif [[ -n "${{ github.event.workflow_run.head_sha }}" ]]; then
-            TAG="${{ github.event.workflow_run.head_sha }}"
-          else
-            TAG="${{ github.sha }}"
-          fi
-          SHORT_TAG="${TAG:0:12}"
-          echo "image_tag=sha-${SHORT_TAG}" >> "$GITHUB_OUTPUT"
-          echo "Deploying image tag: sha-${SHORT_TAG}"
-
-      - name: Configure AWS credentials (OIDC)
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Login to Amazon ECR
-        id: ecr-login
-        uses: aws-actions/amazon-ecr-login@v2
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build and push — ai-agents
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: agents/Dockerfile
-          push: true
-          tags: ${{ steps.ecr-login.outputs.registry }}/enterprise-ai/ai-agents:${{ steps.meta.outputs.image_tag }}
-          cache-from: type=registry,ref=${{ steps.ecr-login.outputs.registry }}/enterprise-ai/ai-agents:cache
-          cache-to:   type=registry,ref=${{ steps.ecr-login.outputs.registry }}/enterprise-ai/ai-agents:cache,mode=max
-
-      - name: Build and push — data-mcp
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: tools/data-mcp/Dockerfile
-          push: true
-          tags: ${{ steps.ecr-login.outputs.registry }}/enterprise-ai/data-mcp:${{ steps.meta.outputs.image_tag }}
-          cache-from: type=registry,ref=${{ steps.ecr-login.outputs.registry }}/enterprise-ai/data-mcp:cache
-          cache-to:   type=registry,ref=${{ steps.ecr-login.outputs.registry }}/enterprise-ai/data-mcp:cache,mode=max
-
-  # ---- Deploy Helm releases to EKS -------------------------------------
-  deploy:
-    needs: build-and-push
-    runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-      contents: read
     environment:
-      name: ${{ inputs.environment || vars.DEPLOY_ENV || 'prod' }}
-      url: ${{ steps.ingress.outputs.url }}
+      name: production
+      url: http://${{ vars.VM_IP }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Configure AWS credentials (OIDC)
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Install kubectl and helm
+      - name: Set up SSH key
         run: |
-          curl -sL https://dl.k8s.io/release/v1.30.0/bin/linux/amd64/kubectl -o kubectl
-          chmod +x kubectl && sudo mv kubectl /usr/local/bin/
-          curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VM_SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "${{ env.VM_IP }}" >> ~/.ssh/known_hosts 2>/dev/null || true
 
-      - name: Configure kubectl for EKS
+      - name: Sync codebase to VM
         run: |
-          aws eks update-kubeconfig \
-            --name "${{ env.EKS_CLUSTER_NAME }}" \
-            --region "${{ env.AWS_REGION }}"
+          rsync -avz --delete \
+            --exclude '.venv' \
+            --exclude 'node_modules' \
+            --exclude '.git' \
+            --exclude '__pycache__' \
+            --exclude '*.pyc' \
+            --exclude '.pytest_cache' \
+            --exclude 'test-results' \
+            --exclude '.ruff_cache' \
+            --exclude '*.egg-info' \
+            --exclude 'dist' \
+            --exclude '.env' \
+            -e "ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no" \
+            . "${{ env.VM_SSH_USER }}@${{ env.VM_IP }}:${{ env.DEPLOY_DIR }}/"
 
-      - name: Verify cluster connectivity
+      - name: Build and restart services
         run: |
-          kubectl get nodes
-          kubectl get pods -n kube-system | grep -E "aws-load-balancer|coredns" || true
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+            "${{ env.VM_SSH_USER }}@${{ env.VM_IP }}" bash <<'EOF'
+          set -euo pipefail
+          cd /opt/enterprise-ai
 
-      - name: Deploy ai-platform (LiteLLM + OPA + OTEL)
+          echo "→ Building images..."
+          docker compose -f docker-compose.cloud.yml build --parallel
+
+          echo "→ Rolling restart..."
+          docker compose -f docker-compose.cloud.yml up -d
+
+          echo "→ Waiting for health checks..."
+          sleep 30
+
+          echo "→ Service status:"
+          docker compose -f docker-compose.cloud.yml ps
+          EOF
+
+      - name: Smoke test
         run: |
-          helm upgrade --install ai-platform infra/helm/ai-platform \
-            --namespace ai-platform \
-            --create-namespace \
-            --values infra/helm/ai-platform/values.yaml \
-            --values infra/helm/ai-platform/values-${{ env.DEPLOY_ENV }}.yaml \
-            --timeout 5m \
-            --wait \
-            --atomic   # Roll back automatically if deploy fails
-
-      - name: Deploy data-mcp
-        env:
-          ECR_REGISTRY: ${{ needs.build-and-push.outputs.ecr_registry }}
-          IMAGE_TAG:    ${{ needs.build-and-push.outputs.image_tag }}
-        run: |
-          helm upgrade --install data-mcp infra/helm/data-mcp \
-            --namespace ai-platform \
-            --values infra/helm/data-mcp/values.yaml \
-            --values infra/helm/data-mcp/values-${{ env.DEPLOY_ENV }}.yaml \
-            --set image.repository="${ECR_REGISTRY}/enterprise-ai/data-mcp" \
-            --set image.tag="${IMAGE_TAG}" \
-            --timeout 5m \
-            --wait \
-            --atomic
-
-      - name: Deploy ai-agents
-        env:
-          ECR_REGISTRY: ${{ needs.build-and-push.outputs.ecr_registry }}
-          IMAGE_TAG:    ${{ needs.build-and-push.outputs.image_tag }}
-        run: |
-          helm upgrade --install ai-agents infra/helm/ai-agents \
-            --namespace ai-platform \
-            --values infra/helm/ai-agents/values.yaml \
-            --values infra/helm/ai-agents/values-${{ env.DEPLOY_ENV }}.yaml \
-            --set image.repository="${ECR_REGISTRY}/enterprise-ai/ai-agents" \
-            --set image.tag="${IMAGE_TAG}" \
-            --timeout 5m \
-            --wait \
-            --atomic
-
-      # ---- Post-deploy smoke tests ------------------------------------
-      - name: Wait for all pods to be ready
-        run: |
-          kubectl wait --for=condition=Ready pods \
-            --all \
-            --namespace ai-platform \
-            --timeout=300s
-
-      - name: Get ALB ingress URL
-        id: ingress
-        run: |
-          echo "Waiting for ALB DNS to be assigned..."
-          for i in $(seq 1 20); do
-            ALB_DNS=$(kubectl get ingress ai-agents -n ai-platform \
-              -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)
-            if [[ -n "$ALB_DNS" ]]; then
-              echo "ALB DNS: $ALB_DNS"
-              echo "url=https://${ALB_DNS}" >> "$GITHUB_OUTPUT"
-              break
-            fi
-            echo "  attempt $i/20 — waiting 15s..."
-            sleep 15
-          done
-
-      - name: Smoke test — /health endpoints
-        run: |
-          # Give ALB 60s to become healthy after pods are ready
-          sleep 60
-
-          BASE_URL="https://$(kubectl get ingress ai-agents -n ai-platform \
-            -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')"
-
-          echo "Testing ${BASE_URL}/health ..."
+          echo "Testing http://${{ env.VM_IP }}/ ..."
           HTTP_STATUS=$(curl -sf -o /dev/null -w "%{http_code}" \
             --max-time 30 --retry 5 --retry-delay 10 \
-            "${BASE_URL}/health" || echo "000")
+            "http://${{ env.VM_IP }}/" || echo "000")
 
           if [[ "$HTTP_STATUS" != "200" ]]; then
-            echo "❌ Health check failed — HTTP ${HTTP_STATUS}"
-            kubectl get pods -n ai-platform
-            kubectl logs -n ai-platform -l app=ai-agents --tail=50
+            echo "Health check failed — HTTP ${HTTP_STATUS}"
             exit 1
           fi
-          echo "✅ Health check passed (HTTP ${HTTP_STATUS})"
+          echo "Health check passed (HTTP ${HTTP_STATUS})"
 
       - name: Record deployment
         if: success()
         run: |
-          echo "✅ Deploy complete"
-          echo "  Environment: ${{ env.DEPLOY_ENV }}"
-          echo "  Image tag:   ${{ needs.build-and-push.outputs.image_tag }}"
-          echo "  Cluster:     ${{ env.EKS_CLUSTER_NAME }}"
-          kubectl get pods -n ai-platform
+          echo "Deploy complete"
+          echo "  VM:  ${{ env.VM_IP }}"
+          echo "  SHA: ${{ github.sha }}"

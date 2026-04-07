@@ -1,0 +1,67 @@
+#cloud-config
+# ============================================================
+# enterprise-ai — VM Bootstrap (cloud-init)
+#
+# Installs Docker, Docker Compose, and prepares the deploy
+# directory. The actual application is deployed via `make
+# cloud-deploy` from the local desktop.
+# ============================================================
+
+package_update: true
+package_upgrade: true
+
+packages:
+  - ca-certificates
+  - curl
+  - gnupg
+  - lsb-release
+  - unzip
+  - jq
+  - htop
+  - fail2ban
+
+runcmd:
+  # ---- Install Docker CE ----
+  - install -m 0755 -d /etc/apt/keyrings
+  - curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+  - chmod a+r /etc/apt/keyrings/docker.asc
+  - |
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" > /etc/apt/sources.list.d/docker.list
+  - apt-get update -y
+  - apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+  - systemctl enable docker
+  - systemctl start docker
+
+  # ---- Add deploy user to docker group ----
+  - usermod -aG docker azureuser
+
+  # ---- Create deployment directory ----
+  - mkdir -p /opt/enterprise-ai
+  - chown azureuser:azureuser /opt/enterprise-ai
+
+  # ---- Create Docker data directory on larger disk ----
+  - mkdir -p /opt/enterprise-ai/docker-data
+
+  # ---- Configure Docker daemon (log rotation, storage) ----
+  - |
+    cat > /etc/docker/daemon.json <<'EOF'
+    {
+      "log-driver": "json-file",
+      "log-opts": {
+        "max-size": "50m",
+        "max-file": "5"
+      },
+      "storage-driver": "overlay2"
+    }
+    EOF
+  - systemctl restart docker
+
+  # ---- Configure fail2ban for SSH ----
+  - systemctl enable fail2ban
+  - systemctl start fail2ban
+
+  # ---- Set up automatic security updates ----
+  - apt-get install -y unattended-upgrades
+  - dpkg-reconfigure -f noninteractive unattended-upgrades
+
+final_message: "enterprise-ai VM ready. Deploy with: make cloud-deploy VM_IP=$(curl -s ifconfig.me)"

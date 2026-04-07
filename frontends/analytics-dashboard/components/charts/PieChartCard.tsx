@@ -3,7 +3,7 @@
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend } from "recharts";
 import type { ChartMetadata, ChartDataPoint } from "@/lib/types";
 import { ChartCard } from "./ChartCard";
-import { CHART_COLORS, tooltipFormatter, TOOLTIP_STYLE, AXIS_TICK_COLOR } from "./chartUtils";
+import { CHART_COLORS, tooltipFormatter, TOOLTIP_STYLE, TOOLTIP_ITEM_STYLE, TOOLTIP_LABEL_STYLE, LEGEND_STYLE } from "./chartUtils";
 
 interface Props {
   metadata: ChartMetadata;
@@ -47,9 +47,11 @@ export default function PieChartCard({ metadata, data }: Props) {
           </Pie>
           <Tooltip
             contentStyle={TOOLTIP_STYLE}
+            itemStyle={TOOLTIP_ITEM_STYLE}
+            labelStyle={TOOLTIP_LABEL_STYLE}
             formatter={tooltipFormatter(metadata.format_hint)}
           />
-          <Legend wrapperStyle={{ fontSize: 11, color: AXIS_TICK_COLOR }} />
+          <Legend wrapperStyle={LEGEND_STYLE} />
         </PieChart>
       </ResponsiveContainer>
     </ChartCard>

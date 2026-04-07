@@ -28,4 +28,5 @@ COPY --from=builder /app/public ./public
 
 EXPOSE 3000
 
-CMD ["node", "server.js"]
+# HOSTNAME must be set inline — Docker overrides ENV HOSTNAME with the container ID at runtime
+CMD ["sh", "-c", "HOSTNAME=0.0.0.0 node server.js"]

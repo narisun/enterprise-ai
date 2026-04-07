@@ -17,7 +17,7 @@ from platform_sdk.auth import AgentContext
 from platform_sdk.base import McpService
 from platform_sdk.cache import make_cache_key
 from platform_sdk.protocols import Authorizer, CacheStore
-from tools_shared.mcp_auth import get_agent_context
+from tools_shared.mcp_auth import get_agent_context, verify_auth_context
 
 import asyncpg
 
@@ -89,7 +89,7 @@ class SalesforceMcpService(McpService):
         pii_allowed_roles = {"rm", "senior_rm", "manager", "compliance_officer"}
 
         @mcp.tool()
-        async def get_salesforce_summary(client_name: str) -> str:
+        async def get_salesforce_summary(client_name: str, auth_context: str = "") -> str:
             """
             Get Salesforce CRM summary for a client.
 
@@ -101,6 +101,7 @@ class SalesforceMcpService(McpService):
 
             Args:
                 client_name: Company name as known in Salesforce (partial match supported).
+                auth_context: HMAC-signed auth token (system-injected, do not set).
 
             Returns:
                 JSON string with full CRM context, or error JSON if client not found.
@@ -113,9 +114,12 @@ class SalesforceMcpService(McpService):
 
             client_name = client_name.strip()[:256]
 
+            # Extract verified user identity from HMAC-signed auth context
+            user_ctx = verify_auth_context(auth_context)
+
             # OPA authorization (resolved at request time)
             is_authorized = await svc.authorizer.authorize(
-                "get_salesforce_summary", {"client_name": client_name}
+                "get_salesforce_summary", {"client_name": client_name, "user_role": user_ctx.user_role}
             )
             if not is_authorized:
                 log.warning("opa_denied", tool="get_salesforce_summary")

@@ -14,6 +14,7 @@ from platform_sdk.auth import AgentContext
 from platform_sdk.base import McpService
 from platform_sdk.cache import make_cache_key
 from platform_sdk.protocols import Authorizer, CacheStore
+from tools_shared.mcp_auth import get_agent_context, verify_auth_context
 
 from .PaymentsService import PaymentsService
 
@@ -75,14 +76,14 @@ class PaymentsMcpService(McpService):
         svc = self
 
         @mcp.tool()
-        async def get_payment_summary(client_name: str) -> str:
+        async def get_payment_summary(client_name: str, auth_context: str = "") -> str:
             """
             Get bank payment transaction summary for a client.
 
             Queries the bank data warehouse (bankdw schema) using the client's company
-            name as the join key.  The company name must match exactly the value in
-            bankdw.dim_party.PartyName, which equals sfcrm.Account.Name — so pass the
-            account_name field from get_salesforce_summary output.
+            name as the join key. Supports fuzzy name matching — partial names like
+            "IBM", "Pepsi", or "Google" are automatically resolved to the full party
+            name via ILIKE prefix/substring search against dim_party and fact_payments.
 
             Returns outbound/inbound volumes by payment rail (ACH/Wire/RTP), trend vs
             prior period, top counterparties, sending bank diversity, transaction status
@@ -91,8 +92,8 @@ class PaymentsMcpService(McpService):
             The look-back window is fixed at 360 days.
 
             Args:
-                client_name: Company name exactly as stored in Salesforce Account.Name.
-                             Use the account_name field from get_salesforce_summary.
+                client_name: Company name (full or partial — fuzzy matching supported).
+                auth_context: HMAC-signed auth token (system-injected, do not set).
 
             Returns:
                 JSON string with payment analytics, or error JSON if no data found.
@@ -104,9 +105,12 @@ class PaymentsMcpService(McpService):
             # Truncate excessively long client names (defence against log/cache abuse)
             client_name = client_name.strip()[:256]
 
+            # Extract verified user identity from HMAC-signed auth context
+            user_ctx = verify_auth_context(auth_context)
+
             # OPA authorization (resolved at request time)
             is_authorized = await svc.authorizer.authorize(
-                "get_payment_summary", {"client_name": client_name}
+                "get_payment_summary", {"client_name": client_name, "user_role": user_ctx.user_role}
             )
             if not is_authorized:
                 log.warning("opa_denied", tool="get_payment_summary")
@@ -115,7 +119,6 @@ class PaymentsMcpService(McpService):
             # Resolve column mask from the per-request AgentContext.
             # If no valid signed context header is present, use anonymous()
             # which grants minimum privilege — all compliance columns are masked.
-            from tools_shared.mcp_auth import get_agent_context
             agent_ctx = get_agent_context()
             if agent_ctx is None:
                 agent_ctx = AgentContext.anonymous()

@@ -27,7 +27,7 @@ from .graph import build_enterprise_agent
 from .mcp_bridge import MCPToolBridge, reset_session_id, set_session_id
 
 # Import shared SDK
-from platform_sdk import Agent, AgentConfig, MCPConfig, get_logger, get_langfuse_callback_handler, make_api_key_verifier
+from platform_sdk import Agent, AgentConfig, MCPConfig, get_logger, make_api_key_verifier
 
 if TYPE_CHECKING:
     from platform_sdk import MCPConfig
@@ -177,14 +177,11 @@ class EnterpriseAgentService(Agent):
             # LLM ever needing to choose or know the value.
             sid_token = set_session_id(body.session_id)
             try:
-                _lf_handler = get_langfuse_callback_handler()
-                _callbacks = [_lf_handler] if _lf_handler else []
                 result = await agent_executor.ainvoke(
                     {"messages": [HumanMessage(content=body.message)]},
                     config={
                         "recursion_limit": service.agent_config.recursion_limit,
                         "configurable": {"thread_id": body.session_id},
-                        "callbacks": _callbacks,
                     },
                 )
                 final_message = result["messages"][-1]

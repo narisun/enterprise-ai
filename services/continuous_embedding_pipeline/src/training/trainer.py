@@ -6,8 +6,11 @@ Wraps SentenceTransformers to fine-tune a base embedding model
 using **Multiple Negatives Ranking Loss (MNRL)** on banking-domain
 training pairs.
 
-Every heavy dependency (model, LangFuse client, hyperparameters) is
+Every heavy dependency (model, tracer, hyperparameters) is
 injected — nothing is self-instantiated.
+
+Observability: Uses OpenTelemetry spans (vendor-agnostic). The OTel
+Collector routes traces to the configured backend (LangFuse, Datadog, etc).
 """
 
 from __future__ import annotations
@@ -16,12 +19,14 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, Sequence
 
+from opentelemetry import trace
 from src.domain.models import TrainingPair
 
 if TYPE_CHECKING:
     from src.config import PipelineSettings
 
 logger = logging.getLogger(__name__)
+tracer = trace.get_tracer(__name__)
 
 
 # Protocols for injected collaborators
@@ -44,13 +49,6 @@ class SentenceTransformerProtocol(Protocol):
         ...
 
 
-class LangfuseProtocol(Protocol):
-    """Structural sub-type for the LangFuse observability client."""
-
-    def trace(self, **kwargs):
-        ...
-
-
 class EmbeddingTrainer:
     """
     Fine-tunes a SentenceTransformer model on domain-specific triplets
@@ -62,19 +60,15 @@ class EmbeddingTrainer:
         The pre-trained model to fine-tune (injected).
     settings : PipelineSettings
         Validated hyperparameters and paths.
-    langfuse_client : LangfuseProtocol
-        Observability client for logging training runs.
     """
 
     def __init__(
         self,
         base_model: SentenceTransformerProtocol,
         settings: PipelineSettings,
-        langfuse_client: LangfuseProtocol,
     ) -> None:
         self._model = base_model
         self._settings = settings
-        self._langfuse = langfuse_client
 
     # Public API
 
@@ -111,16 +105,12 @@ class EmbeddingTrainer:
         total_steps = len(loader) * self._settings.num_epochs
         warmup_steps = int(total_steps * self._settings.warmup_ratio)
 
-        self._langfuse.trace(
-            name="embedding_finetune",
-            metadata={
-                "base_model": self._settings.base_model_name,
-                "num_pairs": len(pairs),
-                "epochs": self._settings.num_epochs,
-                "lr": self._settings.learning_rate,
-                "warmup_steps": warmup_steps,
-            },
-        )
+        with tracer.start_as_current_span("embedding_finetune") as span:
+            span.set_attribute("model.base_name", self._settings.base_model_name)
+            span.set_attribute("training.num_pairs", len(pairs))
+            span.set_attribute("training.epochs", self._settings.num_epochs)
+            span.set_attribute("training.learning_rate", self._settings.learning_rate)
+            span.set_attribute("training.warmup_steps", warmup_steps)
 
         logger.info(
             "Starting MNRL fine-tune: %d examples, %d epochs, lr=%.2e, "

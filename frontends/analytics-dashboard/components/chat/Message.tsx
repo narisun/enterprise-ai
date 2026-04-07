@@ -1,8 +1,11 @@
 "use client";
 
-import { User, AlertTriangle } from "lucide-react";
+import { AlertTriangle } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { useUser } from "@auth0/nextjs-auth0/client";
+import { getUserDisplayName, getInitials } from "@/lib/utils";
 import { ThinkingBlock } from "./ThinkingBlock";
+import { SqlReveal } from "./SqlReveal";
 import { ChartRenderer } from "@/components/charts/ChartRenderer";
 import type { UIComponent } from "@/lib/types";
 import ReactMarkdown from "react-markdown";
@@ -37,13 +40,25 @@ function isErrorMessage(text: string): boolean {
 }
 
 export function Message({ message, uiComponents = [], isStreaming = false }: MessageProps) {
+  const { user } = useUser();
   const isUser = message.role === "user";
+  const initials = getInitials(getUserDisplayName(user?.name, user?.email));
 
   // Extract reasoning from message parts (Vercel AI SDK v4)
-  const reasoningText = (message.parts || [])
+  const rawReasoningText = (message.parts || [])
     .filter((part) => part.type === "reasoning")
     .map((part) => String(part.reasoning || ""))
     .join("");
+
+  // Extract SQL queries from reasoning markers and strip them from display text
+  const sqlQueries: string[] = [];
+  const reasoningText = rawReasoningText.replace(
+    /__SQL_QUERY__:([\s\S]*?):__END_SQL__/g,
+    (_match, sql) => {
+      sqlQueries.push(sql.trim());
+      return "";
+    }
+  );
 
   // Extract text content from parts or fallback to content
   const textContent = message.content || (message.parts || [])
@@ -66,7 +81,7 @@ export function Message({ message, uiComponents = [], isStreaming = false }: Mes
           </div>
           <Avatar className="mt-0.5 shrink-0 w-7 h-7">
             <AvatarFallback className="bg-accent text-white text-[10px] font-semibold">
-              S
+              {initials}
             </AvatarFallback>
           </Avatar>
         </div>
@@ -80,6 +95,10 @@ export function Message({ message, uiComponents = [], isStreaming = false }: Mes
               isStreaming={isStreaming}
               hasNarrativeStarted={textContent.length > 0}
             />
+          )}
+
+          {sqlQueries.length > 0 && (
+            <SqlReveal queries={sqlQueries} />
           )}
 
           {hasError && (
@@ -153,7 +172,13 @@ export function Message({ message, uiComponents = [], isStreaming = false }: Mes
             </div>
           )}
 
-          {kpiComponents.length > 0 && (
+          {kpiComponents.length === 1 && (
+            <div className="w-full">
+              <ChartRenderer key="kpi-0" component={kpiComponents[0]} />
+            </div>
+          )}
+
+          {kpiComponents.length > 1 && (
             <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 w-full">
               {kpiComponents.map((component, idx) => (
                 <ChartRenderer key={`kpi-${idx}`} component={component} />

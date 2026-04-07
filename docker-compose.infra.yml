@@ -14,18 +14,48 @@ name: enterprise-ai
 
 # Pinned image versions — update deliberately via PR, never use :latest
 x-versions:
-  pgvector:    &img-pgvector    pgvector/pgvector:pg16
-  redis:       &img-redis       redis:7.2-alpine
-  litellm:     &img-litellm     ghcr.io/berriai/litellm:main-v1.43.0
-  otel:        &img-otel        otel/opentelemetry-collector-contrib:0.103.0
-  opa:         &img-opa         openpolicyagent/opa:0.65.0-debug
-  langfuse:     &img-langfuse     langfuse/langfuse:2.95.1   # Pinned — headless LANGFUSE_INIT_* requires >=2.82.0 (Sept 2024)
-  langfuse-db:  &img-langfuse-db  postgres:16-alpine
+  pgvector:        &img-pgvector        pgvector/pgvector:pg16
+  redis:           &img-redis           redis:7.2-alpine
+  litellm:         &img-litellm         ghcr.io/berriai/litellm:main-v1.43.0
+  otel:            &img-otel            otel/opentelemetry-collector-contrib:0.103.0
+  opa:             &img-opa             openpolicyagent/opa:0.65.0-debug
+  langfuse:        &img-langfuse        langfuse/langfuse:3
+  langfuse-worker: &img-langfuse-worker langfuse/langfuse-worker:3
+  langfuse-db:     &img-langfuse-db     postgres:16-alpine
+  clickhouse:      &img-clickhouse      clickhouse/clickhouse-server:24.3
+  minio:           &img-minio           minio/minio:RELEASE.2024-06-13T22-53-53Z
+
+# Shared LangFuse environment for web + worker containers
+x-langfuse-common: &langfuse-common
+  DATABASE_URL: postgresql://langfuse:${LANGFUSE_DB_PASSWORD:-langfuse-local-dev}@langfuse-db:5432/langfuse
+  CLICKHOUSE_URL: http://langfuse-clickhouse:8123
+  CLICKHOUSE_MIGRATION_URL: clickhouse://langfuse-clickhouse:9000
+  CLICKHOUSE_USER: default
+  CLICKHOUSE_PASSWORD: ${LANGFUSE_CLICKHOUSE_PASSWORD:-langfuse-clickhouse-dev}
+  REDIS_HOST: langfuse-redis
+  REDIS_PORT: 6379
+  REDIS_AUTH: ${LANGFUSE_REDIS_PASSWORD:-langfuse-redis-dev}
+  NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET:-langfuse-dev-secret-change-me}
+  NEXTAUTH_URL: http://localhost:3001
+  SALT: ${LANGFUSE_SALT:-langfuse-dev-salt-change-me}
+  ENCRYPTION_KEY: ${LANGFUSE_ENCRYPTION_KEY:-0000000000000000000000000000000000000000000000000000000000000000}
+  TELEMETRY_ENABLED: "true"
+  LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES: "true"
+  # S3-compatible storage via MinIO (required by langfuse-worker v3)
+  LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse-events
+  LANGFUSE_S3_EVENT_UPLOAD_REGION: us-east-1
+  LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
+  LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+  LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://langfuse-minio:9000
+  LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
 
 services:
 
   # ============================================================
-  # OBSERVABILITY — LangFuse (LLM tracing + prompt management)
+  # OBSERVABILITY — LangFuse v3 (LLM tracing + prompt management)
+  #
+  # v3 architecture: web + worker + ClickHouse + Redis + Postgres
+  # OTLP ingestion endpoint: http://langfuse:3000/api/public/otel
   # ============================================================
   langfuse-db:
     image: *img-langfuse-db
@@ -45,59 +75,114 @@ services:
     networks:
       - ai-network
 
+  langfuse-clickhouse:
+    image: *img-clickhouse
+    container_name: ai-langfuse-clickhouse
+    environment:
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: ${LANGFUSE_CLICKHOUSE_PASSWORD:-langfuse-clickhouse-dev}
+    volumes:
+      - langfuse-clickhouse-data:/var/lib/clickhouse
+      - ./platform/clickhouse/keeper-config.xml:/etc/clickhouse-server/config.d/keeper.xml:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8123/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - ai-network
+
+  langfuse-redis:
+    image: *img-redis
+    container_name: ai-langfuse-redis
+    command: ["redis-server", "--requirepass", "${LANGFUSE_REDIS_PASSWORD:-langfuse-redis-dev}"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${LANGFUSE_REDIS_PASSWORD:-langfuse-redis-dev}", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - ai-network
+
+  # MinIO — S3-compatible object storage for LangFuse event uploads
+  langfuse-minio:
+    image: *img-minio
+    container_name: ai-langfuse-minio
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    command: ["server", "/data", "--console-address", ":9001"]
+    volumes:
+      - langfuse-minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - ai-network
+
+  # One-shot container to create the langfuse-events bucket in MinIO
+  langfuse-minio-init:
+    image: *img-minio
+    container_name: ai-langfuse-minio-init
+    entrypoint: >
+      /bin/sh -c "
+        until mc alias set myminio http://langfuse-minio:9000 $${MINIO_ROOT_USER} $${MINIO_ROOT_PASSWORD}; do sleep 1; done;
+        mc mb --ignore-existing myminio/langfuse-events;
+        echo 'Bucket langfuse-events ready';
+      "
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    depends_on:
+      langfuse-minio:
+        condition: service_healthy
+    restart: "no"
+    networks:
+      - ai-network
+
+  # LangFuse web — serves UI and APIs including OTLP ingestion.
+  # On first run, open http://localhost:3001 to create your account
+  # and project, then copy the API keys into .env.
   langfuse:
     image: *img-langfuse
     container_name: ai-langfuse
     environment:
-      DATABASE_URL: postgresql://langfuse:${LANGFUSE_DB_PASSWORD:-langfuse-local-dev}@langfuse-db:5432/langfuse
-      NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET:-langfuse-dev-secret-change-me}
-      NEXTAUTH_URL: http://localhost:3001
-      SALT: ${LANGFUSE_SALT:-langfuse-dev-salt-change-me}
-      TELEMETRY_ENABLED: "true"
-      LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES: "true"
-      # Auto-provision a project with deterministic API keys on startup.
-      # These must match LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY in .env
-      # so that agent services authenticate successfully after every restart.
-      LANGFUSE_INIT_PROJECT_NAME: "Enterprise AI"
-      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
-      LANGFUSE_INIT_PROJECT_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
-      LANGFUSE_INIT_USER_EMAIL: ${LANGFUSE_INIT_USER_EMAIL:-admin@local.dev}
-      LANGFUSE_INIT_USER_PASSWORD: ${LANGFUSE_INIT_USER_PASSWORD:-admin}
-      LANGFUSE_INIT_USER_NAME: "Admin"
-      LANGFUSE_INIT_ORG_NAME: "Enterprise AI Platform"
+      <<: *langfuse-common
     depends_on:
       langfuse-db:
         condition: service_healthy
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/public/health"]
-      interval: 15s
-      timeout: 10s
-      retries: 8
-      start_period: 60s          # Prisma migrations on first boot can take >90s on WSL
+      langfuse-clickhouse:
+        condition: service_healthy
+      langfuse-redis:
+        condition: service_healthy
+      langfuse-minio-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
     networks:
       - ai-network
     ports:
       - "127.0.0.1:3001:3000"    # LangFuse UI — open http://localhost:3001
 
-  # One-shot container: verifies LANGFUSE_INIT_* provisioned keys correctly.
-  # If the image is too old for headless init, falls back to REST API
-  # provisioning and prints the generated keys for .env update.
-  langfuse-seed:
-    image: *img-langfuse-db
-    container_name: ai-langfuse-seed
-    entrypoint: ["/bin/sh", "/seed/seed-project.sh"]
+  # LangFuse worker — processes background tasks (trace ingestion, evals).
+  langfuse-worker:
+    image: *img-langfuse-worker
+    container_name: ai-langfuse-worker
     environment:
-      LANGFUSE_URL: http://langfuse:3000
-      EXPECTED_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
-      EXPECTED_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
-      SEED_EMAIL: ${LANGFUSE_INIT_USER_EMAIL:-admin@local.dev}
-      SEED_PASSWORD: ${LANGFUSE_INIT_USER_PASSWORD:-admin}
-    volumes:
-      - ./platform/langfuse/seed-project.sh:/seed/seed-project.sh:ro
+      <<: *langfuse-common
     depends_on:
-      langfuse:
+      langfuse-db:
         condition: service_healthy
-    restart: "no"
+      langfuse-clickhouse:
+        condition: service_healthy
+      langfuse-redis:
+        condition: service_healthy
+      langfuse-minio-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
     networks:
       - ai-network
 
@@ -150,6 +235,9 @@ services:
     volumes:
       - ./platform/otel/otel-local.yaml:/etc/otelcol-contrib/config.yaml:ro
     command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    environment:
+      # Auth header for LangFuse OTLP endpoint (Basic base64(public:secret))
+      LANGFUSE_OTEL_AUTH: ${LANGFUSE_OTEL_AUTH:-placeholder}
     # No depends_on — the OTel collector starts immediately alongside other
     # infrastructure with internal retry logic.
     ports:
@@ -183,10 +271,6 @@ services:
       otel-collector:
         condition: service_started
     healthcheck:
-      # LiteLLM uses a non-standard Python install path so we use absolute path.
-      # Falls back gracefully: if /usr/local/bin/python3 is absent the container
-      # will be marked unhealthy but ai-agents uses service_started (below) so
-      # the stack still comes up.
       test: ["CMD", "/usr/local/bin/python3", "-c",
              "import socket,sys; s=socket.socket(); r=s.connect_ex(('localhost',4000)); s.close(); sys.exit(0 if r==0 else 1)"]
       interval: 20s
@@ -227,3 +311,5 @@ networks:
 volumes:
   pgdata:
   langfuse-db-data:
+  langfuse-clickhouse-data:
+  langfuse-minio-data:

@@ -89,3 +89,29 @@ class AgentContextMiddleware:
                 path=scope.get("path", "unknown"),
             )
         await self.app(scope, receive, send)
+
+
+def verify_auth_context(raw_token: str) -> AgentContext:
+    """Verify an HMAC-signed ``auth_context`` token and return the AgentContext.
+
+    This is the **per-call** verification used by MCP tool handlers.  The token
+    is injected into every tool invocation by MCPToolBridge via ContextVar —
+    it is never set by the LLM or the end-user.
+
+    Args:
+        raw_token: The ``<base64url(JSON)>.<hex(HMAC-SHA256)>`` string.
+
+    Returns:
+        AgentContext with verified user_email, user_role, and service identity.
+        Falls back to ``AgentContext.anonymous()`` (minimum-privilege) if the
+        token is empty, malformed, or has an invalid signature.
+    """
+    if not raw_token or not raw_token.strip():
+        log.warning("verify_auth_context_empty", fallback="anonymous")
+        return AgentContext.anonymous()
+
+    try:
+        return AgentContext.from_header(raw_token)
+    except (ValueError, Exception) as exc:
+        log.warning("verify_auth_context_failed", error=str(exc), fallback="anonymous")
+        return AgentContext.anonymous()

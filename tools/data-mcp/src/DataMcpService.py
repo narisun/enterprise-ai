@@ -16,6 +16,7 @@ from platform_sdk import MCPConfig, configure_logging, get_logger, make_error, s
 from platform_sdk.base import McpService
 from platform_sdk.cache import make_cache_key
 from platform_sdk.protocols import Authorizer, CacheStore
+from tools_shared.mcp_auth import verify_auth_context
 
 from .DataQueryService import DataQueryService
 
@@ -77,7 +78,7 @@ class DataMcpService(McpService):
         svc = self
 
         @mcp.tool()
-        async def execute_read_query(query: str, session_id: str) -> str:
+        async def execute_read_query(query: str, session_id: str, auth_context: str = "") -> str:
             """
             Execute a read-only SQL SELECT query against the enterprise database.
 
@@ -87,6 +88,7 @@ class DataMcpService(McpService):
                 session_id: Workspace session UUID — injected automatically by the
                            agent runtime. Pass any non-empty string; the correct
                            value is always supplied by the server.
+                auth_context: HMAC-signed auth token (system-injected, do not set).
 
             Returns:
                 JSON-encoded rows, a "no records found" message, or an error string.
@@ -100,10 +102,13 @@ class DataMcpService(McpService):
             query = query.strip()
             session_id = session_id.strip()
 
+            # Extract verified user identity from HMAC-signed auth context
+            user_ctx = verify_auth_context(auth_context)
+
             # OPA authorization (resolved at request time)
             is_authorized = await svc._authorizer.authorize(
                 "execute_read_query",
-                {"query": query, "session_id": session_id},
+                {"query": query, "session_id": session_id, "user_role": user_ctx.user_role},
             )
             if not is_authorized:
                 log.warning("opa_denied", tool="execute_read_query")

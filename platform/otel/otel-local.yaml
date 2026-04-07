@@ -3,9 +3,13 @@
 #
 # OTel Collector — local development configuration.
 #
-# Traces/metrics: printed to console so developers can see them
-# immediately. LLM observability is handled by LangFuse directly
-# (not via OTel Collector).
+# All telemetry (infrastructure + LLM traces) flows through this
+# collector and is exported to:
+#   1. LangFuse via OTLP/HTTP — LLM observability
+#   2. Debug (console) — local development visibility
+#
+# To swap LangFuse for another backend (Datadog, Honeycomb, etc),
+# replace the otlp/langfuse exporter — no application code changes.
 # ============================================================
 
 receivers:
@@ -36,6 +40,18 @@ exporters:
   debug:
     verbosity: normal
 
+  # LangFuse v3 OTLP ingestion endpoint.
+  # Authentication: Basic base64(LANGFUSE_PUBLIC_KEY:LANGFUSE_SECRET_KEY)
+  # Generate the auth string:
+  #   echo -n "pk-lf-xxx:sk-lf-xxx" | base64
+  # Then set LANGFUSE_OTEL_AUTH in .env
+  otlphttp/langfuse:
+    endpoint: http://langfuse:3000/api/public/otel
+    tls:
+      insecure: true
+    headers:
+      Authorization: "Basic ${env:LANGFUSE_OTEL_AUTH}"
+
 extensions:
   health_check:
     endpoint: 0.0.0.0:13133
@@ -46,7 +62,7 @@ service:
     traces:
       receivers:  [otlp]
       processors: [memory_limiter, resource, batch]
-      exporters:  [debug]
+      exporters:  [debug, otlphttp/langfuse]
     metrics:
       receivers:  [otlp]
       processors: [memory_limiter, resource, batch]

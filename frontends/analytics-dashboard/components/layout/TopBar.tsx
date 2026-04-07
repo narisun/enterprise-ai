@@ -12,7 +12,7 @@ interface TopBarProps {
 
 export function TopBar({ title, sidebarOpen, onToggleSidebar, onNewChat }: TopBarProps) {
   return (
-    <div className="flex items-center h-12 px-3 bg-background shrink-0 z-20">
+    <div className="flex items-center h-14 px-4 bg-background shrink-0 z-20">
       <div className="flex items-center gap-1">
         {!sidebarOpen && (
           <>
@@ -36,7 +36,7 @@ export function TopBar({ title, sidebarOpen, onToggleSidebar, onNewChat }: TopBa
 
       <div className="flex-1 flex justify-center min-w-0 px-4">
         {title && (
-          <h1 className="text-lg font-semibold text-text truncate max-w-lg">
+          <h1 className="text-[15px] font-medium text-text/90 truncate max-w-lg">
             {title}
           </h1>
         )}

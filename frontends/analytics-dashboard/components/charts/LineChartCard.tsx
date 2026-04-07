@@ -8,7 +8,8 @@ import type { ChartMetadata, ChartDataPoint } from "@/lib/types";
 import { ChartCard } from "./ChartCard";
 import {
   pivotByCategory, getSeriesNames, getSeriesColor, tooltipFormatter,
-  TOOLTIP_STYLE, GRID_COLOR, AXIS_TICK_COLOR,
+  TOOLTIP_STYLE, TOOLTIP_ITEM_STYLE, TOOLTIP_LABEL_STYLE, LEGEND_STYLE,
+  GRID_COLOR, AXIS_TICK_COLOR,
 } from "./chartUtils";
 
 interface Props {
@@ -27,8 +28,8 @@ export default function LineChartCard({ metadata, data }: Props) {
           <CartesianGrid strokeDasharray="3 3" stroke={GRID_COLOR} />
           <XAxis dataKey="category" tick={{ fill: AXIS_TICK_COLOR, fontSize: 11 }} axisLine={{ stroke: GRID_COLOR }} tickLine={false} />
           <YAxis tick={{ fill: AXIS_TICK_COLOR, fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={tooltipFormatter(metadata.format_hint)} width={56} />
-          <Tooltip contentStyle={TOOLTIP_STYLE} formatter={tooltipFormatter(metadata.format_hint)} />
-          {series.length > 1 && <Legend wrapperStyle={{ fontSize: 11, color: AXIS_TICK_COLOR }} />}
+          <Tooltip contentStyle={TOOLTIP_STYLE} itemStyle={TOOLTIP_ITEM_STYLE} labelStyle={TOOLTIP_LABEL_STYLE} formatter={tooltipFormatter(metadata.format_hint)} />
+          {series.length > 1 && <Legend wrapperStyle={LEGEND_STYLE} />}
           {series.map((name, idx) => (
             <Line key={name} type="monotone" dataKey={name} stroke={getSeriesColor(idx)} strokeWidth={2} dot={{ r: 3, fill: getSeriesColor(idx) }} activeDot={{ r: 5 }} />
           ))}

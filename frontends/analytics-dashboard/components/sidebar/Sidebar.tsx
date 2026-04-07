@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { PenSquare, Search, Settings, HelpCircle, Menu } from "lucide-react";
 import { ConversationItem } from "./ConversationItem";
+import { UserMenu } from "./UserMenu";
 import { getTimeGroup } from "@/lib/utils";
 import type { Conversation } from "@/lib/types";
 
@@ -45,10 +46,10 @@ export function Sidebar({
 
   return (
     <div className="flex h-full w-64 flex-col bg-surface">
-      <div className="flex items-center justify-between px-3 pt-3 pb-1">
+      <div className="flex items-center justify-between px-3 pt-3.5 pb-1.5">
         <div className="flex items-center gap-2.5">
           <img src="/logo.svg" alt="Enterprise AI" className="w-6 h-6" />
-          <span className="text-sm font-semibold text-text tracking-tight">Enterprise AI</span>
+          <span className="text-[15px] font-semibold text-text tracking-tight">Enterprise AI</span>
         </div>
         <button
           onClick={onToggleSidebar}
@@ -125,23 +126,8 @@ export function Sidebar({
         </div>
       </div>
 
-      <div className="border-t border-border px-2 py-2">
-        {/* TODO: Implement settings page */}
-        <button
-          className="flex items-center gap-3 w-full rounded-lg px-3 py-2 text-sm text-text-muted hover:text-text hover:bg-surface-2 transition-colors"
-          aria-disabled="true"
-        >
-          <Settings size={16} />
-          <span>Settings</span>
-        </button>
-        {/* TODO: Implement help/documentation */}
-        <button
-          className="flex items-center gap-3 w-full rounded-lg px-3 py-2 text-sm text-text-muted hover:text-text hover:bg-surface-2 transition-colors"
-          aria-disabled="true"
-        >
-          <HelpCircle size={16} />
-          <span>Help</span>
-        </button>
+      <div className="border-t border-border px-2 py-2 space-y-0.5">
+        <UserMenu />
       </div>
     </div>
   );

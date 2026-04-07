@@ -17,15 +17,15 @@ interface SuggestionChipsProps {
 
 export function SuggestionChips({ onSelect }: SuggestionChipsProps) {
   return (
-    <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+    <div className="grid grid-cols-2 md:grid-cols-3 gap-2.5">
       {SUGGESTIONS.map(({ label, query, icon: Icon }) => (
         <button
           key={query}
           onClick={() => onSelect(query)}
-          className="flex items-center gap-2.5 px-4 py-3 text-sm rounded-xl border border-border bg-surface hover:bg-surface-2 text-text-muted hover:text-text transition-colors text-left"
+          className="flex items-center gap-3 px-4 py-3.5 text-[13px] rounded-xl border border-border/50 bg-surface hover:bg-surface-2 hover:border-border text-text-muted hover:text-text transition-all duration-150 text-left group"
         >
-          <Icon size={16} className="shrink-0 text-text-muted/60" />
-          <span className="truncate text-xs">{label}</span>
+          <Icon size={16} className="shrink-0 text-accent/50 group-hover:text-accent/80 transition-colors" />
+          <span className="truncate">{label}</span>
         </button>
       ))}
     </div>

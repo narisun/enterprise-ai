@@ -4,7 +4,7 @@ import { useState, useMemo } from "react";
 import { ChevronUp, ChevronDown } from "lucide-react";
 import type { ChartMetadata } from "@/lib/types";
 import { ChartCard } from "./ChartCard";
-import { formatValue } from "./chartUtils";
+import { formatValue, formatDateValue, isDateColumnName } from "./chartUtils";
 
 interface Props {
   metadata: ChartMetadata;
@@ -84,9 +84,22 @@ export default function DataTable({ metadata, data }: Props) {
                 {columns.map((col) => {
                   const val = row[col];
                   const isNum = typeof val === "number";
+                  const isDateCol = isDateColumnName(col);
+
+                  // Format the cell value
+                  let display: string;
+                  if (isDateCol && val != null) {
+                    // Date columns: format regardless of type (int 20250803 or string "2025-08-03")
+                    display = formatDateValue(val as number | string);
+                  } else if (isNum) {
+                    display = formatValue(val, metadata.format_hint);
+                  } else {
+                    display = String(val ?? "");
+                  }
+
                   return (
-                    <td key={col} className={`px-3 py-1.5 whitespace-nowrap ${isNum ? "text-text font-mono" : "text-text-muted"}`}>
-                      {isNum ? formatValue(val, metadata.format_hint) : String(val ?? "")}
+                    <td key={col} className={`px-3 py-1.5 whitespace-nowrap ${isNum && !isDateCol ? "text-text font-mono" : "text-text-muted"}`}>
+                      {display}
                     </td>
                   );
                 })}

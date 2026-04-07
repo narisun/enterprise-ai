@@ -1,0 +1,14 @@
+# ============================================================
+# enterprise-ai — Azure Terraform Variables
+# Copy to terraform.tfvars and fill in your values.
+# ============================================================
+
+resource_group_name = "rg-enterprise-ai"
+location            = "eastus2"
+vm_size             = "Standard_D4s_v3"    # 4 vCPU / 16 GB RAM
+admin_username      = "azureuser"
+ssh_public_key_path = "~/.ssh/id_rsa.pub"
+
+# Your IP address (find with: curl ifconfig.me)
+# Used for SSH and LangFuse admin access
+admin_ip_cidrs = ["YOUR_IP_HERE/32"]

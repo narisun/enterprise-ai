@@ -1,4 +1,0 @@
-replicaCount: 3
-hpa:
-  minReplicas: 3
-  maxReplicas: 10

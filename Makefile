@@ -7,9 +7,7 @@
         test-integration test-evals test-evals-fidelity test-evals-synthesis \
         test-evals-faithfulness test-all test-all-unit \
         lint lint-fix format build sdk-install install-all-deps \
-        k8s-dev k8s-prod k8s-down \
-        tf-bootstrap tf-vpc tf-ecr tf-iam tf-eks tf-elasticache tf-rds \
-        tf-plan-all aws-secrets aws-connect aws-status \
+        cloud-infra cloud-deploy cloud-status cloud-logs cloud-down cloud-tls \
         clean
 
 REPO_ROOT := $(shell pwd)
@@ -56,31 +54,33 @@ COMPOSE_TEST       := docker compose -f docker-compose.yml -f docs/docker-compos
 infra-up: ## Start infrastructure (no test data — prod schema only)
 	@echo "→ Checking for .env file..."
 	@test -f .env || (echo "ERROR: .env not found. Run: cp .env.example .env" && exit 1)
-	$(COMPOSE_INFRA) up -d
+	$(COMPOSE_INFRA) up -d --remove-orphans
 	@echo ""
 	@echo "✅ Infrastructure is running (no test data):"
 	@echo "   🗄  PostgreSQL     → localhost:5432"
 	@echo "   🔀 LiteLLM Proxy  → http://localhost:4000"
-	@echo "   📊 LangFuse       → http://localhost:3001"
+	@echo "   📊 LangFuse       → http://localhost:3001  (first run: create account here)"
 	@echo "   📡 OTel Collector  → http://localhost:4318"
 	@echo "   🛡  OPA            → http://localhost:8181"
 	@echo ""
+	@echo "   LangFuse takes 2-5 min on first boot (Prisma migrations)."
 	@echo "   Run 'make dev-up' to start app services."
 
 infra-test-up: ## Start infrastructure WITH Salesforce + bankdw test data (recommended for local dev)
 	@echo "→ Checking for .env file..."
 	@test -f .env || (echo "ERROR: .env not found. Run: cp .env.example .env" && exit 1)
-	$(COMPOSE_INFRA_TEST) up -d
+	$(COMPOSE_INFRA_TEST) up -d --remove-orphans
 	@echo ""
 	@echo "✅ Infrastructure is running with test fixtures:"
 	@echo "   salesforce.* and bankdw.* schemas seeded from testdata/ CSVs."
 	@echo ""
 	@echo "   🗄  PostgreSQL     → localhost:5432"
 	@echo "   🔀 LiteLLM Proxy  → http://localhost:4000"
-	@echo "   📊 LangFuse       → http://localhost:3001"
+	@echo "   📊 LangFuse       → http://localhost:3001  (first run: create account here)"
 	@echo "   📡 OTel Collector  → http://localhost:4318"
 	@echo "   🛡  OPA            → http://localhost:8181"
 	@echo ""
+	@echo "   LangFuse takes 2-5 min on first boot (Prisma migrations)."
 	@echo "   Run 'make dev-test-up' to start app services."
 
 infra-down: ## Stop infrastructure services (preserves volumes)
@@ -89,12 +89,11 @@ infra-down: ## Stop infrastructure services (preserves volumes)
 infra-reset: ## Wipe infrastructure volumes and restart with test data
 	@echo "→ Stopping infrastructure and removing volumes..."
 	$(COMPOSE_INFRA_TEST) down -v
-	@echo "→ Pulling latest LangFuse image (needed for headless key init)..."
-	$(COMPOSE_INFRA_TEST) pull langfuse || true
 	@echo "→ Restarting infrastructure with test data..."
-	$(COMPOSE_INFRA_TEST) up -d
+	$(COMPOSE_INFRA_TEST) up -d --remove-orphans
 	@echo ""
 	@echo "✅ Infrastructure reset complete (with test fixtures)."
+	@echo "   LangFuse takes 2-5 min on first boot — open http://localhost:3001 to set up."
 
 infra-status: ## Show infrastructure container health
 	$(COMPOSE_INFRA_TEST) ps
@@ -329,122 +328,67 @@ test-analytics: sdk-install ## Run analytics-agent unit tests
 analytics-logs: ## Follow logs from analytics services only
 	$(COMPOSE_TEST) logs -f analytics-agent analytics-dashboard
 
-# ---- Kubernetes (Skaffold) ---------------------------------
+# ---- Azure Cloud Deployment --------------------------------
+#
+# Single-VM deployment to Azure. Infrastructure is provisioned
+# with Terraform, application is deployed via rsync + docker compose.
+#
+# First-time setup:
+#   make cloud-infra         # provision Azure VM + networking + WAF
+#   make cloud-deploy VM_IP=<ip>  # push code and start services
+#
+# Day-to-day:
+#   make cloud-deploy VM_IP=<ip>  # redeploy after code changes
+#   make cloud-status VM_IP=<ip>  # check service health
+#   make cloud-logs VM_IP=<ip>    # follow logs
 
-k8s-dev: ## Deploy to dev Kubernetes cluster
-	skaffold run --profile=dev-cluster
+VM_IP       ?=
+SSH_USER    ?= azureuser
+COMPOSE_CLOUD := docker compose -f docker-compose.cloud.yml
 
-k8s-prod: ## Deploy to production Kubernetes cluster
-	skaffold run --profile=production
-
-k8s-down: ## Delete Kubernetes deployments
-	skaffold delete --profile=dev-cluster
-
-# ---- AWS Infrastructure (Terraform) -------------------------
-# ENV controls which .tfvars file is used: make tf-vpc ENV=prod
-ENV ?= dev
-
-tf-bootstrap: ## (Run ONCE) Create S3 state bucket + DynamoDB lock table, then patch all backend.tf files
-	@echo "→ Bootstrapping Terraform remote state..."
-	cd infra/terraform/bootstrap && \
+cloud-infra: ## Provision Azure infrastructure (VM + VNet + NSG + App Gateway with WAF)
+	@echo "→ Provisioning Azure infrastructure..."
+	cd infra/azure && \
 	  terraform init && \
 	  terraform apply
-	@echo "→ Patching all backend.tf files with the actual bucket name..."
-	bash infra/terraform/configure-backends.sh
 	@echo ""
-	@echo "✅ Bootstrap complete. Bucket name patched into all backend.tf files."
-	@echo "   Next step: make tf-vpc ENV=$(ENV)"
+	@echo "✅ Azure infrastructure ready."
+	@cd infra/azure && terraform output
 
-tf-vpc: ## Apply VPC module (creates subnets, NAT, VPC endpoints)
-	@echo "→ Applying VPC for ENV=$(ENV)..."
-	cd infra/terraform/vpc && \
-	  terraform init && \
-	  terraform apply -var-file="environments/$(ENV).tfvars"
-	@echo "✅ VPC ready. Outputs:"
-	@cd infra/terraform/vpc && terraform output
+cloud-deploy: ## Deploy to Azure VM (VM_IP=<ip> required)
+	@test -n "$(VM_IP)" || (echo "ERROR: set VM_IP=<your-vm-ip>" && exit 1)
+	bash scripts/cloud-deploy.sh "$(VM_IP)" "$(SSH_USER)"
 
-tf-ecr: ## Apply ECR module (creates container registries — global, run once)
-	@echo "→ Applying ECR repositories..."
-	cd infra/terraform/ecr && \
-	  terraform init && \
-	  terraform apply
-	@echo "✅ ECR repos ready:"
-	@cd infra/terraform/ecr && terraform output repository_urls
+cloud-status: ## Show service health on Azure VM (VM_IP=<ip> required)
+	@test -n "$(VM_IP)" || (echo "ERROR: set VM_IP=<your-vm-ip>" && exit 1)
+	ssh -o StrictHostKeyChecking=accept-new $(SSH_USER)@$(VM_IP) \
+	  "cd /opt/enterprise-ai && docker compose -f docker-compose.cloud.yml ps"
 
-tf-iam: ## Apply IAM module (GitHub OIDC + deploy role). Set GITHUB_ORG and GITHUB_REPO.
-	@echo "→ Applying IAM for GitHub OIDC..."
-	@test -n "$(GITHUB_ORG)"  || (echo "ERROR: set GITHUB_ORG=your-org" && exit 1)
-	@test -n "$(GITHUB_REPO)" || (echo "ERROR: set GITHUB_REPO=your-repo" && exit 1)
-	cd infra/terraform/iam && \
-	  terraform init && \
-	  terraform apply \
-	    -var="github_org=$(GITHUB_ORG)" \
-	    -var="github_repo=$(GITHUB_REPO)"
-	@echo "✅ IAM ready. Copy this to GitHub repo variables:"
-	@cd infra/terraform/iam && terraform output github_deploy_role_arn
+cloud-logs: ## Follow logs on Azure VM (VM_IP=<ip> required)
+	@test -n "$(VM_IP)" || (echo "ERROR: set VM_IP=<your-vm-ip>" && exit 1)
+	ssh -o StrictHostKeyChecking=accept-new $(SSH_USER)@$(VM_IP) \
+	  "cd /opt/enterprise-ai && docker compose -f docker-compose.cloud.yml logs -f"
 
-tf-eks: ## Apply EKS module (cluster + nodes + AWS Load Balancer Controller)
-	@echo "→ Applying EKS cluster for ENV=$(ENV)..."
-	@echo "   ⚠️  This takes 12-15 minutes on first apply."
-	cd infra/terraform/eks && \
-	  terraform init && \
-	  terraform apply -var-file="environments/$(ENV).tfvars"
-	@echo "✅ EKS ready. Configuring kubectl..."
-	@cd infra/terraform/eks && eval $$(terraform output -raw configure_kubectl)
-	@kubectl get nodes
+cloud-down: ## Stop all services on Azure VM (VM_IP=<ip> required)
+	@test -n "$(VM_IP)" || (echo "ERROR: set VM_IP=<your-vm-ip>" && exit 1)
+	ssh -o StrictHostKeyChecking=accept-new $(SSH_USER)@$(VM_IP) \
+	  "cd /opt/enterprise-ai && docker compose -f docker-compose.cloud.yml down"
 
-tf-elasticache: ## Apply ElastiCache (Redis) module
-	@test -n "$(REDIS_SECRET_ARN)" || (echo "ERROR: set REDIS_SECRET_ARN" && exit 1)
-	@echo "→ Applying ElastiCache for ENV=$(ENV)..."
-	cd infra/terraform/elasticache && \
-	  terraform init && \
-	  terraform apply \
-	    -var-file="environments/$(ENV).tfvars" \
-	    -var="redis_password_secret_arn=$(REDIS_SECRET_ARN)"
-	@cd infra/terraform/elasticache && terraform output
-
-tf-rds: ## Apply RDS (PostgreSQL + pgvector) module
-	@test -n "$(DB_SECRET_ARN)" || (echo "ERROR: set DB_SECRET_ARN" && exit 1)
-	@echo "→ Applying RDS for ENV=$(ENV)..."
-	cd infra/terraform/rds && \
-	  terraform init && \
-	  terraform apply \
-	    -var-file="environments/$(ENV).tfvars" \
-	    -var="db_password_secret_arn=$(DB_SECRET_ARN)" \
-	    -var="vpc_id=$(shell cd infra/terraform/vpc && terraform output -raw vpc_id)" \
-	    -var='private_subnet_ids=$(shell cd infra/terraform/vpc && terraform output -json private_subnet_ids)' \
-	    -var='allowed_cidr_blocks=$(shell cd infra/terraform/vpc && terraform output -json private_subnet_cidr_blocks)'
-
-tf-plan-all: ## Show plan for all modules without applying (ENV=dev|prod)
-	@echo "=== VPC ===" && cd infra/terraform/vpc && terraform init -backend=false -reconfigure 2>/dev/null && terraform plan -var-file="environments/$(ENV).tfvars" -compact-warnings 2>/dev/null || true
-	@echo "=== EKS ===" && cd infra/terraform/eks && terraform init -backend=false -reconfigure 2>/dev/null && terraform plan -var-file="environments/$(ENV).tfvars" -compact-warnings 2>/dev/null || true
-
-# ---- AWS Operational Commands ------------------------------
-
-aws-connect: ## Configure kubectl for the EKS cluster (ENV=dev|prod)
-	@echo "→ Connecting kubectl to enterprise-ai-$(ENV)..."
-	aws eks update-kubeconfig \
-	  --name "enterprise-ai-$(ENV)" \
-	  --region "$$(cd infra/terraform/eks && terraform output -raw cluster_endpoint 2>/dev/null | cut -d. -f4 || echo us-east-1)"
-	@kubectl get nodes
-
-aws-status: ## Show pod and service status in the ai-platform namespace
-	@echo "=== Pods ==="
-	kubectl get pods -n ai-platform -o wide
-	@echo ""
-	@echo "=== Services ==="
-	kubectl get svc -n ai-platform
-	@echo ""
-	@echo "=== Ingress ==="
-	kubectl get ingress -n ai-platform
-	@echo ""
-	@echo "=== HPA ==="
-	kubectl get hpa -n ai-platform
-
-aws-secrets: ## Create all Secrets Manager entries (interactive — prompts for values)
-	@echo "→ Creating AWS Secrets Manager entries for ENV=$(ENV)..."
-	@echo "   (You will be prompted for each secret value)"
-	@bash infra/k8s/secrets/create-secrets.sh "$(ENV)"
+cloud-tls: ## Set up Let's Encrypt TLS on Azure VM (VM_IP=<ip> DOMAIN=<domain> required)
+	@test -n "$(VM_IP)" || (echo "ERROR: set VM_IP=<your-vm-ip>" && exit 1)
+	@test -n "$(DOMAIN)" || (echo "ERROR: set DOMAIN=<your-domain>" && exit 1)
+	@echo "→ Installing certbot and obtaining TLS certificate..."
+	ssh -o StrictHostKeyChecking=accept-new $(SSH_USER)@$(VM_IP) bash -s -- "$(DOMAIN)" <<'REMOTE'
+	  set -euo pipefail
+	  DOMAIN="$$1"
+	  sudo apt-get install -y certbot
+	  sudo certbot certonly --webroot \
+	    -w /opt/enterprise-ai/certbot-webroot \
+	    -d "$$DOMAIN" \
+	    --non-interactive --agree-tos --email admin@$$DOMAIN
+	  echo "✅ TLS certificate obtained for $$DOMAIN"
+	  echo "   Update platform/nginx/conf.d/analytics.conf to enable HTTPS block"
+	REMOTE
 
 # ---- Cleanup -----------------------------------------------
 

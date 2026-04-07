@@ -6,12 +6,17 @@
 # Every MCP tool call is evaluated here before execution.
 # Default: DENY. Access must be explicitly granted.
 #
+# Two-layer authorization:
+#   1. agent_role  — service-level identity (stamped by MCP server env)
+#   2. user_role   — OAuth identity (from HMAC-signed _auth_context token,
+#                    verified server-side before reaching OPA)
+#
 # Input schema:
 #   input.tool         string  — MCP tool name
 #   input.session_id   string  — Agent session UUID
 #   input.query        string  — SQL query (for data tools)
-#   input.agent_role   string  — Role of the calling agent
-#   input.environment  string  — "local" | "dev" | "prod"
+#   input.agent_role   string  — Role of the MCP service (server-stamped)
+#   input.user_role    string  — OAuth role (extracted from verified context)
 # ============================================================
 
 package mcp.tools
@@ -33,6 +38,7 @@ allow if {
     input.tool == "execute_read_query"
     _valid_session_id
     _agent_is_authorized
+    _user_is_authorized
 }
 
 # ============================================================
@@ -45,6 +51,7 @@ allow if {
 allow if {
     input.tool == "get_salesforce_summary"
     _agent_is_authorized
+    _user_is_authorized
 }
 
 # ============================================================
@@ -57,6 +64,7 @@ allow if {
 allow if {
     input.tool == "get_payment_summary"
     _agent_is_authorized
+    _user_is_authorized
 }
 
 # ============================================================
@@ -69,23 +77,17 @@ allow if {
 allow if {
     input.tool == "search_company_news"
     _agent_is_authorized
+    _user_is_authorized
 }
 
 # ============================================================
 # FUTURE TOOLS — add rules here as new MCP servers are added
 #
+# Example: restrict a tool to admin users only
 # allow if {
-#     input.tool == "search_documents"
-#     _valid_session_id
+#     input.tool == "admin_only_tool"
 #     _agent_is_authorized
-#     input.agent_role in {"research_agent", "commercial_banking_agent"}
-# }
-#
-# allow if {
-#     input.tool == "call_internal_api"
-#     _valid_session_id
-#     _agent_is_authorized
-#     input.agent_role == "transaction_agent"
+#     input.user_role == "admin"
 # }
 # ============================================================
 
@@ -102,8 +104,9 @@ _valid_session_id if {
     regex.match(_UUID_PATTERN, input.session_id)
 }
 
-# Agent identity authorisation
-# In production, agent_role is injected from a signed JWT or service account.
+# Service-level authorization
+# agent_role is stamped by the MCP server from its own AGENT_ROLE env var.
+# Callers cannot override this — it is defence-in-depth.
 _agent_is_authorized if {
     input.agent_role in {
         "commercial_banking_agent",
@@ -111,4 +114,20 @@ _agent_is_authorized if {
         "compliance_agent",
         "rm_prep_agent",
     }
+}
+
+# User-level authorization (OAuth role from Auth0)
+# user_role flows: Auth0 → dashboard → agent → HMAC-signed _auth_context → OPA input.
+# The role is extracted from a cryptographically verified token — never from
+# plaintext tool parameters or LLM output.
+#
+# Accepted roles:
+#   admin   — full access to all tools and data
+#   analyst — standard data analysis and visualization
+#   viewer  — read-only access (same tools, restricted by row/col filters)
+#
+# No environment-based exceptions: dev and prod use the same policy.
+# All users must authenticate via Auth0 — no anonymous access.
+_user_is_authorized if {
+    input.user_role in {"admin", "analyst", "viewer"}
 }

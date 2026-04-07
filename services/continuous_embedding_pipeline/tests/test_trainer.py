@@ -77,7 +77,6 @@ class TestEmbeddingTrainer:
     def test_fit_calls_model_fit(
         self,
         mock_sentence_transformer: MagicMock,
-        mock_langfuse: MagicMock,
         test_settings,
         sample_training_pairs: list[TrainingPair],
         tmp_path: Path,
@@ -88,40 +87,44 @@ class TestEmbeddingTrainer:
         trainer = EmbeddingTrainer(
             base_model=mock_sentence_transformer,
             settings=test_settings,
-            langfuse_client=mock_langfuse,
         )
         result_path = trainer.fit(sample_training_pairs)
 
         mock_sentence_transformer.fit.assert_called_once()
         assert result_path == tmp_path / "model_out"
 
-    def test_fit_traces_to_langfuse(
+    def test_fit_emits_otel_span(
         self,
         mock_sentence_transformer: MagicMock,
-        mock_langfuse: MagicMock,
         test_settings,
         sample_training_pairs: list[TrainingPair],
         tmp_path: Path,
     ) -> None:
-        """Every training run must produce a LangFuse trace."""
+        """Every training run must produce an OTel span named 'embedding_finetune'."""
+        from unittest.mock import patch
+
         test_settings.finetuned_model_output_dir = str(tmp_path / "model_out")
 
-        trainer = EmbeddingTrainer(
-            base_model=mock_sentence_transformer,
-            settings=test_settings,
-            langfuse_client=mock_langfuse,
-        )
-        trainer.fit(sample_training_pairs)
+        mock_span = MagicMock()
+        mock_context = MagicMock()
+        mock_context.__enter__ = MagicMock(return_value=mock_span)
+        mock_context.__exit__ = MagicMock(return_value=False)
 
-        mock_langfuse.trace.assert_called_once()
-        call_kwargs = mock_langfuse.trace.call_args.kwargs
-        assert call_kwargs["name"] == "embedding_finetune"
-        assert "num_pairs" in call_kwargs["metadata"]
+        with patch("src.training.trainer.tracer") as mock_tracer:
+            mock_tracer.start_as_current_span.return_value = mock_context
+
+            trainer = EmbeddingTrainer(
+                base_model=mock_sentence_transformer,
+                settings=test_settings,
+            )
+            trainer.fit(sample_training_pairs)
+
+            mock_tracer.start_as_current_span.assert_called_once_with("embedding_finetune")
+            mock_span.set_attribute.assert_any_call("training.num_pairs", len(sample_training_pairs))
 
     def test_fit_creates_output_directory(
         self,
         mock_sentence_transformer: MagicMock,
-        mock_langfuse: MagicMock,
         test_settings,
         sample_training_pairs: list[TrainingPair],
         tmp_path: Path,
@@ -133,7 +136,6 @@ class TestEmbeddingTrainer:
         trainer = EmbeddingTrainer(
             base_model=mock_sentence_transformer,
             settings=test_settings,
-            langfuse_client=mock_langfuse,
         )
         trainer.fit(sample_training_pairs)
 
@@ -150,7 +152,6 @@ class TestEmbeddingTrainer:
     def test_fit_passes_correct_hyperparameters(
         self,
         mock_sentence_transformer: MagicMock,
-        mock_langfuse: MagicMock,
         test_settings,
         sample_training_pairs: list[TrainingPair],
         tmp_path: Path,
@@ -161,7 +162,6 @@ class TestEmbeddingTrainer:
         trainer = EmbeddingTrainer(
             base_model=mock_sentence_transformer,
             settings=test_settings,
-            langfuse_client=mock_langfuse,
         )
         trainer.fit(sample_training_pairs)
 
@@ -173,7 +173,6 @@ class TestEmbeddingTrainer:
     def test_fit_with_empty_pairs(
         self,
         mock_sentence_transformer: MagicMock,
-        mock_langfuse: MagicMock,
         test_settings,
         tmp_path: Path,
     ) -> None:
@@ -183,7 +182,6 @@ class TestEmbeddingTrainer:
         trainer = EmbeddingTrainer(
             base_model=mock_sentence_transformer,
             settings=test_settings,
-            langfuse_client=mock_langfuse,
         )
         trainer.fit([])
 

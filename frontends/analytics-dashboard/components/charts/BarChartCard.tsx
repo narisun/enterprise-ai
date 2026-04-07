@@ -8,7 +8,8 @@ import type { ChartMetadata, ChartDataPoint } from "@/lib/types";
 import { ChartCard } from "./ChartCard";
 import {
   pivotByCategory, getSeriesNames, getSeriesColor, tooltipFormatter,
-  TOOLTIP_STYLE, GRID_COLOR, AXIS_TICK_COLOR,
+  TOOLTIP_STYLE, TOOLTIP_ITEM_STYLE, TOOLTIP_LABEL_STYLE, LEGEND_STYLE,
+  GRID_COLOR, AXIS_TICK_COLOR,
 } from "./chartUtils";
 
 interface Props {
@@ -42,9 +43,12 @@ export default function BarChartCard({ metadata, data }: Props) {
           />
           <Tooltip
             contentStyle={TOOLTIP_STYLE}
+            itemStyle={TOOLTIP_ITEM_STYLE}
+            labelStyle={TOOLTIP_LABEL_STYLE}
             formatter={tooltipFormatter(metadata.format_hint)}
+            cursor={{ fill: "#222230", opacity: 0.5 }}
           />
-          {series.length > 1 && <Legend wrapperStyle={{ fontSize: 11, color: AXIS_TICK_COLOR }} />}
+          {series.length > 1 && <Legend wrapperStyle={LEGEND_STYLE} />}
           {series.map((name, idx) => (
             <Bar key={name} dataKey={name} fill={getSeriesColor(idx)} radius={[4, 4, 0, 0]} maxBarSize={40} />
           ))}

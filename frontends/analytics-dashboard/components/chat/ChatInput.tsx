@@ -62,11 +62,14 @@ export function ChatInput({
     <form ref={formRef} onSubmit={onSubmit} className="relative">
       <div
         className={cn(
-          "relative flex items-end rounded-2xl border bg-surface transition-all",
-          "focus-within:border-accent/30",
-          isHero && "border-border/80 shadow-lg focus-within:shadow-xl",
-          isFloating && "border-border shadow-[0_-2px_20px_rgba(0,0,0,0.15)] focus-within:shadow-[0_-2px_28px_rgba(0,0,0,0.2)]",
-          !isHero && !isFloating && "border-border shadow-sm focus-within:shadow-md"
+          "relative flex items-end rounded-2xl border bg-surface transition-all duration-200",
+          // Subtle default border, gentle hover highlight, clean focus ring
+          "border-border/50",
+          "hover:border-text-muted/30",
+          "focus-within:border-accent/40 focus-within:shadow-[0_0_0_1px_rgba(99,102,241,0.08)]",
+          isHero && "border-border/60 shadow-[0_2px_12px_rgba(0,0,0,0.08)] hover:shadow-[0_2px_16px_rgba(0,0,0,0.12)] focus-within:shadow-[0_0_0_1px_rgba(99,102,241,0.1),0_4px_20px_rgba(0,0,0,0.12)]",
+          isFloating && "border-border/60 shadow-[0_-1px_12px_rgba(0,0,0,0.1)] hover:shadow-[0_-1px_16px_rgba(0,0,0,0.14)] focus-within:shadow-[0_0_0_1px_rgba(99,102,241,0.1),0_-1px_20px_rgba(0,0,0,0.14)]",
+          !isHero && !isFloating && "shadow-sm hover:shadow-md focus-within:shadow-md",
         )}
       >
         <textarea

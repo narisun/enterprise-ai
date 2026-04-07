@@ -59,17 +59,6 @@ def _build_sentence_transformer(model_name: str, device: str | None):
     return SentenceTransformer(**kwargs)
 
 
-def _build_langfuse_client(public_key: str, secret_key: str, host: str):
-    """Factory for the LangFuse observability client."""
-    from langfuse import Langfuse
-
-    return Langfuse(
-        public_key=public_key,
-        secret_key=secret_key,
-        host=host,
-    )
-
-
 # DI Container
 
 
@@ -107,13 +96,6 @@ class ServiceContainer(containers.DeclarativeContainer):
         device=settings.provided.device,
     )
 
-    langfuse_client = providers.Singleton(
-        _build_langfuse_client,
-        public_key=settings.provided.langfuse_public_key,
-        secret_key=settings.provided.langfuse_secret_key,
-        host=settings.provided.langfuse_host,
-    )
-
     # Domain services
     hard_negative_miner: providers.Factory[HardNegativeMiner] = providers.Factory(
         HardNegativeMiner,
@@ -125,11 +107,9 @@ class ServiceContainer(containers.DeclarativeContainer):
         EmbeddingTrainer,
         base_model=base_model,
         settings=settings,
-        langfuse_client=langfuse_client,
     )
 
     ragas_gate: providers.Factory[RAGASGate] = providers.Factory(
         RAGASGate,
         settings=settings,
-        langfuse_client=langfuse_client,
     )
