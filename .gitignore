@@ -59,3 +59,4 @@ opa
 opa.exe
 helm
 kubectl
+".env copy" 
