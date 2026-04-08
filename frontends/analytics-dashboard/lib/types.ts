@@ -66,3 +66,12 @@ export interface StreamUIComponent extends UIComponent {
   /** Unique ID for deduplication during streaming */
   _streamId?: string;
 }
+
+/**
+ * Follow-up suggestions event emitted by the synthesis node.
+ * Arrives as a typed item inside a Vercel AI SDK `2:` data frame.
+ */
+export interface FollowUpSuggestionsData {
+  type: "follow_up_suggestions";
+  suggestions: string[];
+}

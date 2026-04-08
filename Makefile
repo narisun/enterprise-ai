@@ -114,7 +114,6 @@ dev-up: ## Start app services without test fixtures (requires infra-up first)
 	@echo "✅ App services are running (no test fixtures)."
 	@echo "   Use 'make dev-test-up' to include Salesforce + bankdw test data."
 	@echo ""
-	@echo "   🌐 Chat UI        → http://localhost:8501"
 	@echo "   🤖 Agent API      → http://localhost:8000"
 	@echo "   📈 Analytics API  → http://localhost:8086"
 	@echo "   📊 Analytics Dash → http://localhost:3003"
@@ -133,7 +132,6 @@ dev-test-up: ## Start app services WITH Salesforce + bankdw test fixtures (use f
 	@echo "✅ App services running with test fixtures:"
 	@echo "   salesforce.* and bankdw.* schemas seeded from testdata/ CSVs."
 	@echo ""
-	@echo "   🌐 Chat UI        → http://localhost:8501  (SHOW_TEST_LOGIN=true)"
 	@echo "   🤖 Agent API      → http://localhost:8000"
 	@echo "   📈 Analytics API  → http://localhost:8086"
 	@echo "   📊 Analytics Dash → http://localhost:3003"
@@ -154,7 +152,7 @@ dev-reset: ## Tear down app services and restart with test fixtures (infra untou
 	$(COMPOSE_TEST) up --build -d
 	@echo ""
 	@echo "✅ App services restarted with test fixtures."
-	@echo "   🌐 Chat UI  → http://localhost:8501  (SHOW_TEST_LOGIN=true)"
+	@echo "   🌐 Analytics Dashboard → http://localhost:3000"
 
 dev-restart: ## Restart app containers (no rebuild)
 	$(COMPOSE_TEST) restart
@@ -162,8 +160,8 @@ dev-restart: ## Restart app containers (no rebuild)
 dev-logs: ## Follow logs from app services
 	$(COMPOSE_TEST) logs -f
 
-ui-logs: ## Follow logs from the Chat UI only
-	$(COMPOSE_TEST) logs -f chat-ui
+dashboard-logs: ## Follow logs from the Analytics Dashboard only
+	$(COMPOSE_TEST) logs -f analytics-dashboard
 
 dev-status: ## Show app container health status
 	$(COMPOSE_TEST) ps
@@ -377,18 +375,7 @@ cloud-down: ## Stop all services on Azure VM (VM_IP=<ip> required)
 cloud-tls: ## Set up Let's Encrypt TLS on Azure VM (VM_IP=<ip> DOMAIN=<domain> required)
 	@test -n "$(VM_IP)" || (echo "ERROR: set VM_IP=<your-vm-ip>" && exit 1)
 	@test -n "$(DOMAIN)" || (echo "ERROR: set DOMAIN=<your-domain>" && exit 1)
-	@echo "→ Installing certbot and obtaining TLS certificate..."
-	ssh -o StrictHostKeyChecking=accept-new $(SSH_USER)@$(VM_IP) bash -s -- "$(DOMAIN)" <<'REMOTE'
-	  set -euo pipefail
-	  DOMAIN="$$1"
-	  sudo apt-get install -y certbot
-	  sudo certbot certonly --webroot \
-	    -w /opt/enterprise-ai/certbot-webroot \
-	    -d "$$DOMAIN" \
-	    --non-interactive --agree-tos --email admin@$$DOMAIN
-	  echo "✅ TLS certificate obtained for $$DOMAIN"
-	  echo "   Update platform/nginx/conf.d/analytics.conf to enable HTTPS block"
-	REMOTE
+	bash scripts/cloud-tls.sh "$(VM_IP)" "$(SSH_USER)" "$(DOMAIN)"
 
 # ---- Cleanup -----------------------------------------------
 
@@ -402,3 +389,4 @@ clean: ## Remove Python caches, build artifacts, venv, and test-results
 	rm -rf $(VENV)
 	rm -rf test-results/
 	@echo "✅ Cleaned (run 'make sdk-install' to recreate the venv)"
+                                                                                                                                                                                                                                                                                                                                                                                                                  

@@ -10,7 +10,6 @@ Enterprise AI is an agentic platform for regulated financial-services workflows.
 This repository currently includes:
 
 - `ai-agents`: a generic chat agent backed by a secure SQL MCP server
-- `chat-ui`: a Chainlit frontend for the generic chat agent
 - `analytics-agent`: analytics and insights agent backed by secure data sources
 - `analytics-dashboard`: dashboarding and visualization frontend
 
@@ -39,7 +38,6 @@ This repository currently includes:
 
 | Frontend | Purpose | Default local URL |
 |---|---|---|
-| `chat-ui` | Chainlit UI for the generic chat agent | `http://localhost:8501` |
 | `analytics-dashboard` | Dashboard and visualization frontend | `http://localhost:3001` |
 
 ### MCP tool servers
@@ -137,12 +135,6 @@ make infra-logs     # infrastructure logs
 
 ## Verify It Works
 
-### Generic chat path
-
-1. Open [http://localhost:8501](http://localhost:8501) in your Windows browser — Docker Desktop forwards WSL2 ports to Windows automatically
-2. Sign in with any username in local development
-3. Send a prompt that requires SQL-backed reasoning
-
 ### Health checks
 
 Run from your WSL terminal:
@@ -156,7 +148,6 @@ curl http://localhost:8005/health
 
 | Interface | URL | Notes |
 |---|---|---|
-| Chat UI | `http://localhost:8501` | Chainlit UI for the generic chat agent |
 | Analytics Dashboard | `http://localhost:3001` | Analytics and visualization frontend |
 | Generic Agent API | `http://localhost:8000` | FastAPI service for `ai-agents` |
 | Analytics Agent API | `http://localhost:8005` | FastAPI service for `analytics-agent` |
@@ -351,7 +342,6 @@ enterprise-ai/
 │   ├── src/                  # Generic chat agent service
 │   └── analytics/            # Analytics agent service
 ├── frontends/
-│   ├── chat-ui/              # Chainlit frontend
 │   └── analytics-dashboard/  # Analytics visualization frontend
 ├── tools/
 │   ├── data-mcp/             # Secure SQL MCP

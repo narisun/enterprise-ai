@@ -75,7 +75,11 @@ services:
     ports:
       - "80:80"
       - "443:443"
-      - "3001:3001"       # LangFuse admin (NSG-restricted)
+      # Port 3001 NOT exposed here — langfuse container already has its own
+      # docker-proxy at 127.0.0.1:3001. Binding 0.0.0.0:3001 from nginx would
+      # conflict and cause Docker to abort ALL port bindings for this container.
+      # Access LangFuse admin via SSH tunnel instead:
+      #   ssh -L 3001:localhost:3001 azureuser@<VM_IP>
     depends_on:
       analytics-dashboard:
         condition: service_healthy
@@ -522,11 +526,13 @@ services:
       analytics-agent:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:3000/',r=>{process.exit(r.statusCode<500?0:1)}).on('error',()=>process.exit(1))"]
+      # Hit the Next.js built-in readiness URL which always returns 200
+      # (avoids the 400 that Auth0 returns on the root URL for unauthenticated requests)
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:3000/api/auth/login',r=>{process.exit(r.statusCode<500?0:1)}).on('error',()=>process.exit(1))"]
       interval: 20s
       timeout: 5s
       retries: 5
-      start_period: 30s
+      start_period: 45s
     restart: unless-stopped
     networks:
       - ai-network

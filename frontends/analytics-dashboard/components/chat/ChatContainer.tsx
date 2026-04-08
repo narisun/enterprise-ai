@@ -47,10 +47,12 @@ export function ChatContainer({ chatId, onNewMessage }: ChatContainerProps) {
   }, [chatId]);
 
   const [uiComponentMap, setUiComponentMap] = useState<Record<string, UIComponent[]>>(restoredComponents);
+  const [followUpMap, setFollowUpMap] = useState<Record<string, string[]>>({});
 
-  // Reset the component map when switching conversations
+  // Reset both maps when switching conversations
   useEffect(() => {
     setUiComponentMap(restoredComponents);
+    setFollowUpMap({});
   }, [chatId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const {
@@ -73,7 +75,7 @@ export function ChatContainer({ chatId, onNewMessage }: ChatContainerProps) {
   const isStreaming = status === "streaming";
   const prevStatusRef = useRef(status);
 
-  const { turnComponents, totalCount, commitTurn } = useStreamData(
+  const { turnComponents, turnFollowUpSuggestions, totalCount, commitTurn } = useStreamData(
     data as unknown[] | undefined
   );
 
@@ -134,6 +136,14 @@ export function ChatContainer({ chatId, onNewMessage }: ChatContainerProps) {
         chatRequestTrace.end("ok");
       }
 
+      // Store follow-up suggestions under the last assistant message ID
+      if (turnFollowUpSuggestions.length > 0) {
+        const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
+        if (lastAssistant) {
+          setFollowUpMap((prev) => ({ ...prev, [lastAssistant.id]: turnFollowUpSuggestions }));
+        }
+      }
+
       commitTurnRef.current();
       if (messages.length > 0) {
         saveMessages(
@@ -143,7 +153,7 @@ export function ChatContainer({ chatId, onNewMessage }: ChatContainerProps) {
         );
       }
     }
-  }, [status, chatId, messages, turnComponents.length]);
+  }, [status, chatId, messages, turnComponents.length, turnFollowUpSuggestions]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Notify parent exactly once when the first user message is sent
   useEffect(() => {
@@ -158,8 +168,15 @@ export function ChatContainer({ chatId, onNewMessage }: ChatContainerProps) {
   const handleSuggestionSelect = useCallback(
     (query: string) => {
       setInput(query);
-      // Submit after React flushes the input state update
-      setTimeout(() => formRef.current?.requestSubmit(), 50);
+      // Populate input and focus — let the user review/edit before submitting
+      setTimeout(() => {
+        const textarea = formRef.current?.querySelector("textarea");
+        textarea?.focus();
+        // Place cursor at end of text
+        if (textarea) {
+          textarea.selectionStart = textarea.selectionEnd = textarea.value.length;
+        }
+      }, 0);
     },
     [setInput]
   );
@@ -184,10 +201,12 @@ export function ChatContainer({ chatId, onNewMessage }: ChatContainerProps) {
       <MessageList
         messages={messages}
         uiComponentsByMessage={uiComponentMap}
+        followUpsByMessage={followUpMap}
+        onSuggestionSelect={handleSuggestionSelect}
         isStreaming={isStreaming}
       />
 
-      <div className="px-6 pb-5 pt-2">
+      <div className="px-3 sm:px-6 pb-4 sm:pb-5 pt-2">
         <div className="w-full max-w-[65rem] mx-auto">
           <ChatInput
             input={input}

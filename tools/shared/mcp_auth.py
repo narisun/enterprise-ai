@@ -72,16 +72,27 @@ class AgentContextMiddleware:
             headers = dict(scope.get("headers", []))
             raw = headers.get(b"x-agent-context", b"").decode()
             if raw:
+                # Only catch exceptions from header parsing — NOT from self.app().
+                # The original code wrapped both in one try/except, so any exception
+                # raised by the app (e.g. an abrupt SSE disconnect after the response
+                # had already started) was caught here, logged as
+                # "invalid_agent_context_header" (a false alarm), and then self.app()
+                # was called a second time.  That second call tried to send another
+                # http.response.start into an already-started response, producing:
+                #   RuntimeError: Expected ASGI message 'http.response.body',
+                #                 but got 'http.response.start'.
                 try:
                     ctx = AgentContext.from_header(raw)
+                except Exception as exc:
+                    log.warning("invalid_agent_context_header", error=str(exc))
+                    # Fall through to the anonymous path below.
+                else:
                     token = _agent_context_var.set(ctx)
                     try:
                         await self.app(scope, receive, send)
                     finally:
                         _agent_context_var.reset(token)
                     return
-                except Exception as exc:
-                    log.warning("invalid_agent_context_header", error=str(exc))
         if scope["type"] in ("http",):
             log.warning(
                 "auth_context_fallback_anonymous",

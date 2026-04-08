@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { Sidebar } from "@/components/sidebar/Sidebar";
 import { ChatContainer } from "@/components/chat/ChatContainer";
 import { TopBar } from "@/components/layout/TopBar";
@@ -12,6 +12,14 @@ export default function HomePage() {
   const { conversations, save, remove, rename } = useConversations();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [hasMessages, setHasMessages] = useState(false);
+
+  // Close sidebar by default on mobile screens (< 768px).
+  // Runs once after hydration so it doesn't cause an SSR mismatch.
+  useEffect(() => {
+    if (window.innerWidth < 768) {
+      setSidebarOpen(false);
+    }
+  }, []);
 
   const activeConversation = conversations.find((c) => c.id === activeChatId);
   const conversationTitle = activeConversation?.title || "";
@@ -26,6 +34,10 @@ export default function HomePage() {
     // Check if this conversation has persisted messages
     const saved = loadMessages(id);
     setHasMessages(saved.length > 0);
+    // Close sidebar drawer on mobile after selecting a conversation
+    if (window.innerWidth < 768) {
+      setSidebarOpen(false);
+    }
   }, []);
 
   const handleDeleteChat = useCallback(
@@ -49,8 +61,10 @@ export default function HomePage() {
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">
+      {/* On mobile: fixed overlay drawer (out of flow, full-height).
+          On md+: relative layout panel that pushes content. */}
       <div
-        className={`shrink-0 transition-all duration-300 ease-in-out overflow-hidden ${
+        className={`fixed inset-y-0 left-0 z-40 md:relative md:inset-auto md:z-auto shrink-0 transition-all duration-300 ease-in-out overflow-hidden ${
           sidebarOpen ? "w-64" : "w-0"
         }`}
       >

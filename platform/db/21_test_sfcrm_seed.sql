@@ -77,6 +77,26 @@ COPY salesforce."Case"
 FROM '/testdata/sfcrm/Case.csv'
 WITH (FORMAT csv, HEADER true, NULL '');
 
+-- ----------------------------------------------------------------
+-- Roll Case dates forward so the most recent case aligns with today.
+--
+-- Anchor: the latest CreatedDate in the CSV is 2026-03-04.
+-- Both CreatedDate and ClosedDate are shifted by the same delta so
+-- case duration (open → closed) is preserved exactly.
+-- NULL ClosedDate (open cases) are left unchanged.
+--
+-- Other sfcrm tables (Opportunity, Task, Event, Campaign) already
+-- have dates extending well into late 2026 and need no adjustment.
+-- ----------------------------------------------------------------
+UPDATE salesforce."Case"
+SET
+    "CreatedDate" = "CreatedDate" + (CURRENT_DATE - DATE '2026-03-04'),
+    "ClosedDate"  = CASE
+                     WHEN "ClosedDate" IS NOT NULL
+                     THEN "ClosedDate" + (CURRENT_DATE - DATE '2026-03-04')
+                     ELSE NULL
+                   END;
+
 -- Contract: 26 rows
 COPY salesforce."Contract"
 FROM '/testdata/sfcrm/Contract.csv'

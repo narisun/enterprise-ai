@@ -125,7 +125,6 @@ This builds and starts agents, MCP tools, and frontends. Use `make dev-up` if yo
 
 | Service | Port | Purpose |
 |---|---|---|
-| Chat UI | 8501 | Chainlit generic chat |
 | Generic Agent | 8000 | ReAct chat API |
 | Analytics Agent | 8086 | Analytics and insights agent |
 | Analytics Dashboard | 3003 | Analytics visualization frontend |
@@ -1374,7 +1373,7 @@ Generic secure SQL tool for the chat agent. Exposes `execute_read_query(sql, ses
 
 ### MCPToolBridge (`agents/src/mcp_bridge.py`)
 
-SSE client that connects to one MCP server and converts its tools to LangChain `StructuredTool` objects. Accepts an optional `agent_context` and forwards it as `X-Agent-Context` on the connection. The SSE connection lifecycle is owned by a dedicated `asyncio.Task` to avoid AnyIO cancel-scope errors in frameworks like Chainlit.
+SSE client that connects to one MCP server and converts its tools to LangChain `StructuredTool` objects. Accepts an optional `agent_context` and forwards it as `X-Agent-Context` on the connection. The SSE connection lifecycle is owned by a dedicated `asyncio.Task` to avoid AnyIO cancel-scope errors in async frameworks.
 
 ---
 

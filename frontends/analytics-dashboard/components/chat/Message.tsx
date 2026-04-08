@@ -76,7 +76,7 @@ export function Message({ message, uiComponents = [], isStreaming = false }: Mes
     <div className="animate-fade-in">
       {isUser && (
         <div className="flex justify-end gap-3">
-          <div className="rounded-2xl rounded-tr-md bg-accent/10 px-4 py-2.5 text-sm text-text max-w-[80%]">
+          <div className="rounded-2xl rounded-tr-md bg-accent/10 px-4 py-2.5 text-sm text-text max-w-[92%] sm:max-w-[80%]">
             {textContent}
           </div>
           <Avatar className="mt-0.5 shrink-0 w-7 h-7">
@@ -179,7 +179,7 @@ export function Message({ message, uiComponents = [], isStreaming = false }: Mes
           )}
 
           {kpiComponents.length > 1 && (
-            <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 w-full">
+            <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2 sm:gap-3 w-full">
               {kpiComponents.map((component, idx) => (
                 <ChartRenderer key={`kpi-${idx}`} component={component} />
               ))}

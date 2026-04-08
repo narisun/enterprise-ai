@@ -31,3 +31,19 @@ WITH (FORMAT csv, HEADER true, NULL '');
 COPY bankdw."fact_payments"
 FROM '/testdata/bankdw/fact_payments.csv'
 WITH (FORMAT csv, HEADER true, NULL '');
+
+-- ----------------------------------------------------------------
+-- Roll transaction dates forward so the dataset always ends at
+-- today's date, regardless of when infra-reset is run.
+--
+-- Anchor: the latest TransactionDate in the CSV is 2025-12-28.
+-- Shift  = CURRENT_DATE - anchor
+--   e.g. on 2026-04-07: shift = +100 days
+--        on 2026-07-01: shift = +185 days  (self-heals over time)
+--
+-- After the shift the dataset spans roughly 12 months ending today,
+-- so "last quarter", "last 30 days", "last 10 days", etc. all
+-- return live data on every fresh infra-reset.
+-- ----------------------------------------------------------------
+UPDATE bankdw.fact_payments
+SET "TransactionDate" = "TransactionDate" + (CURRENT_DATE - DATE '2025-12-28');

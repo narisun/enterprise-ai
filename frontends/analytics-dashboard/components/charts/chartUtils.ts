@@ -153,6 +153,61 @@ export function getSeriesNames(data: ChartDataPoint[]): string[] {
   return Array.from(names);
 }
 
+// Axis label truncation
+
+/** Max characters to display on a chart axis tick before shortening. */
+export const AXIS_LABEL_MAX_LEN = 16;
+
+/**
+ * Strip common institutional / geographic suffixes that add length without
+ * adding meaning in a chart context.
+ * e.g. "TD Bank, N.A. (US)" → "TD Bank"
+ *      "BMO Harris Bank (US)" → "BMO Harris Bank"
+ */
+function simplifyCategory(text: string): string {
+  return text
+    .replace(/\s*\([A-Z]{2,3}\)\s*$/, "")   // "(US)", "(CA)", "(UK)" …
+    .replace(/,?\s*N\.A\.\s*$/i, "")          // "N.A." / ", N.A."
+    .replace(/,?\s*Inc\.?\s*$/i, "")          // "Inc" / "Inc."
+    .replace(/,?\s*LLC\.?\s*$/i, "")          // "LLC"
+    .replace(/,?\s*Corp\.?\s*$/i, "")         // "Corp" / "Corp."
+    .replace(/,?\s*Ltd\.?\s*$/i, "")          // "Ltd" / "Ltd."
+    .trim();
+}
+
+/**
+ * Return a shortened axis label for display.
+ * First simplifies common suffixes, then truncates at a word boundary
+ * if the result is still over maxLen characters.
+ * Returns the simplified string unchanged when it already fits.
+ */
+export function truncateLabel(text: string, maxLen = AXIS_LABEL_MAX_LEN): string {
+  const simplified = simplifyCategory(text);
+  if (simplified.length <= maxLen) return simplified;
+  // Cut at the last word boundary before (maxLen - 1) and add an ellipsis
+  const cutAt = maxLen - 1;
+  const lastSpace = simplified.lastIndexOf(" ", cutAt);
+  const stem = lastSpace > 0 ? simplified.slice(0, lastSpace) : simplified.slice(0, cutAt);
+  return stem + "…";
+}
+
+/**
+ * Build a map of { displayLabel → originalFullLabel } for every category
+ * whose display label differs from the original (i.e. was shortened).
+ * Used to render a name legend and to show full names in tooltips.
+ */
+export function buildShortNameMap(
+  categories: string[],
+  maxLen = AXIS_LABEL_MAX_LEN,
+): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const cat of categories) {
+    const short = truncateLabel(cat, maxLen);
+    if (short !== cat) map.set(short, cat);
+  }
+  return map;
+}
+
 // Theme-aware styles
 
 /**

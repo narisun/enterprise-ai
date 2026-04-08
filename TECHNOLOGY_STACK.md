@@ -17,8 +17,8 @@ The backend is written in **object-oriented Python 3.11+** throughout. All servi
 | **LangChain** | LLM abstraction and tooling layer used alongside LangGraph. Provides `ChatOpenAI` wrappers, tool schemas, and chain primitives consumed by the LangGraph orchestration logic. | https://python.langchain.com |
 | **Pydantic v2** | Data validation and typed configuration. Used for request/response models in FastAPI, structured agent outputs (`RMBrief`), and environment-driven config objects (`AgentConfig`, `MCPConfig`). | https://docs.pydantic.dev |
 | **Uvicorn** | ASGI server that runs FastAPI services inside Docker containers. Used with the `standard` extras (watchfiles, httptools) for production-grade async serving. | https://www.uvicorn.org |
-| **asyncpg** | High-performance async PostgreSQL driver. Used by MCP servers (data-mcp, salesforce-mcp, payments-mcp) for all database queries, and by the Chainlit data layer for conversation persistence. | https://magicstack.github.io/asyncpg |
-| **SQLAlchemy 2** | ORM used specifically by the Chainlit data layer (`SQLAlchemyDataLayer`) to persist conversation threads and messages in PostgreSQL. | https://www.sqlalchemy.org |
+| **asyncpg** | High-performance async PostgreSQL driver. Used by MCP servers (data-mcp, salesforce-mcp, payments-mcp) for all database queries, and by the analytics agent for conversation persistence. | https://magicstack.github.io/asyncpg |
+| **SQLAlchemy 2** | ORM used by the analytics agent's conversation persistence layer to store and query conversation threads and messages in PostgreSQL. | https://www.sqlalchemy.org |
 | **httpx** | Async HTTP client. Used by `OpaClient` in the platform SDK to call the OPA REST API for authorization decisions, and in integration/eval test suites. | https://www.python-httpx.org |
 | **Redis (redis-py async)** | Tool-result cache and rate-limit store. The `ToolResultCache` in the platform SDK stores MCP tool outputs in Redis with configurable TTLs, reducing repeated data-source queries. Also used by LiteLLM for semantic caching. | https://redis-py.readthedocs.io |
 | **Jinja2** | Prompt templating engine. The `PromptLoader` in the platform SDK renders agent system prompts from Jinja2 templates, with sandboxed execution to prevent server-side template injection (SSTI). | https://jinja.palletsprojects.com |
@@ -61,12 +61,6 @@ The platform has two distinct frontends serving different user personas.
 | **Auth0 (`@auth0/nextjs-auth0`)** | OAuth 2.0 / OIDC authentication for the analytics dashboard. Handles login flows, session management, and JWT issuance for calls to the analytics agent. | https://auth0.com |
 | **lucide-react** | Icon library used throughout the dashboard UI. | https://lucide.dev |
 | **react-markdown + remark-gfm** | Renders agent markdown responses (tables, code blocks, lists) inside chat and result panels. | https://github.com/remarkjs/react-markdown |
-
-### Chat UI — Chainlit (Python)
-
-| Technology | Purpose | More Information |
-|---|---|---|
-| **Chainlit** | Python-native chat application framework. The `chat-ui` service is a Chainlit app that connects to the agent backend, renders a full chat interface, handles user authentication, and persists conversation threads via its `SQLAlchemyDataLayer`. | https://chainlit.io |
 
 ---
 

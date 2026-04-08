@@ -105,47 +105,8 @@ services:
       - "127.0.0.1:8000:8000"  # Bind to loopback only in dev
 
   # ============================================================
-  # FRONTENDS — User-facing interfaces (chat UI, future plugins)
+  # FRONTENDS — Analytics Dashboard (Next.js)
   # ============================================================
-  chat-ui:
-    build:
-      context: .                           # Build from monorepo root
-      dockerfile: frontends/chat-ui/Dockerfile
-    container_name: ai-chat-ui
-    environment:
-      LITELLM_BASE_URL: http://litellm:4000/v1    # Container name on ai-network
-      MCP_SSE_URL: http://data-mcp:8080/sse        # Container name on ai-network
-      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
-      # Required by Chainlit to sign session JWTs — generate with:
-      #   python3 -c "import secrets; print(secrets.token_hex(32))"
-      CHAINLIT_AUTH_SECRET: ${CHAINLIT_AUTH_SECRET}
-      # Conversation history: Chainlit persists threads and messages into
-      # the shared PostgreSQL instance via SQLAlchemyDataLayer (asyncpg driver).
-      # Tables are created automatically on first startup.
-      DATABASE_URL: "postgresql+asyncpg://admin:${POSTGRES_PASSWORD}@pgvector:5432/ai_memory"
-      # Shown in the Help modal so users know which environment they are on
-      APP_VERSION: ${APP_VERSION:-1.0.0}
-      APP_ENV: ${APP_ENV:-development}
-      SERVICE_NAME: chat-ui
-      # Agent behaviour — keeps chat-ui in sync with ai-agents service settings
-      AGENT_MODEL_ROUTE: ${AGENT_MODEL_ROUTE:-complex-routing}
-      ENABLE_COMPACTION: ${ENABLE_COMPACTION:-true}
-      AGENT_CONTEXT_TOKEN_LIMIT: ${AGENT_CONTEXT_TOKEN_LIMIT:-6000}
-      AGENT_RECURSION_LIMIT: ${AGENT_RECURSION_LIMIT:-10}
-      <<: [*otel-env, *langfuse-env]
-    depends_on:
-      data-mcp:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:8501/health"]
-      interval: 20s
-      timeout: 10s
-      retries: 5
-      start_period: 30s
-    networks:
-      - ai-network
-    ports:
-      - "127.0.0.1:8501:8501"    # Chat UI — open http://localhost:8501 in your browser
 
   # ============================================================
   # ANALYTICS AGENT — MCP SERVERS (data sources)
@@ -281,6 +242,11 @@ services:
       ENABLE_COMPACTION: ${ENABLE_COMPACTION:-true}
       AGENT_CONTEXT_TOKEN_LIMIT: ${AGENT_CONTEXT_TOKEN_LIMIT:-6000}
       AGENT_RECURSION_LIMIT: ${AGENT_RECURSION_LIMIT:-10}
+      # MCP bridge startup timeout — must be well under the effective health-check
+      # window (start_period + retries*interval = 60 + 5*15 = 135 s).
+      # Bridges that don't connect within this limit start in degraded mode and
+      # reconnect automatically in the background via MCPToolBridge._reconnect_loop.
+      MCP_STARTUP_TIMEOUT: "30"
       <<: [*otel-env, *langfuse-env]
     depends_on:
       data-mcp:
@@ -297,7 +263,7 @@ services:
       interval: 15s
       timeout: 5s
       retries: 5
-      start_period: 30s
+      start_period: 60s    # Widened from 30s: allows MCP_STARTUP_TIMEOUT (30s) + graph init to complete
     networks:
       - ai-network
     ports:

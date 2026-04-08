@@ -1,0 +1,1180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agentic AI Pipeline Explorer — Step-by-Step</title>
+<style>
+/* ═══════════════════════════════════════════════════════════════ */
+/* ENTERPRISE LIGHT THEME                                          */
+/* ═══════════════════════════════════════════════════════════════ */
+:root {
+  --bg:       #eef2f7;
+  --bg2:      #ffffff;
+  --bg3:      #f4f7fb;
+  --border:   #d8e2ef;
+  --border-hi:#b5c8e0;
+  --text:     #1a2740;
+  --text2:    #475d7a;
+  --text3:    #8fa3bc;
+  --accent:   #1a56a0;
+  --user:     #1d4ed8;
+  --sec:      #b91c1c;
+  --ctx:      #6d28d9;
+  --rag:      #047857;
+  --orch:     #0369a1;
+  --llm:      #4338ca;
+  --tools:    #b45309;
+  --guard:    #b91c1c;
+  --cache:    #0f766e;
+  --resp:     #0284c7;
+  --eval:     #be185d;
+  --obs:      #475569;
+  --ingest:   #4d7c0f;
+  --radius:   10px;
+  --speed:    0.4s;
+  --shadow:   0 1px 4px rgba(26,40,64,0.07), 0 4px 16px rgba(26,40,64,0.05);
+  --shadow-hi:0 2px 8px rgba(26,86,160,0.12), 0 8px 24px rgba(26,86,160,0.08);
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{
+  background:var(--bg);
+  color:var(--text);
+  font-family:'Segoe UI','Inter',-apple-system,BlinkMacSystemFont,system-ui,sans-serif;
+  font-size:13px;line-height:1.5;
+  min-height:100vh;
+}
+
+/* ═══════════════════════════════════════════════════════════════ */
+/* TOP BAR                                                         */
+/* ═══════════════════════════════════════════════════════════════ */
+#topbar{
+  position:sticky;top:0;z-index:200;
+  background:rgba(255,255,255,0.97);
+  backdrop-filter:blur(12px);
+  border-bottom:2px solid #c8d8eb;
+  box-shadow:0 2px 8px rgba(26,40,64,0.08);
+  display:flex;align-items:center;gap:12px;
+  padding:10px 24px;
+}
+#topbar .brand{display:flex;flex-direction:column;gap:0}
+#topbar h1{font-size:15px;font-weight:700;color:var(--accent);white-space:nowrap;letter-spacing:-0.2px}
+#topbar .sub{font-size:10px;color:var(--text3);white-space:nowrap}
+.sep{width:1px;height:28px;background:var(--border);flex-shrink:0}
+.step-nav{display:flex;gap:3px;flex-wrap:wrap;align-items:center}
+.step-dot{
+  width:28px;height:28px;border-radius:50%;
+  border:2px solid var(--border);
+  display:flex;align-items:center;justify-content:center;
+  font-size:10px;font-weight:700;color:var(--text3);cursor:pointer;
+  transition:all var(--speed);background:#fff;
+}
+.step-dot.active{border-color:var(--accent);color:#fff;background:var(--accent);box-shadow:0 0 0 3px rgba(26,86,160,0.15)}
+.step-dot.visited{border-color:var(--accent);color:var(--accent);background:rgba(26,86,160,0.06)}
+.step-dot:hover{border-color:var(--accent);color:var(--accent);background:rgba(26,86,160,0.08)}
+.nav-btns{display:flex;gap:6px;margin-left:auto;align-items:center}
+.nav-btns button{
+  background:#fff;border:1px solid var(--border);border-radius:6px;
+  color:var(--text2);padding:5px 14px;font-size:11px;cursor:pointer;
+  transition:all 0.2s;font-weight:600;
+}
+.nav-btns button:hover{border-color:var(--accent);color:var(--accent);background:rgba(26,86,160,0.05)}
+.nav-btns button:disabled{opacity:0.35;cursor:default}
+.nav-btns .primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.nav-btns .primary:hover{background:#1347880;color:#fff}
+#revealAllBtn{font-size:10px;padding:4px 10px;background:#fff}
+
+/* ═══════════════════════════════════════════════════════════════ */
+/* PROGRESS BAR                                                    */
+/* ═══════════════════════════════════════════════════════════════ */
+#progressBar{
+  height:3px;background:var(--border);position:sticky;top:54px;z-index:199;
+}
+#progressFill{height:100%;background:var(--accent);transition:width var(--speed);width:0}
+
+/* ═══════════════════════════════════════════════════════════════ */
+/* PIPELINE OVERVIEW (top 12-step panel)                          */
+/* ═══════════════════════════════════════════════════════════════ */
+#pipeline-overview{
+  background:#fff;
+  border-bottom:2px solid var(--border);
+  padding:16px 24px 14px;
+  box-shadow:0 2px 8px rgba(26,40,64,0.06);
+}
+#pipeline-overview .ov-title{
+  font-size:11px;font-weight:700;color:var(--text3);
+  text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;
+}
+.ov-grid{
+  display:grid;
+  grid-template-columns:repeat(12,1fr);
+  gap:6px;
+}
+.ov-step{
+  cursor:pointer;
+  border-radius:8px;
+  padding:9px 8px 8px;
+  text-align:center;
+  border:1.5px solid var(--border);
+  background:var(--bg3);
+  transition:all 0.25s;
+  position:relative;
+}
+.ov-step:hover{border-color:var(--accent);background:rgba(26,86,160,0.05);transform:translateY(-1px);box-shadow:0 2px 8px rgba(26,86,160,0.1)}
+.ov-step.ov-active{border-color:var(--accent);background:rgba(26,86,160,0.07);box-shadow:0 0 0 2px rgba(26,86,160,0.18)}
+.ov-step.ov-visited{opacity:1}
+.ov-num{
+  width:24px;height:24px;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;
+  font-size:11px;font-weight:800;margin:0 auto 5px;
+}
+.ov-name{font-size:9px;font-weight:600;color:var(--text2);line-height:1.3}
+.ov-tag{font-size:8px;color:var(--text3);margin-top:2px}
+
+/* Connector line between overview steps */
+.ov-connector{
+  display:none; /* handled by grid layout */
+}
+
+/* ═══════════════════════════════════════════════════════════════ */
+/* CANVAS                                                          */
+/* ═══════════════════════════════════════════════════════════════ */
+#canvas{
+  max-width:1320px;margin:0 auto;padding:20px 24px 60px;
+}
+
+/* ═══════════════════════════════════════════════════════════════ */
+/* PIPELINE STEP                                                   */
+/* ═══════════════════════════════════════════════════════════════ */
+.step{
+  opacity:0;transform:translateY(24px);
+  transition:opacity var(--speed),transform var(--speed);
+  pointer-events:none;max-height:0;overflow:hidden;margin-bottom:0;
+}
+.step.visible{
+  opacity:1;transform:translateY(0);pointer-events:auto;
+  max-height:none;overflow:visible;margin-bottom:16px;
+}
+
+/* The main card */
+.card{
+  background:var(--bg2);
+  border:1.5px solid var(--border);
+  border-radius:var(--radius);
+  overflow:hidden;
+  box-shadow:var(--shadow);
+  transition:box-shadow 0.25s;
+}
+.card:hover{box-shadow:var(--shadow-hi)}
+.card-head{
+  display:flex;align-items:center;gap:10px;
+  padding:13px 18px;
+  cursor:pointer;user-select:none;
+  border-bottom:1px solid transparent;
+}
+.card-head:hover{background:rgba(26,86,160,0.02)}
+.card.open .card-head{border-bottom-color:var(--border)}
+.step-num{
+  width:34px;height:34px;border-radius:50%;display:flex;
+  align-items:center;justify-content:center;font-size:13px;
+  font-weight:800;flex-shrink:0;
+}
+.card-title{font-size:14px;font-weight:700;flex:1}
+.card-summary{
+  font-size:11px;color:var(--text2);
+  padding:2px 16px 12px 62px;
+  line-height:1.5;
+  font-style:italic;
+  border-bottom:1px solid var(--border);
+}
+.card-tag{
+  font-size:9px;padding:3px 9px;border-radius:4px;font-weight:700;
+  text-transform:uppercase;letter-spacing:0.8px;
+  flex-shrink:0;
+}
+.expand-icon{
+  font-size:14px;color:var(--text3);transition:transform 0.3s;
+  width:20px;text-align:center;
+}
+.card.open .expand-icon{transform:rotate(180deg)}
+
+/* Card body */
+.card-body{
+  max-height:0;overflow:hidden;transition:max-height 0.5s ease;
+}
+.card.open .card-body{max-height:4000px}
+.card-inner{padding:16px 18px}
+
+/* ═══════════════════════════════════════════════════════════════ */
+/* ARROW CONNECTOR                                                 */
+/* ═══════════════════════════════════════════════════════════════ */
+.arrow{
+  display:flex;flex-direction:column;align-items:center;
+  padding:2px 0;opacity:0;transition:opacity 0.3s;
+}
+.arrow.visible{opacity:1}
+.arrow svg{width:22px;height:26px}
+.arrow-label{font-size:9px;color:var(--text3);text-align:center;max-width:500px;margin-top:1px}
+.arrow path{stroke:var(--border-hi);stroke-width:2;fill:none;marker-end:url(#ah)}
+
+/* ═══════════════════════════════════════════════════════════════ */
+/* DETAIL BOXES                                                    */
+/* ═══════════════════════════════════════════════════════════════ */
+.row{display:flex;gap:10px;margin-bottom:10px;flex-wrap:wrap}
+.row:last-child{margin-bottom:0}
+.box{
+  flex:1;min-width:140px;
+  background:var(--bg3);
+  border:1px solid var(--border);
+  border-radius:8px;padding:10px 12px;
+}
+.box-t{font-size:11px;font-weight:700;margin-bottom:5px;display:flex;align-items:center;gap:5px}
+.box-b{font-size:10px;color:var(--text2);line-height:1.6}
+.box-b span{
+  display:inline-block;background:rgba(26,40,64,0.05);
+  border-radius:3px;padding:1px 6px;margin:1px 2px 1px 0;
+  border:1px solid rgba(26,40,64,0.06);
+  color:var(--text);
+}
+.note{font-size:9px;color:var(--text3);font-style:italic;margin-top:6px;padding-top:5px;border-top:1px dashed var(--border)}
+.note::before{content:"⚙ "}
+
+/* Color accents */
+.bl{border-left:3px solid}
+.bl-user{border-left-color:var(--user)}.bl-sec{border-left-color:var(--sec)}
+.bl-ctx{border-left-color:var(--ctx)}.bl-rag{border-left-color:var(--rag)}
+.bl-orch{border-left-color:var(--orch)}.bl-llm{border-left-color:var(--llm)}
+.bl-tools{border-left-color:var(--tools)}.bl-guard{border-left-color:var(--guard)}
+.bl-cache{border-left-color:var(--cache)}.bl-resp{border-left-color:var(--resp)}
+.bl-eval{border-left-color:var(--eval)}.bl-obs{border-left-color:var(--obs)}
+.bl-ingest{border-left-color:var(--ingest)}
+
+/* ═══════════════════════════════════════════════════════════════ */
+/* AGENT LOOP                                                      */
+/* ═══════════════════════════════════════════════════════════════ */
+.loop-wrap{
+  border:2px dashed #b0c8e0;border-radius:10px;padding:14px;
+  position:relative;margin-top:10px;background:rgba(3,105,161,0.03);
+}
+.loop-label{
+  position:absolute;top:-10px;left:14px;background:var(--bg2);
+  padding:0 10px;font-size:10px;font-weight:700;color:var(--orch);
+  letter-spacing:0.5px;
+}
+.loop-steps{display:flex;gap:6px;align-items:stretch;flex-wrap:wrap}
+.loop-step{
+  flex:1;min-width:100px;background:#fff;border:1px solid var(--border);
+  border-radius:6px;padding:8px 10px;text-align:center;
+}
+.loop-step .ls-num{font-size:9px;font-weight:700;color:var(--orch);margin-bottom:3px}
+.loop-step .ls-title{font-size:10px;font-weight:700;margin-bottom:3px}
+.loop-step .ls-desc{font-size:9px;color:var(--text2)}
+.loop-arrow{display:flex;align-items:center;color:var(--text3);font-size:14px;padding:0 2px;flex-shrink:0}
+
+/* ═══════════════════════════════════════════════════════════════ */
+/* LLM MESSAGE STACK                                               */
+/* ═══════════════════════════════════════════════════════════════ */
+.msg-stack{display:flex;flex-direction:column;gap:3px}
+.msg-row{
+  display:flex;gap:8px;align-items:flex-start;padding:6px 10px;
+  border-radius:6px;font-size:10px;border:1px solid var(--border);
+}
+.msg-role{font-weight:700;min-width:70px;flex-shrink:0;font-size:10px}
+.msg-content{color:var(--text2);flex:1}
+
+/* ═══════════════════════════════════════════════════════════════ */
+/* LLM PIPELINE                                                    */
+/* ═══════════════════════════════════════════════════════════════ */
+.llm-pipe{display:flex;gap:0;align-items:stretch;flex-wrap:wrap}
+.llm-stage{
+  flex:1;min-width:110px;
+  background:var(--bg3);border:1px solid var(--border);padding:10px;
+}
+.llm-stage:first-child{border-radius:8px 0 0 8px}
+.llm-stage:last-child{border-radius:0 8px 8px 0}
+.llm-stage .st{font-size:10px;font-weight:700;margin-bottom:4px}
+.llm-stage .sd{font-size:9px;color:var(--text2);line-height:1.5}
+.llm-arrow{width:20px;display:flex;align-items:center;justify-content:center;color:var(--text3);font-size:14px;flex-shrink:0}
+
+/* ═══════════════════════════════════════════════════════════════ */
+/* SUMMARY STRIP                                                   */
+/* ═══════════════════════════════════════════════════════════════ */
+.summary{
+  font-size:11px;color:var(--text2);padding:10px 14px;
+  background:rgba(26,86,160,0.04);
+  border:1px solid rgba(26,86,160,0.1);
+  border-radius:8px;margin-top:10px;line-height:1.6;
+}
+.summary strong{color:var(--text)}
+.summary .in,.summary .out{
+  display:inline-block;padding:1px 7px;border-radius:4px;font-size:10px;font-weight:600;
+}
+.summary .in{background:rgba(26,86,160,0.1);color:var(--accent)}
+.summary .out{background:rgba(4,120,87,0.1);color:var(--rag)}
+
+/* ═══════════════════════════════════════════════════════════════ */
+/* LEGEND                                                          */
+/* ═══════════════════════════════════════════════════════════════ */
+#legend{
+  position:fixed;bottom:12px;right:12px;z-index:300;
+  background:rgba(255,255,255,0.97);backdrop-filter:blur(10px);
+  border:1.5px solid var(--border);border-radius:8px;
+  box-shadow:0 4px 16px rgba(26,40,64,0.10);
+  padding:10px 14px;display:flex;flex-wrap:wrap;gap:5px 14px;max-width:460px;
+}
+.leg{display:flex;align-items:center;gap:4px;font-size:9px;color:var(--text2)}
+.leg .d{width:8px;height:8px;border-radius:2px;flex-shrink:0}
+
+/* ═══════════════════════════════════════════════════════════════ */
+/* PRINT                                                           */
+/* ═══════════════════════════════════════════════════════════════ */
+@media print{
+  #topbar,#progressBar,#legend,#pipeline-overview,.nav-btns{display:none!important}
+  .step{opacity:1!important;transform:none!important;pointer-events:auto!important;max-height:none!important;overflow:visible!important;margin-bottom:16px!important}
+  .arrow{opacity:1!important}
+  .card-body{max-height:none!important}
+  body{background:#fff;color:#111}
+}
+
+/* ═══════════════════════════════════════════════════════════════ */
+/* RESPONSIVE                                                      */
+/* ═══════════════════════════════════════════════════════════════ */
+@media(max-width:900px){
+  .ov-grid{grid-template-columns:repeat(6,1fr)}
+}
+@media(max-width:540px){
+  .ov-grid{grid-template-columns:repeat(4,1fr)}
+  #topbar{flex-wrap:wrap}
+}
+</style>
+</head>
+<body>
+
+<!-- SVG arrow marker -->
+<svg style="position:absolute;width:0;height:0">
+  <defs><marker id="ah" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+    <path d="M0,0 L8,3 L0,6" fill="none" stroke="#b5c8e0" stroke-width="1.5"/>
+  </marker></defs>
+</svg>
+
+<!-- ═══════════════════ TOP BAR ═══════════════════ -->
+<div id="topbar">
+  <div class="brand">
+    <h1>Agentic AI Pipeline Explorer</h1>
+    <span class="sub">Enterprise Engineering Reference · Click through each step</span>
+  </div>
+  <div class="sep"></div>
+  <div class="step-nav" id="stepNav"></div>
+  <div class="nav-btns">
+    <button id="revealAllBtn" onclick="revealAll()">Reveal All</button>
+    <button id="prevBtn" onclick="goStep(currentStep-1)" disabled>← Prev</button>
+    <button id="nextBtn" class="primary" onclick="goStep(currentStep+1)">Next →</button>
+  </div>
+</div>
+<div id="progressBar"><div id="progressFill"></div></div>
+
+<!-- ═══════════════════ PIPELINE OVERVIEW ═══════════════════ -->
+<div id="pipeline-overview">
+  <div class="ov-title">Full Pipeline — 12 Steps at a Glance</div>
+  <div class="ov-grid">
+
+    <div class="ov-step" onclick="goStep(1)" id="ov-1">
+      <div class="ov-num" style="background:rgba(29,78,216,0.12);color:var(--user)">1</div>
+      <div class="ov-name" style="color:var(--user)">User Input</div>
+      <div class="ov-tag">Entry Point</div>
+    </div>
+
+    <div class="ov-step" onclick="goStep(2)" id="ov-2">
+      <div class="ov-num" style="background:rgba(185,28,28,0.1);color:var(--sec)">2</div>
+      <div class="ov-name" style="color:var(--sec)">Auth &amp; AuthZ</div>
+      <div class="ov-tag">Security</div>
+    </div>
+
+    <div class="ov-step" onclick="goStep(3)" id="ov-3">
+      <div class="ov-num" style="background:rgba(185,28,28,0.1);color:var(--guard)">3</div>
+      <div class="ov-name" style="color:var(--guard)">Pre-Model Guards</div>
+      <div class="ov-tag">Safety Gate</div>
+    </div>
+
+    <div class="ov-step" onclick="goStep(4)" id="ov-4">
+      <div class="ov-num" style="background:rgba(109,40,217,0.1);color:var(--ctx)">4</div>
+      <div class="ov-name" style="color:var(--ctx)">Context Eng.</div>
+      <div class="ov-tag">Assembly</div>
+    </div>
+
+    <div class="ov-step" onclick="goStep(5)" id="ov-5">
+      <div class="ov-num" style="background:rgba(4,120,87,0.1);color:var(--rag)">5</div>
+      <div class="ov-name" style="color:var(--rag)">RAG / Retrieval</div>
+      <div class="ov-tag">Retrieval</div>
+    </div>
+
+    <div class="ov-step" onclick="goStep(6)" id="ov-6">
+      <div class="ov-num" style="background:rgba(3,105,161,0.1);color:var(--orch)">6</div>
+      <div class="ov-name" style="color:var(--orch)">Orchestration</div>
+      <div class="ov-tag">Agent Loop</div>
+    </div>
+
+    <div class="ov-step" onclick="goStep(7)" id="ov-7">
+      <div class="ov-num" style="background:rgba(180,83,9,0.1);color:var(--tools)">7</div>
+      <div class="ov-name" style="color:var(--tools)">MCP Tools</div>
+      <div class="ov-tag">Tool Exec</div>
+    </div>
+
+    <div class="ov-step" onclick="goStep(8)" id="ov-8">
+      <div class="ov-num" style="background:rgba(67,56,202,0.1);color:var(--llm)">8</div>
+      <div class="ov-name" style="color:var(--llm)">LLM Input</div>
+      <div class="ov-tag">Msg Stack</div>
+    </div>
+
+    <div class="ov-step" onclick="goStep(9)" id="ov-9">
+      <div class="ov-num" style="background:rgba(67,56,202,0.1);color:var(--llm)">9</div>
+      <div class="ov-name" style="color:var(--llm)">Inside LLM</div>
+      <div class="ov-tag">Inference</div>
+    </div>
+
+    <div class="ov-step" onclick="goStep(10)" id="ov-10">
+      <div class="ov-num" style="background:rgba(185,28,28,0.1);color:var(--guard)">10</div>
+      <div class="ov-name" style="color:var(--guard)">Post-Model Guards</div>
+      <div class="ov-tag">Output Safety</div>
+    </div>
+
+    <div class="ov-step" onclick="goStep(11)" id="ov-11">
+      <div class="ov-num" style="background:rgba(190,24,93,0.1);color:var(--eval)">11</div>
+      <div class="ov-name" style="color:var(--eval)">Evals &amp; Obs.</div>
+      <div class="ov-tag">Quality + Ops</div>
+    </div>
+
+    <div class="ov-step" onclick="goStep(12)" id="ov-12">
+      <div class="ov-num" style="background:rgba(2,132,199,0.1);color:var(--resp)">12</div>
+      <div class="ov-name" style="color:var(--resp)">Response</div>
+      <div class="ov-tag">Delivery</div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ═══════════════════ LEGEND ═══════════════════ -->
+<div id="legend">
+  <div class="leg"><div class="d" style="background:var(--user)"></div>User / Request</div>
+  <div class="leg"><div class="d" style="background:var(--sec)"></div>Security / Auth</div>
+  <div class="leg"><div class="d" style="background:var(--ctx)"></div>Context Eng.</div>
+  <div class="leg"><div class="d" style="background:var(--rag)"></div>RAG / Retrieval</div>
+  <div class="leg"><div class="d" style="background:var(--orch)"></div>Orchestration</div>
+  <div class="leg"><div class="d" style="background:var(--tools)"></div>Tools / MCP</div>
+  <div class="leg"><div class="d" style="background:var(--llm)"></div>LLM / Model</div>
+  <div class="leg"><div class="d" style="background:var(--guard)"></div>Guardrails</div>
+  <div class="leg"><div class="d" style="background:var(--cache)"></div>Caching</div>
+  <div class="leg"><div class="d" style="background:var(--eval)"></div>Evals</div>
+  <div class="leg"><div class="d" style="background:var(--obs)"></div>Observability</div>
+  <div class="leg"><div class="d" style="background:var(--resp)"></div>Response</div>
+</div>
+
+<!-- ═══════════════════ CANVAS ═══════════════════ -->
+<div id="canvas">
+
+<!-- ────────────────────────────────────────────────── -->
+<!-- STEP 1: USER INPUT                                 -->
+<!-- ────────────────────────────────────────────────── -->
+<div class="step" data-step="1">
+<div class="card">
+  <div class="card-head" onclick="toggleCard(this)">
+    <div class="step-num" style="background:rgba(29,78,216,0.12);color:var(--user)">1</div>
+    <div class="card-title" style="color:var(--user)">User Input &amp; Request Ingestion</div>
+    <div class="card-tag" style="background:rgba(29,78,216,0.1);color:var(--user)">Entry Point</div>
+    <div class="expand-icon">▾</div>
+  </div>
+  <div class="card-summary">Raw user request arrives from any channel (web, mobile, API, voice) and is normalized into a structured envelope with trace ID and metadata.</div>
+  <div class="card-body"><div class="card-inner">
+    <div class="row">
+      <div class="box bl bl-user">
+        <div class="box-t" style="color:var(--user)">👤 User / Client</div>
+        <div class="box-b"><span>Web App</span><span>Mobile</span><span>CLI</span><span>API</span><span>Slack / Teams Bot</span><span>Voice Assistant</span></div>
+      </div>
+      <div class="box bl bl-user">
+        <div class="box-t" style="color:var(--user)">Input Types</div>
+        <div class="box-b"><span>Text / NL query</span><span>Voice / Audio (→ ASR)</span><span>Files / Docs / Images (→ OCR)</span><span>Structured forms</span><span>Conversation history</span></div>
+      </div>
+      <div class="box bl bl-user">
+        <div class="box-t" style="color:var(--user)">Request Envelope</div>
+        <div class="box-b"><span>user_id</span><span>tenant_id</span><span>role</span><span>locale</span><span>channel</span><span>timestamp</span><span>request_id / trace_id</span><span>conversation_id</span><span>session_id</span></div>
+        <div class="note">trace_id propagated across ALL components for distributed tracing</div>
+      </div>
+      <div class="box bl bl-user">
+        <div class="box-t" style="color:var(--user)">Preprocessing</div>
+        <div class="box-b"><span>Input normalization</span><span>Language detection</span><span>File extraction / OCR</span><span>Audio transcription</span><span>Rate limit check</span></div>
+      </div>
+    </div>
+    <div class="summary">
+      <span class="in">IN</span> Raw user request from any channel &nbsp;→&nbsp; <span class="out">OUT</span> Normalized request envelope with <strong>trace_id</strong> and metadata, ready for authentication
+    </div>
+  </div></div>
+</div>
+</div>
+
+<div class="arrow" data-step="2"><svg viewBox="0 0 24 28"><path d="M12,0 L12,22"/></svg><div class="arrow-label">Request → Authentication &amp; Authorization</div></div>
+
+<!-- ────────────────────────────────────────────────── -->
+<!-- STEP 2: AUTHENTICATION & AUTHORIZATION             -->
+<!-- ────────────────────────────────────────────────── -->
+<div class="step" data-step="2">
+<div class="card">
+  <div class="card-head" onclick="toggleCard(this)">
+    <div class="step-num" style="background:rgba(185,28,28,0.1);color:var(--sec)">2</div>
+    <div class="card-title" style="color:var(--sec)">Authentication &amp; Authorization (JWT + OPA)</div>
+    <div class="card-tag" style="background:rgba(185,28,28,0.08);color:var(--sec)">Security Gate</div>
+    <div class="expand-icon">▾</div>
+  </div>
+  <div class="card-summary">Identity verified via JWT/OAuth; OPA policy engine determines access rights, tool permissions, and data filters — all propagated downstream.</div>
+  <div class="card-body"><div class="card-inner">
+    <div class="row">
+      <div class="box bl bl-sec">
+        <div class="box-t" style="color:var(--sec)">🔐 Authentication</div>
+        <div class="box-b"><span>SSO / OAuth 2.0 / OIDC</span><span>JWT token validation</span><span>Signature + expiry check</span><span>Claims extraction: user, roles, tenant, scopes</span></div>
+        <div class="note">JWT claims become the identity context that flows through every downstream component</div>
+      </div>
+      <div class="box bl bl-sec">
+        <div class="box-t" style="color:var(--sec)">OPA Policy Decision Point</div>
+        <div class="box-b"><span>Policy inputs: role, tenant, resource, tool, action, data sensitivity</span></div>
+        <div style="margin-top:6px;font-size:10px"><strong style="color:var(--sec)">Outputs →</strong></div>
+        <div class="box-b"><span>allow / deny</span><span>row/column filters</span><span>tool allowlist</span><span>redaction rules</span><span>document ACL filters</span></div>
+        <div class="note">OPA re-evaluated on every tool call, data access, and retrieval query</div>
+      </div>
+      <div class="box bl bl-sec">
+        <div class="box-t" style="color:var(--sec)">Secrets &amp; Tenant Isolation</div>
+        <div class="box-b"><span>Vault / KMS for credentials</span><span>Data partitioning per tenant</span><span>Resource quotas</span><span>PII / PHI compliance gates</span><span>Least-privilege credential injection</span></div>
+      </div>
+    </div>
+    <div class="summary">
+      <span class="in">IN</span> Raw request + JWT token &nbsp;→&nbsp; <span class="out">OUT</span> <strong>Authenticated identity context</strong> + policy decisions (ACL filters, tool allowlists, redaction rules) passed to all downstream components
+    </div>
+  </div></div>
+</div>
+</div>
+
+<div class="arrow" data-step="3"><svg viewBox="0 0 24 28"><path d="M12,0 L12,22"/></svg><div class="arrow-label">Authenticated context + ACL filters → Pre-model guardrails</div></div>
+
+<!-- ────────────────────────────────────────────────── -->
+<!-- STEP 3: PRE-MODEL GUARDRAILS                       -->
+<!-- ────────────────────────────────────────────────── -->
+<div class="step" data-step="3">
+<div class="card">
+  <div class="card-head" onclick="toggleCard(this)">
+    <div class="step-num" style="background:rgba(185,28,28,0.1);color:var(--guard)">3</div>
+    <div class="card-title" style="color:var(--guard)">Pre-Model Guardrails &amp; Input Validation</div>
+    <div class="card-tag" style="background:rgba(185,28,28,0.08);color:var(--guard)">Safety Gate</div>
+    <div class="expand-icon">▾</div>
+  </div>
+  <div class="card-summary">Every incoming request is screened for prompt injection, jailbreaks, abuse, and policy violations before any model or retrieval call is made.</div>
+  <div class="card-body"><div class="card-inner">
+    <div class="row">
+      <div class="box bl bl-guard">
+        <div class="box-t" style="color:var(--guard)">Input Safety</div>
+        <div class="box-b"><span>Prompt injection detection</span><span>Jailbreak resistance</span><span>Content safety classification</span><span>Toxicity / hate speech filter</span><span>Malware / file scanning</span></div>
+      </div>
+      <div class="box bl bl-guard">
+        <div class="box-t" style="color:var(--guard)">Validation</div>
+        <div class="box-b"><span>Input format validation</span><span>Schema compliance</span><span>Abuse / anomaly detection</span><span>Rate limiting (per-user, per-tenant)</span><span>Cost budget pre-check</span></div>
+      </div>
+      <div class="box bl bl-guard">
+        <div class="box-t" style="color:var(--guard)">Decision</div>
+        <div class="box-b"><span>✅ Pass → continue pipeline</span><span>🚫 Block → safe refusal to user</span><span>⚠️ Flag → proceed with restrictions</span><span>📋 Log → always audit</span></div>
+      </div>
+    </div>
+    <div class="summary">
+      <span class="in">IN</span> Authenticated request &nbsp;→&nbsp; <span class="out">OUT</span> Validated, safe request cleared for context assembly (or blocked with safe refusal)
+    </div>
+  </div></div>
+</div>
+</div>
+
+<div class="arrow" data-step="4"><svg viewBox="0 0 24 28"><path d="M12,0 L12,22"/></svg><div class="arrow-label">Validated request → Context engineering begins</div></div>
+
+<!-- ────────────────────────────────────────────────── -->
+<!-- STEP 4: CONTEXT ENGINEERING                        -->
+<!-- ────────────────────────────────────────────────── -->
+<div class="step" data-step="4">
+<div class="card">
+  <div class="card-head" onclick="toggleCard(this)">
+    <div class="step-num" style="background:rgba(109,40,217,0.1);color:var(--ctx)">4</div>
+    <div class="card-title" style="color:var(--ctx)">Context Engineering — Prompt &amp; Context Assembly</div>
+    <div class="card-tag" style="background:rgba(109,40,217,0.08);color:var(--ctx)">Assembly</div>
+    <div class="expand-icon">▾</div>
+  </div>
+  <div class="card-summary">System prompts, business rules, conversation history, and retrieval triggers are combined into a carefully token-budgeted prompt for the model.</div>
+  <div class="card-body"><div class="card-inner">
+    <div class="row">
+      <div class="box bl bl-ctx">
+        <div class="box-t" style="color:var(--ctx)">System Prompt Stack</div>
+        <div class="box-b"><span>Platform / developer prompt</span><span>Application / business rules</span><span>Security / policy instructions</span><span>Output format constraints</span><span>Citation requirements</span><span>Response style guidance</span></div>
+        <div class="note">Prompt versioned in config management; A/B testable</div>
+      </div>
+      <div class="box bl bl-ctx">
+        <div class="box-t" style="color:var(--ctx)">User Context</div>
+        <div class="box-b"><span>Current user query</span><span>Conversation history</span><span>User preferences</span><span>Session state</span><span>Uploaded attachments</span></div>
+      </div>
+      <div class="box bl bl-ctx">
+        <div class="box-t" style="color:var(--ctx)">Context Window Management</div>
+        <div class="box-b"><span>Token budgeting per section</span><span>Truncation / summarization</span><span>Context ranking &amp; ordering</span><span>Prompt injection defenses</span><span>Priority: system &gt; tools &gt; RAG &gt; history</span></div>
+        <div class="note">Total must fit within model's context window (128K–200K tokens)</div>
+      </div>
+    </div>
+    <div class="row">
+      <div class="box bl bl-ctx" style="flex:2">
+        <div class="box-t" style="color:var(--ctx)">What Gets Assembled (triggers retrieval from Steps 5–7)</div>
+        <div class="box-b"><span>System prompt</span><span>Developer instructions</span><span>→ RAG chunks (from retrieval)</span><span>→ Schema metadata (from retrieval)</span><span>→ Tool descriptions (from retrieval)</span><span>→ Memory recalls (from retrieval)</span><span>Workflow state / scratchpad</span><span>Output schema / JSON schema</span><span>Few-shot examples</span></div>
+      </div>
+      <div class="box bl bl-cache">
+        <div class="box-t" style="color:var(--cache)">Prompt Cache Check</div>
+        <div class="box-b"><span>Exact match cache</span><span>Semantic cache (similar queries)</span><span>Reusable prompt prefix cache</span><span>Cache hit → skip retrieval</span></div>
+      </div>
+    </div>
+    <div class="summary">
+      <span class="in">IN</span> User query + system prompts + session state &nbsp;→&nbsp; <span class="out">OUT</span> Triggers retrieval calls to RAG layers; assembles all context into the final prompt
+    </div>
+  </div></div>
+</div>
+</div>
+
+<div class="arrow" data-step="5"><svg viewBox="0 0 24 28"><path d="M12,0 L12,22"/></svg><div class="arrow-label">Context assembly triggers retrieval from multiple RAG sources</div></div>
+
+<!-- ────────────────────────────────────────────────── -->
+<!-- STEP 5: RAG / RETRIEVAL                            -->
+<!-- ────────────────────────────────────────────────── -->
+<div class="step" data-step="5">
+<div class="card">
+  <div class="card-head" onclick="toggleCard(this)">
+    <div class="step-num" style="background:rgba(4,120,87,0.1);color:var(--rag)">5</div>
+    <div class="card-title" style="color:var(--rag)">RAG / Retrieval — Multiple Types</div>
+    <div class="card-tag" style="background:rgba(4,120,87,0.08);color:var(--rag)">Retrieval</div>
+    <div class="expand-icon">▾</div>
+  </div>
+  <div class="card-summary">Five retrieval types (document, schema, tool, memory, code/graph) run in parallel, all filtered by the user's authorization level from Step 2.</div>
+  <div class="card-body"><div class="card-inner">
+    <div class="row">
+      <div class="box bl bl-rag">
+        <div class="box-t" style="color:var(--rag)">A. Document RAG</div>
+        <div class="box-b"><span>Embed query → vector search</span><span>Semantic similarity matching</span><span>Cross-encoder reranking</span><span>Chunk selection + metadata filter</span><span>Citation-ready output</span></div>
+        <div class="note">Vector DB is one part of RAG, not the whole thing</div>
+      </div>
+      <div class="box bl bl-rag">
+        <div class="box-t" style="color:var(--rag)">B. Schema / Metadata RAG</div>
+        <div class="box-b"><span>DB schemas &amp; DDL</span><span>Table/column descriptions</span><span>API contracts (OpenAPI)</span><span>Business glossary</span><span>Semantic layer / metrics</span><span>Data lineage / catalog</span></div>
+        <div class="note">Critical for SQL generation and enterprise reasoning</div>
+      </div>
+      <div class="box bl bl-rag">
+        <div class="box-t" style="color:var(--rag)">C. Tool / Capability RAG</div>
+        <div class="box-b"><span>Tool registry search</span><span>MCP tool descriptions</span><span>Parameter schemas</span><span>Usage examples</span><span>Relevance ranking</span></div>
+      </div>
+    </div>
+    <div class="row">
+      <div class="box bl bl-rag">
+        <div class="box-t" style="color:var(--rag)">D. Memory / Interaction RAG</div>
+        <div class="box-b"><span>Session memory</span><span>Long-term memory</span><span>User preferences</span><span>Entity extraction</span><span>Temporal decay</span></div>
+      </div>
+      <div class="box bl bl-rag">
+        <div class="box-t" style="color:var(--rag)">E. Other Retrieval</div>
+        <div class="box-b"><span>Code RAG</span><span>Knowledge graph traversal</span><span>BM25 / keyword search</span><span>Hybrid (dense + sparse)</span><span>Few-shot example retrieval</span><span>Policy / compliance docs</span></div>
+      </div>
+      <div class="box bl bl-sec">
+        <div class="box-t" style="color:var(--sec)">Authorization Filters</div>
+        <div class="box-b"><span>ACL from OPA (Step 2)</span><span>Row/column/doc filters applied</span><span>Tenant data isolation</span><span>Redaction before context inclusion</span></div>
+        <div class="note">Retrieval results ALWAYS filtered by user's auth level</div>
+      </div>
+    </div>
+    <div class="row">
+      <div class="box bl bl-rag" style="flex:2">
+        <div class="box-t" style="color:var(--rag)">Retrieval Pipeline</div>
+        <div class="box-b"><span>Query expansion / rewrite</span><span>Multi-index fan-out</span><span>Reranking / fusion</span><span>Deduplication</span><span>Token budget enforcement</span><span>Context pack assembly</span></div>
+      </div>
+      <div class="box bl bl-ingest">
+        <div class="box-t" style="color:var(--ingest)">Index Stores (populated offline)</div>
+        <div class="box-b"><span>Vector DB (pgvector, Pinecone)</span><span>Keyword index (OpenSearch)</span><span>Graph DB (Neo4j)</span><span>Metadata store</span></div>
+        <div class="note">Fed by offline ingestion pipeline: extract → chunk → embed → index</div>
+      </div>
+      <div class="box bl bl-cache">
+        <div class="box-t" style="color:var(--cache)">Retrieval Cache</div>
+        <div class="box-b"><span>Embedding cache</span><span>Query result cache</span><span>Semantic cache</span><span>TTL-based invalidation</span></div>
+      </div>
+    </div>
+    <div class="summary">
+      <span class="in">IN</span> Query + auth filters from context assembly &nbsp;→&nbsp; <span class="out">OUT</span> Authorization-filtered <strong>context pack</strong>: document chunks, schemas, tool descriptions, memory, examples — all with citations
+    </div>
+  </div></div>
+</div>
+</div>
+
+<div class="arrow" data-step="6"><svg viewBox="0 0 24 28"><path d="M12,0 L12,22"/></svg><div class="arrow-label">Retrieved context + assembled prompt → Orchestrator</div></div>
+
+<!-- ────────────────────────────────────────────────── -->
+<!-- STEP 6: ORCHESTRATION / AGENT LOOP                 -->
+<!-- ────────────────────────────────────────────────── -->
+<div class="step" data-step="6">
+<div class="card">
+  <div class="card-head" onclick="toggleCard(this)">
+    <div class="step-num" style="background:rgba(3,105,161,0.1);color:var(--orch)">6</div>
+    <div class="card-title" style="color:var(--orch)">Orchestration / Agent Loop</div>
+    <div class="card-tag" style="background:rgba(3,105,161,0.08);color:var(--orch)">Execution Engine</div>
+    <div class="expand-icon">▾</div>
+  </div>
+  <div class="card-summary">The agent iteratively plans, retrieves context, calls tools, and calls the LLM — looping until the task is complete or a stop condition is met.</div>
+  <div class="card-body"><div class="card-inner">
+    <div class="row">
+      <div class="box bl bl-orch">
+        <div class="box-t" style="color:var(--orch)">Agent Runtime</div>
+        <div class="box-b"><span>Request router</span><span>Planner</span><span>Tool selector</span><span>State manager</span><span>Workflow graph (DAG)</span></div>
+      </div>
+      <div class="box bl bl-orch">
+        <div class="box-t" style="color:var(--orch)">Agent Patterns</div>
+        <div class="box-b"><span>Single agent</span><span>Multi-agent (manager + specialists)</span><span>ReAct (Reason + Act)</span><span>Plan-and-Execute</span><span>Human-in-the-loop</span></div>
+      </div>
+      <div class="box bl bl-orch">
+        <div class="box-t" style="color:var(--orch)">Control Flow</div>
+        <div class="box-b"><span>Stop conditions</span><span>Retries / fallback</span><span>Max iterations / budget</span><span>Structured output parsing</span><span>Self-correction loop</span></div>
+      </div>
+    </div>
+    <div class="loop-wrap">
+      <div class="loop-label">⟳ AGENT EXECUTION LOOP</div>
+      <div class="loop-steps">
+        <div class="loop-step" style="border-top:2px solid var(--orch)">
+          <div class="ls-num">STEP 1</div>
+          <div class="ls-title" style="color:var(--orch)">Plan / Think</div>
+          <div class="ls-desc">Decompose task, select next action</div>
+        </div>
+        <div class="loop-arrow">→</div>
+        <div class="loop-step" style="border-top:2px solid var(--rag)">
+          <div class="ls-num">STEP 2</div>
+          <div class="ls-title" style="color:var(--rag)">Retrieve</div>
+          <div class="ls-desc">Query RAG for relevant context</div>
+        </div>
+        <div class="loop-arrow">→</div>
+        <div class="loop-step" style="border-top:2px solid var(--tools)">
+          <div class="ls-num">STEP 3</div>
+          <div class="ls-title" style="color:var(--tools)">Call Tool</div>
+          <div class="ls-desc">MCP invocation, API call</div>
+        </div>
+        <div class="loop-arrow">→</div>
+        <div class="loop-step" style="border-top:2px solid var(--orch)">
+          <div class="ls-num">STEP 4</div>
+          <div class="ls-title" style="color:var(--orch)">Observe</div>
+          <div class="ls-desc">Parse tool output, update state</div>
+        </div>
+        <div class="loop-arrow">→</div>
+        <div class="loop-step" style="border-top:2px solid var(--llm)">
+          <div class="ls-num">STEP 5</div>
+          <div class="ls-title" style="color:var(--llm)">Call LLM</div>
+          <div class="ls-desc">Revise plan or generate answer</div>
+        </div>
+        <div class="loop-arrow">→</div>
+        <div class="loop-step" style="border-top:2px dashed var(--orch)">
+          <div class="ls-num">CHECK</div>
+          <div class="ls-title" style="color:var(--orch)">Done?</div>
+          <div class="ls-desc">Yes → synthesize | No → loop to 1</div>
+        </div>
+      </div>
+    </div>
+    <div class="summary">
+      <span class="in">IN</span> Assembled context + user intent &nbsp;→&nbsp; <span class="out">OUT</span> Orchestrated execution: retrieval, tool calls, LLM calls — loops until final answer or stop condition
+    </div>
+  </div></div>
+</div>
+</div>
+
+<div class="arrow" data-step="7"><svg viewBox="0 0 24 28"><path d="M12,0 L12,22"/></svg><div class="arrow-label">Agent invokes MCP tools when needed</div></div>
+
+<!-- ────────────────────────────────────────────────── -->
+<!-- STEP 7: MCP TOOLS                                  -->
+<!-- ────────────────────────────────────────────────── -->
+<div class="step" data-step="7">
+<div class="card">
+  <div class="card-head" onclick="toggleCard(this)">
+    <div class="step-num" style="background:rgba(180,83,9,0.1);color:var(--tools)">7</div>
+    <div class="card-title" style="color:var(--tools)">MCP Tools &amp; External Systems</div>
+    <div class="card-tag" style="background:rgba(180,83,9,0.08);color:var(--tools)">Tool Execution</div>
+    <div class="expand-icon">▾</div>
+  </div>
+  <div class="card-summary">The orchestrator invokes authorized MCP tools (SQL, CRM, search, code sandbox, etc.) with per-call OPA checks; results return as agent observations.</div>
+  <div class="card-body"><div class="card-inner">
+    <div class="row">
+      <div class="box bl bl-tools">
+        <div class="box-t" style="color:var(--tools)">MCP Client (in Orchestrator)</div>
+        <div class="box-b"><span>Discovery / capability negotiation</span><span>Schema resolution</span><span>Structured invocation</span><span>Auth context propagation</span><span>Response parsing</span></div>
+      </div>
+      <div class="box bl bl-tools">
+        <div class="box-t" style="color:var(--tools)">Tool Registry</div>
+        <div class="box-b"><span>Tool name + description</span><span>Parameter schemas (JSON Schema)</span><span>Auth requirements</span><span>Rate limits / versions</span><span>Policy-constrained visibility</span></div>
+        <div class="note">Visibility filtered by OPA policy per user/tenant</div>
+      </div>
+      <div class="box bl bl-sec">
+        <div class="box-t" style="color:var(--sec)">Per-Call Authorization</div>
+        <div class="box-b"><span>OPA policy re-check</span><span>Parameter validation</span><span>Credential injection (from vault)</span><span>Audit log entry</span></div>
+      </div>
+    </div>
+    <div class="row">
+      <div class="box bl bl-tools">
+        <div class="box-t" style="color:var(--tools)">MCP Tool Providers (Examples)</div>
+        <div class="box-b"><span>SQL Query Tool</span><span>CRM Lookup (Salesforce)</span><span>Ticketing (Jira)</span><span>File / Doc Access</span><span>Email / Calendar</span><span>Web Search / Browser</span><span>Code Execution (sandbox)</span><span>Workflow Trigger</span><span>Data Pipeline</span></div>
+      </div>
+      <div class="box bl bl-tools">
+        <div class="box-t" style="color:var(--tools)">External Systems Accessed</div>
+        <div class="box-b"><span>Vector DB</span><span>Relational DB</span><span>Data Warehouse</span><span>Document / Object Store</span><span>Graph DB</span><span>Search Engine</span><span>Enterprise Apps</span><span>Event Streams (Kafka)</span></div>
+      </div>
+      <div class="box bl bl-cache">
+        <div class="box-t" style="color:var(--cache)">Tool Result Cache</div>
+        <div class="box-b"><span>Deterministic tool results cached</span><span>TTL per tool type</span><span>Cache key: tool + params + auth context</span></div>
+      </div>
+    </div>
+    <div class="summary">
+      <span class="in">IN</span> Structured tool call from orchestrator + auth context &nbsp;→&nbsp; <span class="out">OUT</span> Tool results (data, confirmations, errors) returned as <strong>observations</strong> to the agent loop
+    </div>
+  </div></div>
+</div>
+</div>
+
+<div class="arrow" data-step="8"><svg viewBox="0 0 24 28"><path d="M12,0 L12,22"/></svg><div class="arrow-label">All context assembled → Final LLM input message stack</div></div>
+
+<!-- ────────────────────────────────────────────────── -->
+<!-- STEP 8: FINAL LLM INPUT                            -->
+<!-- ────────────────────────────────────────────────── -->
+<div class="step" data-step="8">
+<div class="card">
+  <div class="card-head" onclick="toggleCard(this)">
+    <div class="step-num" style="background:rgba(67,56,202,0.1);color:var(--llm)">8</div>
+    <div class="card-title" style="color:var(--llm)">What Actually Goes Into the LLM — Final Message Stack</div>
+    <div class="card-tag" style="background:rgba(67,56,202,0.08);color:var(--llm)">LLM Input</div>
+    <div class="expand-icon">▾</div>
+  </div>
+  <div class="card-summary">System + developer + RAG + history + user + tool_results are serialized in a precise order, token-budgeted to fit the context window, and sent to the model.</div>
+  <div class="card-body"><div class="card-inner">
+    <div class="row">
+      <div class="box bl bl-llm" style="flex:3">
+        <div class="box-t" style="color:var(--llm)">Serialized Message Structure (in order)</div>
+        <div class="msg-stack">
+          <div class="msg-row" style="background:rgba(109,40,217,0.05);border-left:3px solid var(--ctx)"><div class="msg-role" style="color:var(--ctx)">system</div><div class="msg-content">Platform prompt + app instructions + policy rules + output schema + citation requirements + response style</div></div>
+          <div class="msg-row" style="background:rgba(67,56,202,0.05);border-left:3px solid var(--llm)"><div class="msg-role" style="color:var(--llm)">developer</div><div class="msg-content">Tool/function definitions (JSON Schema) + response format constraints + structured output instructions</div></div>
+          <div class="msg-row" style="background:rgba(4,120,87,0.05);border-left:3px solid var(--rag)"><div class="msg-role" style="color:var(--rag)">context</div><div class="msg-content">RAG chunks (docs, schemas, tool descriptions) + few-shot examples + citations metadata</div></div>
+          <div class="msg-row" style="background:rgba(71,85,105,0.05);border-left:3px solid var(--obs)"><div class="msg-role" style="color:var(--obs)">history</div><div class="msg-content">Conversation turns (summarized if long) + prior assistant messages + accumulated observations</div></div>
+          <div class="msg-row" style="background:rgba(29,78,216,0.05);border-left:3px solid var(--user)"><div class="msg-role" style="color:var(--user)">user</div><div class="msg-content">Current user message / query / follow-up</div></div>
+          <div class="msg-row" style="background:rgba(180,83,9,0.05);border-left:3px solid var(--tools)"><div class="msg-role" style="color:var(--tools)">tool_results</div><div class="msg-content">Accumulated tool outputs from current agent loop iteration (if any)</div></div>
+        </div>
+      </div>
+      <div class="box bl bl-llm" style="flex:1">
+        <div class="box-t" style="color:var(--llm)">Token Budget Example</div>
+        <div class="box-b">
+          <span>Window: 128K–200K</span><span>System: ~2K</span><span>Tools: ~1–3K</span><span>RAG: ~4–8K</span><span>History: ~2–4K</span><span>User: variable</span><span>Output reserve: ~4K</span>
+        </div>
+        <div class="note">Longer context = higher cost + latency; budget carefully</div>
+      </div>
+    </div>
+    <div class="summary">
+      <span class="in">IN</span> All assembled context from Steps 4–7 &nbsp;→&nbsp; <span class="out">OUT</span> Complete serialized message stack, tokenized and sent to the model's inference engine
+    </div>
+  </div></div>
+</div>
+</div>
+
+<div class="arrow" data-step="9"><svg viewBox="0 0 24 28"><path d="M12,0 L12,22"/></svg><div class="arrow-label">Tokenized input → Transformer inference</div></div>
+
+<!-- ────────────────────────────────────────────────── -->
+<!-- STEP 9: INSIDE THE LLM                             -->
+<!-- ────────────────────────────────────────────────── -->
+<div class="step" data-step="9">
+<div class="card">
+  <div class="card-head" onclick="toggleCard(this)">
+    <div class="step-num" style="background:rgba(67,56,202,0.1);color:var(--llm)">9</div>
+    <div class="card-title" style="color:var(--llm)">Inside the LLM — Transformer Inference</div>
+    <div class="card-tag" style="background:rgba(67,56,202,0.08);color:var(--llm)">Model Internals</div>
+    <div class="expand-icon">▾</div>
+  </div>
+  <div class="card-summary">Tokens flow through embedding, N transformer layers (attention + FFN), and an output head — generating either natural language or structured tool-call JSON.</div>
+  <div class="card-body"><div class="card-inner">
+    <div class="llm-pipe">
+      <div class="llm-stage" style="border-top:3px solid var(--llm)">
+        <div class="st" style="color:var(--llm)">Tokenization</div>
+        <div class="sd"><span>BPE / SentencePiece</span><br><span>Text → token IDs</span><br><span>Special tokens: [BOS], [EOS]</span></div>
+      </div>
+      <div class="llm-arrow">→</div>
+      <div class="llm-stage" style="border-top:3px solid var(--llm)">
+        <div class="st" style="color:var(--llm)">Embeddings</div>
+        <div class="sd"><span>Token → dense vector</span><br><span>+ Positional encoding (RoPE/ALiBi)</span><br><span>Dim: 4096–12288</span></div>
+      </div>
+      <div class="llm-arrow">→</div>
+      <div class="llm-stage" style="border-top:3px solid var(--llm);flex:2">
+        <div class="st" style="color:var(--llm)">Transformer Layers (×N)</div>
+        <div class="sd">
+          <strong>Self-Attention:</strong> Q, K, V projections → attention scores → weighted values<br>
+          <strong>Multi-head:</strong> parallel attention heads capture different patterns<br>
+          <strong>FFN:</strong> feed-forward network (MLP) per token<br>
+          <strong>Residual + LayerNorm</strong> after each sub-layer<br>
+          <strong>KV Cache:</strong> stores computed K, V for already-processed tokens
+        </div>
+        <div class="note">32–128 layers depending on model (7B–400B+ params)</div>
+      </div>
+      <div class="llm-arrow">→</div>
+      <div class="llm-stage" style="border-top:3px solid var(--llm)">
+        <div class="st" style="color:var(--llm)">Output Head</div>
+        <div class="sd"><span>Logits (vocab scores)</span><br><span>Softmax → probabilities</span><br><span>Sampling: temp, top-k, top-p</span><br><span>Stop sequences, max tokens</span></div>
+      </div>
+      <div class="llm-arrow">→</div>
+      <div class="llm-stage" style="border-top:3px solid var(--resp)">
+        <div class="st" style="color:var(--resp)">Token Stream</div>
+        <div class="sd"><span>Autoregressive generation</span><br><span>Streaming output (SSE)</span><br><span>Tool call JSON detection</span><br><span>Continue until stop/max</span></div>
+      </div>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <div class="box bl bl-cache">
+        <div class="box-t" style="color:var(--cache)">KV Cache (Inference)</div>
+        <div class="box-b"><span>Stores K,V from previous tokens</span><span>Avoids re-computing attention for processed prefix</span><span>Prompt prefix caching: shared across requests</span><span>Dramatically reduces TTFT</span></div>
+        <div class="note">This is inside the inference engine — separate from application caches</div>
+      </div>
+      <div class="box bl bl-llm">
+        <div class="box-t" style="color:var(--llm)">Critical Engineer Notes</div>
+        <div class="box-b"><span>Model does NOT "know" tools — tools exposed via prompt/schema</span><span>Tool calls = structured output parsed by runtime</span><span>Context window is a hard limit — exceeding it truncates</span><span>Temperature=0 ≠ deterministic (floating point)</span><span>Streaming: tokens sent as generated, not batched</span></div>
+      </div>
+    </div>
+    <div class="summary">
+      <span class="in">IN</span> Tokenized message stack &nbsp;→&nbsp; <span class="out">OUT</span> Stream of generated tokens — either <strong>natural language response</strong> or <strong>structured tool call JSON</strong> (parsed by orchestrator, loops back to Step 6)
+    </div>
+  </div></div>
+</div>
+</div>
+
+<div class="arrow" data-step="10"><svg viewBox="0 0 24 28"><path d="M12,0 L12,22"/></svg><div class="arrow-label">LLM output → Post-model guardrails + output validation</div></div>
+
+<!-- ────────────────────────────────────────────────── -->
+<!-- STEP 10: POST-MODEL GUARDRAILS                     -->
+<!-- ────────────────────────────────────────────────── -->
+<div class="step" data-step="10">
+<div class="card">
+  <div class="card-head" onclick="toggleCard(this)">
+    <div class="step-num" style="background:rgba(185,28,28,0.1);color:var(--guard)">10</div>
+    <div class="card-title" style="color:var(--guard)">Post-Model Guardrails &amp; Output Validation</div>
+    <div class="card-tag" style="background:rgba(185,28,28,0.08);color:var(--guard)">Output Safety</div>
+    <div class="expand-icon">▾</div>
+  </div>
+  <div class="card-summary">Raw LLM output is checked for PII leakage, hallucinations, toxicity, and schema compliance — with auto-retry, redaction, or safe-refusal fallbacks.</div>
+  <div class="card-body"><div class="card-inner">
+    <div class="row">
+      <div class="box bl bl-guard">
+        <div class="box-t" style="color:var(--guard)">Content Checks</div>
+        <div class="box-b"><span>Output moderation</span><span>Toxicity / safety filter</span><span>PII / PHI leakage detection</span><span>Policy compliance check</span><span>Harmful content filter</span></div>
+      </div>
+      <div class="box bl bl-guard">
+        <div class="box-t" style="color:var(--guard)">Quality Checks</div>
+        <div class="box-b"><span>Groundedness / hallucination check</span><span>Citation verification (sources in context?)</span><span>Response schema validation</span><span>Consistency with prior turns</span></div>
+      </div>
+      <div class="box bl bl-guard">
+        <div class="box-t" style="color:var(--guard)">Fallback Paths</div>
+        <div class="box-b"><span>✅ Pass → deliver response</span><span>🔄 Retry → re-prompt LLM with correction</span><span>⚠️ Redact → strip sensitive content</span><span>🚫 Block → safe refusal / escalation</span></div>
+      </div>
+    </div>
+    <div class="summary">
+      <span class="in">IN</span> Raw LLM output &nbsp;→&nbsp; <span class="out">OUT</span> Validated, safe, grounded response (or fallback / retry)
+    </div>
+  </div></div>
+</div>
+</div>
+
+<div class="arrow" data-step="11"><svg viewBox="0 0 24 28"><path d="M12,0 L12,22"/></svg><div class="arrow-label">Validated output → Evals + Observability + Response delivery</div></div>
+
+<!-- ────────────────────────────────────────────────── -->
+<!-- STEP 11: EVALS & OBSERVABILITY                     -->
+<!-- ────────────────────────────────────────────────── -->
+<div class="step" data-step="11">
+<div class="card">
+  <div class="card-head" onclick="toggleCard(this)">
+    <div class="step-num" style="background:rgba(190,24,93,0.1);color:var(--eval)">11</div>
+    <div class="card-title" style="color:var(--eval)">Evals &amp; Observability</div>
+    <div class="card-tag" style="background:rgba(190,24,93,0.08);color:var(--eval)">Quality + Ops</div>
+    <div class="expand-icon">▾</div>
+  </div>
+  <div class="card-summary">Every request is scored (groundedness, latency, cost), traced end-to-end via OpenTelemetry, and logged — fueling dashboards, SLOs, and continuous improvement.</div>
+  <div class="card-body"><div class="card-inner">
+    <div class="row">
+      <div class="box bl bl-eval">
+        <div class="box-t" style="color:var(--eval)">Online Evals (per request)</div>
+        <div class="box-b"><span>Groundedness score</span><span>Faithfulness check</span><span>Answer relevance</span><span>Tool-use correctness</span><span>User satisfaction signal</span><span>Latency / cost per request</span></div>
+      </div>
+      <div class="box bl bl-eval">
+        <div class="box-t" style="color:var(--eval)">Offline Evals (batch)</div>
+        <div class="box-b"><span>Golden datasets</span><span>Retrieval evals (P@k, MRR)</span><span>Regression tests</span><span>Prompt/version comparison</span><span>Model A/B comparison</span><span>Human review sampling</span></div>
+      </div>
+      <div class="box bl bl-obs">
+        <div class="box-t" style="color:var(--obs)">Observability Signals</div>
+        <div class="box-b"><span>Distributed traces (OpenTelemetry)</span><span>Structured logs with trace_id</span><span>Token usage per component</span><span>Model vs retrieval vs tool latency</span><span>Cost tracking / budget alerts</span></div>
+      </div>
+      <div class="box bl bl-obs">
+        <div class="box-t" style="color:var(--obs)">Operations</div>
+        <div class="box-b"><span>Dashboards (Grafana, Datadog)</span><span>SLO alerts</span><span>Audit trails</span><span>Run replay / debugging</span><span>Prompt version lineage</span><span>Feedback → improvement loop</span></div>
+      </div>
+    </div>
+    <div class="summary">
+      <span class="in">IN</span> Every request, response, and intermediate step &nbsp;→&nbsp; <span class="out">OUT</span> Quality scores, cost/latency metrics, audit records, traces — feeding <strong>continuous improvement</strong>
+    </div>
+  </div></div>
+</div>
+</div>
+
+<div class="arrow" data-step="12"><svg viewBox="0 0 24 28"><path d="M12,0 L12,22"/></svg><div class="arrow-label">Final validated response → Delivery to user</div></div>
+
+<!-- ────────────────────────────────────────────────── -->
+<!-- STEP 12: RESPONSE DELIVERY                         -->
+<!-- ────────────────────────────────────────────────── -->
+<div class="step" data-step="12">
+<div class="card">
+  <div class="card-head" onclick="toggleCard(this)">
+    <div class="step-num" style="background:rgba(2,132,199,0.1);color:var(--resp)">12</div>
+    <div class="card-title" style="color:var(--resp)">Response Synthesis &amp; Delivery</div>
+    <div class="card-tag" style="background:rgba(2,132,199,0.08);color:var(--resp)">Output</div>
+    <div class="expand-icon">▾</div>
+  </div>
+  <div class="card-summary">The validated answer is formatted, streamed token-by-token to the user with citations and action confirmations — then memory and audit records are updated.</div>
+  <div class="card-body"><div class="card-inner">
+    <div class="row">
+      <div class="box bl bl-resp">
+        <div class="box-t" style="color:var(--resp)">Parser / Formatter</div>
+        <div class="box-b"><span>Structured JSON extraction</span><span>Markdown rendering</span><span>Citation attachment</span><span>Schema validation</span></div>
+      </div>
+      <div class="box bl bl-resp">
+        <div class="box-t" style="color:var(--resp)">Streamed Delivery</div>
+        <div class="box-b"><span>SSE / WebSocket stream</span><span>Token-by-token rendering</span><span>Progressive UI update</span><span>Final answer assembly</span></div>
+      </div>
+      <div class="box bl bl-resp">
+        <div class="box-t" style="color:var(--resp)">Side Effects</div>
+        <div class="box-b"><span>Actions completed (emails, tickets)</span><span>Conversation state update</span><span>Memory write-back</span><span>Audit record creation</span><span>Telemetry emission</span></div>
+      </div>
+      <div class="box bl bl-user">
+        <div class="box-t" style="color:var(--user)">👤 User Receives</div>
+        <div class="box-b"><span>Natural language answer</span><span>Citations / sources</span><span>Structured data / charts</span><span>Action confirmations</span><span>Follow-up suggestions</span></div>
+      </div>
+    </div>
+    <div class="summary" style="background:rgba(2,132,199,0.05);border:1px solid rgba(2,132,199,0.15)">
+      <span class="in">IN</span> Validated LLM output + side effects &nbsp;→&nbsp; <span class="out">OUT</span> <strong>Grounded, authorized, tool-augmented response</strong> streamed to user with citations — the end-to-end pipeline is complete ✓
+    </div>
+  </div></div>
+</div>
+</div>
+
+<!-- Final cross-cutting banner -->
+<div class="step" data-step="12" style="opacity:0;transform:translateY(20px);transition:opacity 0.5s,transform 0.5s">
+<div style="display:flex;gap:0;border-radius:8px;overflow:hidden;border:1.5px solid var(--border);margin-top:8px;box-shadow:var(--shadow)">
+  <div style="flex:1;padding:10px 12px;text-align:center;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:var(--sec);background:#fff;border-right:1px solid var(--border)">🔒 Security at every boundary</div>
+  <div style="flex:1;padding:10px 12px;text-align:center;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:var(--obs);background:#fff;border-right:1px solid var(--border)">📊 Traces across all components</div>
+  <div style="flex:1;padding:10px 12px;text-align:center;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:var(--cache);background:#fff;border-right:1px solid var(--border)">⚡ Caching at 5 levels</div>
+  <div style="flex:1;padding:10px 12px;text-align:center;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:var(--eval);background:#fff;border-right:1px solid var(--border)">✅ Evals as first-class concern</div>
+  <div style="flex:1;padding:10px 12px;text-align:center;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:var(--tools);background:#fff">💰 Cost tracking everywhere</div>
+</div>
+<div style="text-align:center;padding:18px 0 6px;color:var(--text3);font-size:10px;font-weight:600;letter-spacing:0.3px">
+  Complete Agentic AI System — End-to-End Engineering View &nbsp;|&nbsp; From user request to grounded, authorized, tool-augmented response
+</div>
+</div>
+
+</div><!-- /canvas -->
+
+<!-- ═══════════════════ JAVASCRIPT ═══════════════════ -->
+<script>
+const TOTAL_STEPS = 12;
+let currentStep = 0;
+let allRevealed = false;
+
+// Build step nav dots in topbar
+const nav = document.getElementById('stepNav');
+for (let i = 1; i <= TOTAL_STEPS; i++) {
+  const dot = document.createElement('div');
+  dot.className = 'step-dot';
+  dot.textContent = i;
+  dot.title = `Step ${i}`;
+  dot.onclick = () => goStep(i);
+  dot.id = `dot-${i}`;
+  nav.appendChild(dot);
+}
+
+function goStep(n) {
+  if (n < 1 || n > TOTAL_STEPS) return;
+  currentStep = n;
+
+  // Reveal all steps up to n
+  for (let i = 1; i <= TOTAL_STEPS; i++) {
+    const steps = document.querySelectorAll(`.step[data-step="${i}"]`);
+    const arrows = document.querySelectorAll(`.arrow[data-step="${i}"]`);
+    steps.forEach(s => { if (i <= n) s.classList.add('visible'); });
+    arrows.forEach(a => { if (i <= n) a.classList.add('visible'); });
+  }
+
+  // Update topbar dots
+  for (let i = 1; i <= TOTAL_STEPS; i++) {
+    const dot = document.getElementById(`dot-${i}`);
+    dot.classList.toggle('active', i === n);
+    dot.classList.toggle('visited', i < n);
+  }
+
+  // Update overview tiles
+  for (let i = 1; i <= TOTAL_STEPS; i++) {
+    const tile = document.getElementById(`ov-${i}`);
+    if (tile) {
+      tile.classList.toggle('ov-active', i === n);
+      tile.classList.toggle('ov-visited', i < n);
+    }
+  }
+
+  // Update nav buttons
+  document.getElementById('prevBtn').disabled = n <= 1;
+  document.getElementById('nextBtn').disabled = n >= TOTAL_STEPS;
+
+  // Update progress bar
+  document.getElementById('progressFill').style.width = `${(n / TOTAL_STEPS) * 100}%`;
+
+  // Auto-open the current card
+  document.querySelectorAll(`.step[data-step="${n}"] .card`).forEach(c => c.classList.add('open'));
+
+  // Scroll step into view
+  const target = document.querySelector(`.step[data-step="${n}"]`);
+  if (target) {
+    setTimeout(() => target.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100);
+  }
+}
+
+function revealAll() {
+  allRevealed = !allRevealed;
+  const btn = document.getElementById('revealAllBtn');
+
+  if (allRevealed) {
+    for (let i = 1; i <= TOTAL_STEPS; i++) {
+      document.querySelectorAll(`.step[data-step="${i}"]`).forEach(s => s.classList.add('visible'));
+      document.querySelectorAll(`.arrow[data-step="${i}"]`).forEach(a => a.classList.add('visible'));
+    }
+    document.querySelectorAll('.card').forEach(c => c.classList.add('open'));
+    currentStep = TOTAL_STEPS;
+    for (let i = 1; i <= TOTAL_STEPS; i++) {
+      const dot = document.getElementById(`dot-${i}`);
+      dot.classList.add('visited');
+      if (i === TOTAL_STEPS) dot.classList.add('active');
+      const tile = document.getElementById(`ov-${i}`);
+      if (tile) { tile.classList.add('ov-visited'); if (i===TOTAL_STEPS) tile.classList.add('ov-active'); }
+    }
+    document.getElementById('progressFill').style.width = '100%';
+    document.getElementById('prevBtn').disabled = false;
+    document.getElementById('nextBtn').disabled = true;
+    btn.textContent = 'Collapse All';
+  } else {
+    document.querySelectorAll('.card').forEach(c => c.classList.remove('open'));
+    btn.textContent = 'Reveal All';
+  }
+}
+
+function toggleCard(head) {
+  head.closest('.card').classList.toggle('open');
+}
+
+// Keyboard navigation
+document.addEventListener('keydown', e => {
+  if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { e.preventDefault(); goStep(currentStep + 1); }
+  if (e.key === 'ArrowLeft'  || e.key === 'ArrowUp')   { e.preventDefault(); goStep(currentStep - 1); }
+  if (e.key === ' ') { e.preventDefault(); goStep(currentStep + 1); }
+});
+
+// Auto-start: reveal step 1
+setTimeout(() => goStep(1), 300);
+</script>
+</body>
+</html>
