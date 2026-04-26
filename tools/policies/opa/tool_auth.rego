@@ -81,6 +81,21 @@ allow if {
 }
 
 # ============================================================
+# RULE: Schema Context (get_schema_context)
+#
+# Returns live database schema (tables, columns, comments, FKs,
+# text joins, perspectives). Metadata only — no row data — so we
+# only require an authorized agent role. The user_role check is
+# intentionally omitted so the agent can fetch schema at startup
+# before any user request has arrived.
+# ============================================================
+
+allow if {
+    input.tool == "get_schema_context"
+    _agent_is_authorized
+}
+
+# ============================================================
 # FUTURE TOOLS — add rules here as new MCP servers are added
 #
 # Example: restrict a tool to admin users only

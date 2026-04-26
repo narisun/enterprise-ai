@@ -57,6 +57,7 @@ services:
       - ./platform/db/21_test_sfcrm_seed.sql:/docker-entrypoint-initdb.d/21_test_sfcrm_seed.sql:ro
       - ./platform/db/30_test_bankdw_schema.sql:/docker-entrypoint-initdb.d/30_test_bankdw_schema.sql:ro
       - ./platform/db/31_test_bankdw_seed.sql:/docker-entrypoint-initdb.d/31_test_bankdw_seed.sql:ro
+      - ./platform/db/40_metadata_comments.sql:/docker-entrypoint-initdb.d/40_metadata_comments.sql:ro
       # CSV source files for COPY FROM
       - ./testdata/sfcrm:/testdata/sfcrm:ro
       - ./testdata/bankdw:/testdata/bankdw:ro
@@ -248,7 +249,10 @@ services:
       TOOL_CACHE_TTL: "300"
       JWT_SECRET: ${JWT_SECRET:-test-secret-change-in-prod}
       CONTEXT_HMAC_SECRET: ${CONTEXT_HMAC_SECRET:-test-context-secret-change-in-prod}
+      RELATIONSHIPS_YAML_PATH: /app/platform/db/relationships.yaml
       <<: *otel-env
+    volumes:
+      - ./platform/db/relationships.yaml:/app/platform/db/relationships.yaml:ro
     depends_on:
       pgvector:
         condition: service_healthy

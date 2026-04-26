@@ -1,0 +1,109 @@
+# ============================================================
+# platform/db/relationships.yaml
+#
+# Domain semantics that aren't expressible as PostgreSQL foreign keys:
+#   - perspectives: the analytical angles a banking analyst asks from
+#   - joins: text-match joins (string equality, no FK enforcement)
+#
+# Loaded at agent startup by platform_sdk.schema_introspection.
+# Edit this file to teach the agent how the warehouse fits together;
+# you do NOT need to touch any prompts.
+# ============================================================
+
+# ----------------------------------------------------------------
+# PERSPECTIVES — three independent angles into bankdw."fact_payments"
+# ----------------------------------------------------------------
+# A payment transaction has THREE participants:
+#   • two parties  (corporate counterparties — Payor sends, Payee receives)
+#   • two banks    (financial institutions facilitating the move of money)
+#   • one product  (the rail used: ACH / Wire / RTP / Check)
+#
+# An analyst's question usually fixes one or two of these and varies the
+# third. The router must identify the perspective(s) before writing SQL.
+
+perspectives:
+  - name: party
+    description: |
+      Corporate counterparty (the company sending or receiving money).
+      Parties are NON-FINANCIAL entities — clients, vendors, customers.
+      The same party can appear as Payor on one row and Payee on another.
+      For client-specific questions ("show payments for Pepsi") use the
+      get_payment_summary MCP tool, not raw SQL.
+    primary_table: bankdw.dim_party
+    fact_columns:
+      - PayorName
+      - PayeeName
+
+  - name: bank
+    description: |
+      Financial institution that facilitates a payment by providing the rail
+      (ACH origination, wire clearing, RTP settlement, check processing).
+      Banks are NOT clients — names contain words like Bank / Bancorp /
+      Financial / Trust / N.A. / Credit Union. For bank-side questions
+      ("which bank cleared the most volume?") filter on PayorBank/PayeeBank
+      directly via execute_read_query — get_payment_summary is for parties.
+    primary_table: bankdw.dim_bank
+    fact_columns:
+      - PayorBank
+      - PayeeBank
+
+  - name: product
+    description: |
+      Payment product / rail used for the transaction. ProductName is the
+      human-readable name; PaymentRail is the wire-format identifier and
+      joins by direct equality to fact_payments.TransactionType — values
+      are identical across both tables.
+    primary_table: bankdw.dim_product
+    fact_columns:
+      - TransactionType
+
+# ----------------------------------------------------------------
+# JOINS — string-equality bridges between tables (no PG FK enforces these)
+# ----------------------------------------------------------------
+
+joins:
+  # ---- Within bankdw: party perspective ----
+  - from: bankdw.fact_payments.PayorName
+    to:   bankdw.dim_party.PartyName
+    semantics: Sender of payment ↔ party master record
+
+  - from: bankdw.fact_payments.PayeeName
+    to:   bankdw.dim_party.PartyName
+    semantics: Receiver of payment ↔ party master record
+
+  - from: bankdw.bridge_party_account.PartyName
+    to:   bankdw.dim_party.PartyName
+    semantics: Bridge row ↔ party master (party ↔ accounts mapping)
+
+  # ---- Within bankdw: bank perspective ----
+  - from: bankdw.fact_payments.PayorBank
+    to:   bankdw.dim_bank.BankName
+    semantics: Sending bank ↔ bank master record (originating FI)
+
+  - from: bankdw.fact_payments.PayeeBank
+    to:   bankdw.dim_bank.BankName
+    semantics: Receiving bank ↔ bank master record (beneficiary FI)
+
+  - from: bankdw.bridge_party_account.BankName
+    to:   bankdw.dim_bank.BankName
+    semantics: Bridge row ↔ bank master (party ↔ accounts mapping)
+
+  # ---- Within bankdw: product perspective ----
+  - from: bankdw.fact_payments.TransactionType
+    to:   bankdw.dim_product.PaymentRail
+    semantics: Direct equality join — values match exactly across both tables
+
+  # ---- Cross-schema: salesforce ↔ bankdw bridge ----
+  # These connect the CRM picture (Accounts, Opportunities, …) to the
+  # money-movement picture (parties, banks, products).
+  - from: salesforce.Account.Name
+    to:   bankdw.dim_party.PartyName
+    semantics: Salesforce Account ↔ banking party master (the CRM bridge)
+
+  - from: salesforce.Account.Name
+    to:   bankdw.fact_payments.PayorName
+    semantics: Salesforce Account ↔ payment sender (cross-schema)
+
+  - from: salesforce.Account.Name
+    to:   bankdw.fact_payments.PayeeName
+    semantics: Salesforce Account ↔ payment receiver (cross-schema)

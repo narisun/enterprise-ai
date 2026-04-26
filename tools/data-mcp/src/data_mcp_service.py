@@ -7,6 +7,7 @@ Extends McpService to handle:
 - Delegation to DataQueryService for business logic
 """
 import json
+import os
 from typing import Any, Optional
 
 import asyncpg
@@ -16,6 +17,7 @@ from platform_sdk import MCPConfig, configure_logging, get_logger, make_error, s
 from platform_sdk.base import McpService
 from platform_sdk.cache import make_cache_key
 from platform_sdk.protocols import Authorizer, CacheStore
+from platform_sdk.schema_introspection import format_for_prompt, introspect_schema
 from tools_shared.mcp_auth import verify_auth_context
 
 from .data_query_service import DataQueryService
@@ -132,4 +134,66 @@ class DataMcpService(McpService):
             if cache is not None and cache_key is not None:
                 await cache.set(cache_key, result)
 
+            return result
+
+        @mcp.tool()
+        async def get_schema_context(auth_context: str = "") -> str:
+            """
+            Return live database schema context as Markdown — tables, columns,
+            comments, foreign keys, text-match joins, and analyst perspectives.
+
+            The analytics agent calls this once at startup to inject up-to-date
+            schema knowledge into its planner system prompt. Output reflects the
+            current pg_catalog plus relationships declared in
+            platform/db/relationships.yaml — there is no separate schema cache
+            for callers to maintain.
+
+            Args:
+                auth_context: HMAC-signed auth token (system-injected, do not set).
+
+            Returns:
+                JSON-encoded Markdown string, or an error JSON.
+            """
+            user_ctx = verify_auth_context(auth_context)
+            is_authorized = await svc.authorizer.authorize(
+                "get_schema_context", {"user_role": user_ctx.user_role}
+            )
+            if not is_authorized:
+                log.warning("opa_denied", tool="get_schema_context")
+                return make_error("unauthorized", "Execution blocked by policy engine.")
+
+            cache = svc._cache
+            cache_key = make_cache_key("get_schema_context", {"v": 1})
+            if cache is not None:
+                cached = await cache.get(cache_key)
+                if cached is not None:
+                    log.info("schema_cache_hit")
+                    return cached
+
+            schemas = ["bankdw", "salesforce"]
+            yaml_path = os.getenv(
+                "RELATIONSHIPS_YAML_PATH", "/app/platform/db/relationships.yaml"
+            )
+            try:
+                ctx = await introspect_schema(
+                    svc._db_pool, schemas, relationships_path=yaml_path
+                )
+                result = format_for_prompt(ctx)
+            except Exception as exc:
+                log.error("schema_introspection_failed", error=str(exc))
+                return make_error(
+                    "introspection_failed", f"Schema introspection error: {exc}"
+                )
+
+            log.info(
+                "schema_context_built",
+                tables=len(ctx.tables),
+                fks=len(ctx.foreign_keys),
+                text_joins=len(ctx.text_joins),
+                perspectives=len(ctx.perspectives),
+                bytes=len(result),
+            )
+
+            if cache is not None:
+                await cache.set(cache_key, result)
             return result
