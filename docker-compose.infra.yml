@@ -19,43 +19,36 @@ x-versions:
   litellm:         &img-litellm         ghcr.io/berriai/litellm:main-v1.43.0
   otel:            &img-otel            otel/opentelemetry-collector-contrib:0.103.0
   opa:             &img-opa             openpolicyagent/opa:0.65.0-debug
-  langfuse:        &img-langfuse        langfuse/langfuse:3
-  langfuse-worker: &img-langfuse-worker langfuse/langfuse-worker:3
+  langfuse:        &img-langfuse        langfuse/langfuse:2
   langfuse-db:     &img-langfuse-db     postgres:16-alpine
-  clickhouse:      &img-clickhouse      clickhouse/clickhouse-server:24.3
-  minio:           &img-minio           minio/minio:RELEASE.2024-06-13T22-53-53Z
 
-# Shared LangFuse environment for web + worker containers
+# LangFuse v2 single-container deployment.
+# Note: the cloud compose file (docker-compose.cloud.yml) keeps the v3
+# multi-container deployment for production scale; v2 here is for fast
+# local-dev iteration with the same web UI and API surface.
 x-langfuse-common: &langfuse-common
   DATABASE_URL: postgresql://langfuse:${LANGFUSE_DB_PASSWORD:-langfuse-local-dev}@langfuse-db:5432/langfuse
-  CLICKHOUSE_URL: http://langfuse-clickhouse:8123
-  CLICKHOUSE_MIGRATION_URL: clickhouse://langfuse-clickhouse:9000
-  CLICKHOUSE_USER: default
-  CLICKHOUSE_PASSWORD: ${LANGFUSE_CLICKHOUSE_PASSWORD:-langfuse-clickhouse-dev}
-  REDIS_HOST: langfuse-redis
-  REDIS_PORT: 6379
-  REDIS_AUTH: ${LANGFUSE_REDIS_PASSWORD:-langfuse-redis-dev}
   NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET:-langfuse-dev-secret-change-me}
   NEXTAUTH_URL: http://localhost:3001
   SALT: ${LANGFUSE_SALT:-langfuse-dev-salt-change-me}
   ENCRYPTION_KEY: ${LANGFUSE_ENCRYPTION_KEY:-0000000000000000000000000000000000000000000000000000000000000000}
   TELEMETRY_ENABLED: "true"
-  LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES: "true"
-  # S3-compatible storage via MinIO (required by langfuse-worker v3)
-  LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse-events
-  LANGFUSE_S3_EVENT_UPLOAD_REGION: us-east-1
-  LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
-  LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
-  LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://langfuse-minio:9000
-  LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
 
 services:
 
   # ============================================================
-  # OBSERVABILITY — LangFuse v3 (LLM tracing + prompt management)
+  # OBSERVABILITY — LangFuse v2 (LLM tracing + prompt management)
   #
-  # v3 architecture: web + worker + ClickHouse + Redis + Postgres
-  # OTLP ingestion endpoint: http://langfuse:3000/api/public/otel
+  # v2 architecture: single container backed by Postgres only.
+  # OTLP ingestion endpoint: http://langfuse:3000/api/public/otel/v1/traces
+  #
+  # Why v2 here vs v3 in cloud compose:
+  #   - v3 needs ClickHouse + MinIO + Redis + Worker (5 extra containers,
+  #     ~3GB images) which is overkill for a single-developer laptop.
+  #   - v2 stores traces in Postgres directly. Same UI, same SDK contract,
+  #     same OTLP ingestion, just lower throughput at scale.
+  #   - Production deploys via docker-compose.cloud.yml retain v3 for
+  #     trace volume scaling.
   # ============================================================
   langfuse-db:
     image: *img-langfuse-db
@@ -75,75 +68,6 @@ services:
     networks:
       - ai-network
 
-  langfuse-clickhouse:
-    image: *img-clickhouse
-    container_name: ai-langfuse-clickhouse
-    environment:
-      CLICKHOUSE_USER: default
-      CLICKHOUSE_PASSWORD: ${LANGFUSE_CLICKHOUSE_PASSWORD:-langfuse-clickhouse-dev}
-    volumes:
-      - langfuse-clickhouse-data:/var/lib/clickhouse
-      - ./platform/clickhouse/keeper-config.xml:/etc/clickhouse-server/config.d/keeper.xml:ro
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8123/ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
-    networks:
-      - ai-network
-
-  langfuse-redis:
-    image: *img-redis
-    container_name: ai-langfuse-redis
-    command: ["redis-server", "--requirepass", "${LANGFUSE_REDIS_PASSWORD:-langfuse-redis-dev}"]
-    healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${LANGFUSE_REDIS_PASSWORD:-langfuse-redis-dev}", "ping"]
-      interval: 10s
-      timeout: 3s
-      retries: 5
-    networks:
-      - ai-network
-
-  # MinIO — S3-compatible object storage for LangFuse event uploads
-  langfuse-minio:
-    image: *img-minio
-    container_name: ai-langfuse-minio
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
-    command: ["server", "/data", "--console-address", ":9001"]
-    volumes:
-      - langfuse-minio-data:/data
-    healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
-    networks:
-      - ai-network
-
-  # One-shot container to create the langfuse-events bucket in MinIO
-  langfuse-minio-init:
-    image: *img-minio
-    container_name: ai-langfuse-minio-init
-    entrypoint: >
-      /bin/sh -c "
-        until mc alias set myminio http://langfuse-minio:9000 $${MINIO_ROOT_USER} $${MINIO_ROOT_PASSWORD}; do sleep 1; done;
-        mc mb --ignore-existing myminio/langfuse-events;
-        echo 'Bucket langfuse-events ready';
-      "
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
-    depends_on:
-      langfuse-minio:
-        condition: service_healthy
-    restart: "no"
-    networks:
-      - ai-network
-
   # LangFuse web — serves UI and APIs including OTLP ingestion.
   # On first run, open http://localhost:3001 to create your account
   # and project, then copy the API keys into .env.
@@ -155,36 +79,11 @@ services:
     depends_on:
       langfuse-db:
         condition: service_healthy
-      langfuse-clickhouse:
-        condition: service_healthy
-      langfuse-redis:
-        condition: service_healthy
-      langfuse-minio-init:
-        condition: service_completed_successfully
     restart: unless-stopped
     networks:
       - ai-network
     ports:
       - "127.0.0.1:3001:3000"    # LangFuse UI — open http://localhost:3001
-
-  # LangFuse worker — processes background tasks (trace ingestion, evals).
-  langfuse-worker:
-    image: *img-langfuse-worker
-    container_name: ai-langfuse-worker
-    environment:
-      <<: *langfuse-common
-    depends_on:
-      langfuse-db:
-        condition: service_healthy
-      langfuse-clickhouse:
-        condition: service_healthy
-      langfuse-redis:
-        condition: service_healthy
-      langfuse-minio-init:
-        condition: service_completed_successfully
-    restart: unless-stopped
-    networks:
-      - ai-network
 
   # ============================================================
   # DATABASES & CACHES
@@ -311,5 +210,3 @@ networks:
 volumes:
   pgdata:
   langfuse-db-data:
-  langfuse-clickhouse-data:
-  langfuse-minio-data:

@@ -31,8 +31,6 @@ htmlcov/
 # Test output
 test-results/
 *.xml
-# Infra config XMLs (ClickHouse keeper, etc.) are tracked even though *.xml is ignored
-!platform/clickhouse/*.xml
 
 # Node
 node_modules/
