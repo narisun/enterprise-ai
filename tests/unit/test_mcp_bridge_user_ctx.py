@@ -33,16 +33,11 @@ async def test_get_langchain_tools_accepts_user_ctx_keyword():
     assert isinstance(tools, list)
 
 
-async def test_invoke_closure_uses_user_ctx_auth_token_over_contextvar():
+async def test_invoke_closure_uses_user_ctx_auth_token():
     """When user_ctx is passed to get_langchain_tools, the resulting tool's
-    invocation must stamp kwargs['auth_context'] with user_ctx.auth_token,
-    NOT with whatever the module-level ContextVar holds.
+    invocation must stamp kwargs['auth_context'] with user_ctx.auth_token.
     """
-    from platform_sdk.mcp_bridge import (
-        MCPToolBridge,
-        set_user_auth_token,
-        reset_user_auth_token,
-    )
+    from platform_sdk.mcp_bridge import MCPToolBridge
 
     # Build a bridge with a mocked active MCP session that returns one tool
     # and records call_tool kwargs so we can inspect what auth_context was used.
@@ -70,34 +65,27 @@ async def test_invoke_closure_uses_user_ctx_auth_token_over_contextvar():
     bridge._session = fake_session
     bridge._session_id = "sess-1"
 
-    # Set the ContextVar to a value the test must NOT see.
-    cv_token = set_user_auth_token("CONTEXTVAR_TOKEN_SHOULD_NOT_BE_USED")
-    try:
-        ctx = _FakeUserContext(auth_token="USER_CTX_TOKEN_WINS")
-        tools = await bridge.get_langchain_tools(user_ctx=ctx)
-        assert len(tools) == 1
+    ctx = _FakeUserContext(auth_token="USER_CTX_TOKEN_WINS")
+    tools = await bridge.get_langchain_tools(user_ctx=ctx)
+    assert len(tools) == 1
 
-        await tools[0].coroutine()  # invoke the tool
+    await tools[0].coroutine()  # invoke the tool
 
-        # Inspect what call_tool received
-        assert fake_session.call_tool.await_count == 1
-        _, call_kwargs = fake_session.call_tool.await_args
-        stamped = call_kwargs["arguments"].get("auth_context")
-        assert stamped == "USER_CTX_TOKEN_WINS", (
-            f"Expected user_ctx.auth_token, got {stamped!r} — "
-            "the closure must prefer the explicit user_ctx over the ContextVar."
-        )
-    finally:
-        reset_user_auth_token(cv_token)
-
-
-async def test_invoke_closure_falls_back_to_contextvar_when_user_ctx_is_none():
-    """Backward-compat: if user_ctx not passed, the closure still reads ContextVar."""
-    from platform_sdk.mcp_bridge import (
-        MCPToolBridge,
-        set_user_auth_token,
-        reset_user_auth_token,
+    # Inspect what call_tool received
+    assert fake_session.call_tool.await_count == 1
+    _, call_kwargs = fake_session.call_tool.await_args
+    stamped = call_kwargs["arguments"].get("auth_context")
+    assert stamped == "USER_CTX_TOKEN_WINS", (
+        f"Expected user_ctx.auth_token, got {stamped!r} — "
+        "the closure must stamp auth_context with the explicit user_ctx."
     )
+
+
+async def test_invoke_closure_no_auth_context_when_user_ctx_is_none():
+    """When user_ctx is not passed, no auth_context header is stamped.
+    The MCP server's OPA policy will fail-closed on missing auth.
+    """
+    from platform_sdk.mcp_bridge import MCPToolBridge
 
     bridge = MCPToolBridge(sse_url="http://127.0.0.1:0")
 
@@ -117,17 +105,13 @@ async def test_invoke_closure_falls_back_to_contextvar_when_user_ctx_is_none():
     bridge._session = fake_session
     bridge._session_id = "sess-1"
 
-    cv_token = set_user_auth_token("FALLBACK_CONTEXTVAR_TOKEN")
-    try:
-        # Note: NO user_ctx kwarg this time.
-        tools = await bridge.get_langchain_tools()
-        assert len(tools) == 1
-        await tools[0].coroutine()
+    # Note: NO user_ctx kwarg — auth_context should NOT be stamped.
+    tools = await bridge.get_langchain_tools()
+    assert len(tools) == 1
+    await tools[0].coroutine()
 
-        _, call_kwargs = fake_session.call_tool.await_args
-        stamped = call_kwargs["arguments"].get("auth_context")
-        assert stamped == "FALLBACK_CONTEXTVAR_TOKEN", (
-            f"Expected ContextVar fallback, got {stamped!r}"
-        )
-    finally:
-        reset_user_auth_token(cv_token)
+    _, call_kwargs = fake_session.call_tool.await_args
+    stamped = call_kwargs["arguments"].get("auth_context")
+    assert stamped is None, (
+        f"Expected no auth_context when user_ctx is None, got {stamped!r}"
+    )
