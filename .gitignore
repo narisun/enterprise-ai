@@ -36,6 +36,10 @@ test-results/
 node_modules/
 npm-debug.log*
 
+# Next.js build output (auto-generated; never commit)
+**/.next/
+**/next-env.d.ts
+
 # Terraform
 .terraform/
 *.tfstate
