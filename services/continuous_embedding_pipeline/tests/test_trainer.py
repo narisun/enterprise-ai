@@ -57,6 +57,19 @@ def _fake_heavy_modules(monkeypatch: pytest.MonkeyPatch):
     torch_utils.data = torch_data
     torch_mod.utils = torch_utils
 
+    # Reproducibility attributes accessed in EmbeddingTrainer.__init__
+    torch_mod.manual_seed = MagicMock()
+    torch_cuda = ModuleType("torch.cuda")
+    torch_cuda.is_available = MagicMock(return_value=False)
+    torch_cuda.manual_seed_all = MagicMock()
+    torch_mod.cuda = torch_cuda
+    torch_backends = ModuleType("torch.backends")
+    torch_backends_cudnn = ModuleType("torch.backends.cudnn")
+    torch_backends_cudnn.deterministic = False
+    torch_backends_cudnn.benchmark = True
+    torch_backends.cudnn = torch_backends_cudnn
+    torch_mod.backends = torch_backends
+
     monkeypatch.setitem(sys.modules, "sentence_transformers", st_mod)
     monkeypatch.setitem(sys.modules, "sentence_transformers.losses", losses_mod)
     monkeypatch.setitem(sys.modules, "torch", torch_mod)
