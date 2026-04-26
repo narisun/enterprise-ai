@@ -70,6 +70,13 @@ class EmbeddingTrainer:
         self._model = base_model
         self._settings = settings
 
+        import torch
+        torch.manual_seed(self._settings.seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(self._settings.seed)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+
     # Public API
 
     def fit(self, pairs: Sequence[TrainingPair]) -> Path:

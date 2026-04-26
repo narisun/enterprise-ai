@@ -14,7 +14,7 @@ Key design decisions:
 """
 from platform_sdk import configure_logging, setup_telemetry
 
-from .EnterpriseAgentService import EnterpriseAgentService
+from .enterprise_agent_service import EnterpriseAgentService
 
 # ---- Startup ----------------------------------------------------------------
 configure_logging()

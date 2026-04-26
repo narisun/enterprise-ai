@@ -8,7 +8,7 @@ from mcp.server.fastmcp import FastMCP
 
 from platform_sdk import configure_logging, get_logger
 
-from .NewsSearchMcpService import NewsSearchMcpService
+from .news_search_mcp_service import NewsSearchMcpService
 
 configure_logging()
 log = get_logger(__name__)

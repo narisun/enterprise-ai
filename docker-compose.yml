@@ -1,62 +1,194 @@
 # ============================================================
-# enterprise-ai — Application Services
+# enterprise-ai — Single-file dev stack
 #
-# Agents, MCP tools, and frontends that are rebuilt frequently
-# during development.  Infrastructure (databases, caches,
-# LangFuse, LiteLLM, OPA, OTel) lives in docker-compose.infra.yml
-# and is started separately with `make infra-up`.
+# Everything (databases, caches, OTel, LiteLLM, OPA, MCP servers,
+# agents, dashboard) runs in one compose. Designed for a single
+# host: macOS (dev) or Linux VM (cloud).
 #
-# Usage:
-#   make infra-up        # once — starts infrastructure
-#   make dev-up          # start app services (rebuilds images)
-#   make dev-reset       # tear down app services + pgdata, restart
+# Lifecycle: see Makefile.
+#   make setup    # wipe + rebuild + load fresh test data
+#   make start    # bring up anything that isn't running
+#   make stop     # stop everything (data preserved)
+#   make restart  # stop then start
+#
+# Test fixtures (bankdw + salesforce schemas) are loaded into
+# pgvector on first volume init. To re-seed, run `make setup`.
+#
+# LangFuse is intentionally NOT in this file — it can be added
+# back later as an overlay or sidecar when richer observability
+# is wanted. For now, traces flow through the OTel collector to
+# its debug exporter (visible via `docker logs ai-otel-collector`).
 # ============================================================
 
 name: enterprise-ai
 
-# Shared environment injected into every service
+# Pinned image versions — update deliberately via PR, never use :latest
+x-versions:
+  pgvector: &img-pgvector pgvector/pgvector:pg16
+  redis:    &img-redis    redis:7.2-alpine
+  litellm:  &img-litellm  ghcr.io/berriai/litellm:main-v1.43.0
+  otel:     &img-otel     otel/opentelemetry-collector-contrib:0.103.0
+  opa:      &img-opa      openpolicyagent/opa:0.65.0-debug
+
+# Shared env injected into every service that emits traces
 x-otel-env: &otel-env
   OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318/v1/traces
-
-x-langfuse-env: &langfuse-env
-  LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
-  LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
-  LANGFUSE_HOST: http://langfuse:3000
 
 services:
 
   # ============================================================
-  # MCP TOOLS
+  # POSTGRES (pgvector) — stores agent memory + bankdw + salesforce fixtures
+  # ============================================================
+  pgvector:
+    image: *img-pgvector
+    container_name: ai-pgvector
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ai_memory
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # Init scripts run in lexical order on a FRESH volume only.
+      # 01- = base extensions/roles. 20- and 30- = test fixtures.
+      - ./platform/db/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+      - ./platform/db/20_test_sfcrm_schema.sql:/docker-entrypoint-initdb.d/20_test_sfcrm_schema.sql:ro
+      - ./platform/db/21_test_sfcrm_seed.sql:/docker-entrypoint-initdb.d/21_test_sfcrm_seed.sql:ro
+      - ./platform/db/30_test_bankdw_schema.sql:/docker-entrypoint-initdb.d/30_test_bankdw_schema.sql:ro
+      - ./platform/db/31_test_bankdw_seed.sql:/docker-entrypoint-initdb.d/31_test_bankdw_seed.sql:ro
+      # CSV source files for COPY FROM
+      - ./testdata/sfcrm:/testdata/sfcrm:ro
+      - ./testdata/bankdw:/testdata/bankdw:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d ai_memory"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - ai-network
+    ports:
+      - "127.0.0.1:5432:5432"
+
+  # ============================================================
+  # REDIS — application cache + rate-limit
+  # ============================================================
+  redis:
+    image: *img-redis
+    container_name: ai-redis
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD}"]
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - ai-network
+
+  # ============================================================
+  # OTEL COLLECTOR — receives spans, prints to stdout for now
+  # ============================================================
+  otel-collector:
+    image: *img-otel
+    container_name: ai-otel-collector
+    volumes:
+      - ./platform/otel/otel-local.yaml:/etc/otelcol-contrib/config.yaml:ro
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    ports:
+      - "127.0.0.1:4317:4317"
+      - "127.0.0.1:4318:4318"
+    networks:
+      - ai-network
+
+  # ============================================================
+  # LITELLM — LLM gateway (Azure OpenAI routing)
+  # ============================================================
+  litellm:
+    image: *img-litellm
+    container_name: ai-litellm
+    environment:
+      AZURE_API_KEY: ${AZURE_API_KEY}
+      AZURE_API_BASE: ${AZURE_API_BASE}
+      AZURE_API_VERSION: ${AZURE_API_VERSION:-2024-10-21}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+      LITELLM_MASTER_KEY: ${INTERNAL_API_KEY}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318/v1/traces
+    volumes:
+      - ./platform/config/litellm-local.yaml:/app/config.yaml:ro
+    command: ["--config", "/app/config.yaml"]
+    depends_on:
+      redis:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/python3", "-c",
+             "import socket,sys; s=socket.socket(); r=s.connect_ex(('localhost',4000)); s.close(); sys.exit(0 if r==0 else 1)"]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    networks:
+      - ai-network
+    ports:
+      - "127.0.0.1:4000:4000"
+
+  # ============================================================
+  # OPA — policy engine (every MCP tool calls /v1/data/mcp/tools/allow)
+  # ============================================================
+  opa:
+    image: *img-opa
+    container_name: ai-opa
+    volumes:
+      - ./tools/policies/opa:/policies:ro
+    command: ["run", "--server", "--addr", "0.0.0.0:8181", "--log-level", "info", "/policies"]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8181/health?plugins"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ai-network
+    ports:
+      - "127.0.0.1:8181:8181"
+
+  # ============================================================
+  # MCP SERVERS — data-mcp / salesforce-mcp / payments-mcp / news-search-mcp
   # ============================================================
   data-mcp:
     build:
-      context: .                           # Build from monorepo root
+      context: .
       dockerfile: tools/data-mcp/Dockerfile
     container_name: ai-data-mcp
     environment:
       MCP_TRANSPORT: sse
       OPA_URL: http://opa:8181/v1/data/mcp/tools/allow
-      DB_HOST: pgvector                    # Container name on ai-network
+      DB_HOST: pgvector
       DB_PORT: 5432
       DB_USER: admin
       DB_PASS: ${POSTGRES_PASSWORD}
       DB_NAME: ai_memory
       SERVICE_NAME: data-mcp
-      ENVIRONMENT: ${ENVIRONMENT:-local}    # Stamped into OPA input
+      ENVIRONMENT: ${ENVIRONMENT:-local}
       AGENT_ROLE: ${AGENT_ROLE:-data_analyst_agent}
-      # Tool-result caching via platform_sdk.ToolResultCache
       REDIS_HOST: redis
       REDIS_PORT: 6379
-      REDIS_PASSWORD: ${REDIS_PASSWORD}    # Authenticated Redis
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
       ENABLE_TOOL_CACHE: "true"
-      TOOL_CACHE_TTL: "300"                # 5 minutes — tune based on data freshness
-      # Auth context verification — must match the orchestrator's signing secrets
-      JWT_SECRET: ${JWT_SECRET}
-      CONTEXT_HMAC_SECRET: ${CONTEXT_HMAC_SECRET}
-      <<: [*otel-env, *langfuse-env]
+      TOOL_CACHE_TTL: "300"
+      JWT_SECRET: ${JWT_SECRET:-test-secret-change-in-prod}
+      CONTEXT_HMAC_SECRET: ${CONTEXT_HMAC_SECRET:-test-context-secret-change-in-prod}
+      <<: *otel-env
+    depends_on:
+      pgvector:
+        condition: service_healthy
+      opa:
+        condition: service_healthy
     healthcheck:
-      # TCP check — python3 is always present as the container runtime.
-      # Avoids needing curl or wget, and works regardless of HTTP routes.
       test: ["CMD", "python3", "-c",
              "import socket,sys; s=socket.socket(); r=s.connect_ex(('localhost',8080)); s.close(); sys.exit(0 if r==0 else 1)"]
       interval: 15s
@@ -66,54 +198,11 @@ services:
     networks:
       - ai-network
     ports:
-      - "127.0.0.1:8080:8080"    # Loopback only in dev
+      - "127.0.0.1:8080:8080"
 
-  # ============================================================
-  # AGENT SERVICE
-  # ============================================================
-  ai-agents:
-    build:
-      context: .                           # Build from monorepo root
-      dockerfile: agents/Dockerfile
-    container_name: ai-agents
-    environment:
-      LITELLM_BASE_URL: http://litellm:4000/v1    # Container name on ai-network
-      MCP_SSE_URL: http://data-mcp:8080/sse        # Container name on ai-network
-      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
-      SERVICE_NAME: ai-agents
-      # Agent behaviour — all tunable via AgentConfig.from_env()
-      AGENT_MODEL_ROUTE: ${AGENT_MODEL_ROUTE:-complex-routing}
-      ENABLE_COMPACTION: ${ENABLE_COMPACTION:-true}
-      AGENT_CONTEXT_TOKEN_LIMIT: ${AGENT_CONTEXT_TOKEN_LIMIT:-6000}
-      AGENT_RECURSION_LIMIT: ${AGENT_RECURSION_LIMIT:-10}
-      <<: [*otel-env, *langfuse-env]
-    depends_on:
-      data-mcp:
-        condition: service_healthy
-    # Healthcheck so dependent services and orchestrators know when the
-    # agent is fully ready (MCP handshake + LangGraph init included in startup)
-    healthcheck:
-      test: ["CMD", "python3", "-c",
-             "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
-      interval: 15s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
-    networks:
-      - ai-network
-    ports:
-      - "127.0.0.1:8000:8000"  # Bind to loopback only in dev
-
-  # ============================================================
-  # FRONTENDS — Analytics Dashboard (Next.js)
-  # ============================================================
-
-  # ============================================================
-  # ANALYTICS AGENT — MCP SERVERS (data sources)
-  # ============================================================
   salesforce-mcp:
     build:
-      context: .                           # Build from monorepo root
+      context: .
       dockerfile: tools/salesforce-mcp/Dockerfile
     container_name: ai-salesforce-mcp
     environment:
@@ -127,14 +216,19 @@ services:
       SERVICE_NAME: salesforce-mcp
       ENVIRONMENT: ${ENVIRONMENT:-local}
       AGENT_ROLE: ${AGENT_ROLE:-data_analyst_agent}
-      JWT_SECRET: ${JWT_SECRET}
-      CONTEXT_HMAC_SECRET: ${CONTEXT_HMAC_SECRET}
+      JWT_SECRET: ${JWT_SECRET:-test-secret-change-in-prod}
+      CONTEXT_HMAC_SECRET: ${CONTEXT_HMAC_SECRET:-test-context-secret-change-in-prod}
       REDIS_HOST: redis
       REDIS_PORT: 6379
       REDIS_PASSWORD: ${REDIS_PASSWORD}
       ENABLE_TOOL_CACHE: "true"
-      TOOL_CACHE_TTL: "1800"              # 30 minutes — CRM data is human-updated
-      <<: [*otel-env, *langfuse-env]
+      TOOL_CACHE_TTL: "1800"
+      <<: *otel-env
+    depends_on:
+      pgvector:
+        condition: service_healthy
+      opa:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "python3", "-c",
              "import socket,sys; s=socket.socket(); r=s.connect_ex(('localhost',8081)); s.close(); sys.exit(0 if r==0 else 1)"]
@@ -145,11 +239,11 @@ services:
     networks:
       - ai-network
     ports:
-      - "127.0.0.1:8081:8081"    # Loopback only in dev
+      - "127.0.0.1:8081:8081"
 
   payments-mcp:
     build:
-      context: .                           # Build from monorepo root
+      context: .
       dockerfile: tools/payments-mcp/Dockerfile
     container_name: ai-payments-mcp
     environment:
@@ -163,14 +257,19 @@ services:
       SERVICE_NAME: payments-mcp
       ENVIRONMENT: ${ENVIRONMENT:-local}
       AGENT_ROLE: ${AGENT_ROLE:-data_analyst_agent}
-      JWT_SECRET: ${JWT_SECRET}
-      CONTEXT_HMAC_SECRET: ${CONTEXT_HMAC_SECRET}
+      JWT_SECRET: ${JWT_SECRET:-test-secret-change-in-prod}
+      CONTEXT_HMAC_SECRET: ${CONTEXT_HMAC_SECRET:-test-context-secret-change-in-prod}
       REDIS_HOST: redis
       REDIS_PORT: 6379
       REDIS_PASSWORD: ${REDIS_PASSWORD}
       ENABLE_TOOL_CACHE: "true"
-      TOOL_CACHE_TTL: "3600"              # 1 hour — payments loaded in nightly batches
-      <<: [*otel-env, *langfuse-env]
+      TOOL_CACHE_TTL: "3600"
+      <<: *otel-env
+    depends_on:
+      pgvector:
+        condition: service_healthy
+      opa:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "python3", "-c",
              "import socket,sys; s=socket.socket(); r=s.connect_ex(('localhost',8082)); s.close(); sys.exit(0 if r==0 else 1)"]
@@ -181,28 +280,31 @@ services:
     networks:
       - ai-network
     ports:
-      - "127.0.0.1:8082:8082"    # Loopback only in dev
+      - "127.0.0.1:8082:8082"
 
   news-search-mcp:
     build:
-      context: .                           # Build from monorepo root
+      context: .
       dockerfile: tools/news-search-mcp/Dockerfile
     container_name: ai-news-search-mcp
     environment:
       MCP_TRANSPORT: sse
-      OPA_URL: http://opa:8181/v1/data/mcp/tools/allow   # Added — news-mcp now calls OPA
-      TAVILY_API_KEY: ${TAVILY_API_KEY:-}  # Optional — uses mock data if not set
+      OPA_URL: http://opa:8181/v1/data/mcp/tools/allow
+      TAVILY_API_KEY: ${TAVILY_API_KEY:-}
       SERVICE_NAME: news-search-mcp
       ENVIRONMENT: ${ENVIRONMENT:-local}
       AGENT_ROLE: ${AGENT_ROLE:-data_analyst_agent}
-      JWT_SECRET: ${JWT_SECRET}
-      CONTEXT_HMAC_SECRET: ${CONTEXT_HMAC_SECRET}
+      JWT_SECRET: ${JWT_SECRET:-test-secret-change-in-prod}
+      CONTEXT_HMAC_SECRET: ${CONTEXT_HMAC_SECRET:-test-context-secret-change-in-prod}
       REDIS_HOST: redis
       REDIS_PORT: 6379
       REDIS_PASSWORD: ${REDIS_PASSWORD}
       ENABLE_TOOL_CACHE: "true"
-      TOOL_CACHE_TTL: "1800"              # 30 minutes — news is latency-tolerant
-      <<: [*otel-env, *langfuse-env]
+      TOOL_CACHE_TTL: "1800"
+      <<: *otel-env
+    depends_on:
+      opa:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "python3", "-c",
              "import socket,sys; s=socket.socket(); r=s.connect_ex(('localhost',8083)); s.close(); sys.exit(0 if r==0 else 1)"]
@@ -213,41 +315,67 @@ services:
     networks:
       - ai-network
     ports:
-      - "127.0.0.1:8083:8083"    # Loopback only in dev
+      - "127.0.0.1:8083:8083"
 
   # ============================================================
-  # ANALYTICS AGENT — Agentic analytics platform (LangGraph)
+  # GENERIC AGENT (legacy ReAct chat agent)
+  # ============================================================
+  ai-agents:
+    build:
+      context: .
+      dockerfile: agents/Dockerfile
+    container_name: ai-agents
+    environment:
+      LITELLM_BASE_URL: http://litellm:4000/v1
+      MCP_SSE_URL: http://data-mcp:8080/sse
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+      SERVICE_NAME: ai-agents
+      AGENT_MODEL_ROUTE: ${AGENT_MODEL_ROUTE:-complex-routing}
+      ENABLE_COMPACTION: ${ENABLE_COMPACTION:-true}
+      AGENT_CONTEXT_TOKEN_LIMIT: ${AGENT_CONTEXT_TOKEN_LIMIT:-6000}
+      AGENT_RECURSION_LIMIT: ${AGENT_RECURSION_LIMIT:-10}
+      <<: *otel-env
+    depends_on:
+      data-mcp:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python3", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - ai-network
+    ports:
+      - "127.0.0.1:8000:8000"
+
+  # ============================================================
+  # ANALYTICS AGENT — primary agentic analytics service (LangGraph)
   # ============================================================
   analytics-agent:
     build:
-      context: .                           # Build from monorepo root
+      context: .
       dockerfile: agents/analytics-agent/Dockerfile
     container_name: ai-analytics-agent
     environment:
       LITELLM_BASE_URL: http://litellm:4000/v1
       INTERNAL_API_KEY: ${INTERNAL_API_KEY}
       SERVICE_NAME: analytics-agent
-      # MCP server endpoints for data retrieval
       DATA_MCP_URL: http://data-mcp:8080/sse
       SALESFORCE_MCP_URL: http://salesforce-mcp:8081/sse
       PAYMENTS_MCP_URL: http://payments-mcp:8082/sse
       NEWS_MCP_URL: http://news-search-mcp:8083/sse
-      # Environment & security — controls orchestrator role and HMAC signing
       ENVIRONMENT: ${ENVIRONMENT:-local}
-      JWT_SECRET: ${JWT_SECRET}
-      CONTEXT_HMAC_SECRET: ${CONTEXT_HMAC_SECRET}
-      # Agent behaviour — model tiering for analytics
+      JWT_SECRET: ${JWT_SECRET:-test-secret-change-in-prod}
+      CONTEXT_HMAC_SECRET: ${CONTEXT_HMAC_SECRET:-test-context-secret-change-in-prod}
       ROUTER_MODEL_ROUTE: ${ROUTER_MODEL_ROUTE:-fast-routing}
       SYNTHESIS_MODEL_ROUTE: ${SYNTHESIS_MODEL_ROUTE:-complex-routing}
       ENABLE_COMPACTION: ${ENABLE_COMPACTION:-true}
       AGENT_CONTEXT_TOKEN_LIMIT: ${AGENT_CONTEXT_TOKEN_LIMIT:-6000}
       AGENT_RECURSION_LIMIT: ${AGENT_RECURSION_LIMIT:-10}
-      # MCP bridge startup timeout — must be well under the effective health-check
-      # window (start_period + retries*interval = 60 + 5*15 = 135 s).
-      # Bridges that don't connect within this limit start in degraded mode and
-      # reconnect automatically in the background via MCPToolBridge._reconnect_loop.
       MCP_STARTUP_TIMEOUT: "30"
-      <<: [*otel-env, *langfuse-env]
+      <<: *otel-env
     depends_on:
       data-mcp:
         condition: service_healthy
@@ -257,20 +385,22 @@ services:
         condition: service_healthy
       news-search-mcp:
         condition: service_healthy
+      litellm:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "python3", "-c",
              "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 15s
       timeout: 5s
       retries: 5
-      start_period: 60s    # Widened from 30s: allows MCP_STARTUP_TIMEOUT (30s) + graph init to complete
+      start_period: 60s
     networks:
       - ai-network
     ports:
-      - "127.0.0.1:8086:8000"    # Analytics Agent API — loopback only in dev
+      - "127.0.0.1:8086:8000"
 
   # ============================================================
-  # ANALYTICS DASHBOARD — Next.js 15 + Shadcn/ui + Vercel AI SDK
+  # ANALYTICS DASHBOARD — Next.js + Auth0 + Vercel AI SDK
   # ============================================================
   analytics-dashboard:
     build:
@@ -280,7 +410,6 @@ services:
     environment:
       ANALYTICS_AGENT_URL: http://analytics-agent:8000
       INTERNAL_API_KEY: ${INTERNAL_API_KEY}
-      # Auth0 OAuth
       AUTH0_SECRET: ${AUTH0_SECRET}
       AUTH0_BASE_URL: ${AUTH0_BASE_URL:-http://localhost:3003}
       AUTH0_DOMAIN: ${AUTH0_DOMAIN}
@@ -298,12 +427,14 @@ services:
     networks:
       - ai-network
     ports:
-      - "127.0.0.1:3003:3000"    # Analytics Dashboard — open http://localhost:3003
+      - "127.0.0.1:3003:3000"
 
 # ============================================================
-# SHARED NETWORK — created by docker-compose.infra.yml
+# Network + volumes
 # ============================================================
 networks:
   ai-network:
-    external: true
-    name: enterprise-ai_ai-network
+    driver: bridge
+
+volumes:
+  pgdata:

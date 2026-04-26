@@ -101,53 +101,14 @@ def reset_session_id(token: "contextvars.Token[Optional[str]]") -> None:
     _session_id_ctx.reset(token)
 
 
-# ---- Per-call user auth context ----------------------------------------------
-# Holds an HMAC-signed AgentContext token carrying the authenticated user's
-# identity (user_email, user_role) from the OAuth provider.  Set per-request
-# in the agent entry point; the bridge injects it into every tool call as
-# `auth_context`.  MCP servers verify the HMAC before extracting claims —
-# no plaintext security info ever flows as a tool parameter.
-_user_auth_ctx: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
-    "mcp_user_auth", default=None
-)
-
-
-def set_user_auth_token(token: str) -> "contextvars.Token[Optional[str]]":
-    """Bind an HMAC-signed auth context token to the current async context.
-
-    The token is an AgentContext.to_header_value() string containing the
-    authenticated user's claims.  It is injected into every MCP tool call
-    as `auth_context` so downstream services can verify and extract user
-    identity without trusting plaintext parameters.
-
-        auth_token = set_user_auth_token(agent_ctx.to_header_value())
-        try:
-            result = await graph.ainvoke(...)
-        finally:
-            reset_user_auth_token(auth_token)
-    """
-    return _user_auth_ctx.set(token)
-
-
-def reset_user_auth_token(token: "contextvars.Token[Optional[str]]") -> None:
-    """Restore the previous auth token binding after an agent invocation.
-
-    Starlette's StreamingResponse runs the async generator in a task-group
-    that receives a *copy* of the parent Context.  ContextVar.reset()
-    requires the exact same Context, so it raises ValueError when called
-    from inside the streaming task.  Fall back to clearing the var directly.
-    """
-    try:
-        _user_auth_ctx.reset(token)
-    except ValueError:
-        # Streaming context copy — safe to just clear since the request is ending.
-        _user_auth_ctx.set(None)
 
 from langchain_core.tools import StructuredTool
 from mcp.client.sse import sse_client
 from mcp.client.session import ClientSession
 from platform_sdk import get_logger
 from pydantic import Field, create_model
+from .user_context import UserContext
+from .errors import UnsupportedSchemaError
 
 # Use structlog logger (supports keyword args) rather than standard logging.getLogger()
 log = get_logger(__name__)
@@ -252,6 +213,8 @@ def _make_invoke_fn(
     tool_name: str,
     input_schema: dict,
     bridge_session_id: Optional[str] = None,
+    *,
+    user_ctx: "UserContext | None" = None,
 ):
     """
     Factory that returns an async callable bound to a specific tool name.
@@ -301,9 +264,8 @@ def _make_invoke_fn(
 
             # Inject per-call HMAC-signed auth context carrying user identity.
             # This is verified server-side before use — the LLM cannot forge it.
-            user_auth = _user_auth_ctx.get()
-            if user_auth:
-                kwargs["auth_context"] = user_auth
+            if user_ctx is not None:
+                kwargs["auth_context"] = user_ctx.auth_token
 
             log.debug("mcp_tool_call", tool=tool_name, args=list(kwargs.keys()))
             try:
@@ -552,12 +514,38 @@ class MCPToolBridge:
         self._bg_task = None
         log.info("mcp_disconnected", url=self.sse_url)
 
-    async def get_langchain_tools(self) -> list[StructuredTool]:
+    _UNSUPPORTED_TOPLEVEL_KEYWORDS = ("$ref", "allOf", "anyOf", "oneOf")
+
+    def _convert_schema(self, tool_name: str, schema: dict) -> type:
+        """Convert an MCP tool's inputSchema to a Pydantic args model.
+
+        Raises ``UnsupportedSchemaError`` if the schema uses a top-level
+        JSON Schema keyword the SDK cannot translate ($ref, allOf, anyOf,
+        oneOf). Nested usage of those keywords inside ``properties`` falls
+        through to the existing degradation path in
+        ``_resolve_field_python_type`` (warning logged, mapped to dict).
+        """
+        if isinstance(schema, dict):
+            for kw in self._UNSUPPORTED_TOPLEVEL_KEYWORDS:
+                if kw in schema:
+                    raise UnsupportedSchemaError(tool_name=tool_name, keyword=kw)
+        return _build_args_model(tool_name, schema)
+
+    async def get_langchain_tools(
+        self,
+        user_ctx: "UserContext | None" = None,
+    ) -> list[StructuredTool]:
         """
         Fetch all tools from the MCP server and return them as LangChain tools.
 
         Each tool's JSON Schema is used to build a typed Pydantic model,
         so LangGraph can validate arguments before dispatching.
+
+        Args:
+            user_ctx: Optional user identity object.  When provided, each tool
+                      closure stamps ``auth_context`` with ``user_ctx.auth_token``.
+                      When None, no auth_context header is stamped — the MCP
+                      server's OPA policy will fail-closed on missing auth.
 
         Requires an active session.  If the bridge is in a degraded (not yet
         connected) state — for example when the MCP server has not started yet
@@ -582,7 +570,11 @@ class MCPToolBridge:
             # Pass bridge reference (not session) so the closure always uses
             # the current live session even after a reconnect.
             invoke_fn = _make_invoke_fn(
-                self, tool.name, input_schema, bridge_session_id=self._session_id
+                self,
+                tool.name,
+                input_schema,
+                bridge_session_id=self._session_id,
+                user_ctx=user_ctx,
             )
 
             kwargs: dict[str, Any] = dict(
@@ -591,7 +583,7 @@ class MCPToolBridge:
                 description=tool.description or f"Executes the {tool.name} tool.",
             )
             if input_schema.get("properties"):
-                kwargs["args_schema"] = _build_args_model(tool.name, input_schema)
+                kwargs["args_schema"] = self._convert_schema(tool.name, input_schema)
 
             langchain_tools.append(StructuredTool.from_function(**kwargs))
             log.debug("mcp_tool_registered", tool=tool.name)

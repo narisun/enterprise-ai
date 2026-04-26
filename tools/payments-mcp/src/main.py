@@ -8,7 +8,7 @@ from mcp.server.fastmcp import FastMCP
 
 from platform_sdk import configure_logging, get_logger
 
-from .PaymentsMcpService import PaymentsMcpService
+from .payments_mcp_service import PaymentsMcpService
 
 configure_logging()
 log = get_logger(__name__)
