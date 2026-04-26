@@ -68,6 +68,20 @@ allow if {
 }
 
 # ============================================================
+# RULE: Bank-perspective Payment Summary (get_bank_payment_summary)
+#
+# Bank-side companion to get_payment_summary — pivots fact_payments
+# on PayorBank/PayeeBank to answer "what does <bank> facilitate?"
+# instead of "what does <client> send/receive?". Same role gates.
+# ============================================================
+
+allow if {
+    input.tool == "get_bank_payment_summary"
+    _agent_is_authorized
+    _user_is_authorized
+}
+
+# ============================================================
 # RULE: News Search Tools (search_company_news)
 #
 # RM Prep Agent searches internet news for company intelligence

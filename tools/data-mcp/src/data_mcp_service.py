@@ -116,11 +116,21 @@ class DataMcpService(McpService):
                 log.warning("opa_denied", tool="execute_read_query")
                 return make_error("unauthorized", "Execution blocked by policy engine.")
 
-            # Cache lookup
+            # Cache lookup. user_role is part of the key so role-masked
+            # rows from one role can't bleed into a request from a less
+            # privileged role (the same query may return different
+            # columns depending on caller clearance).
             cache_key = None
             cache = svc._cache
             if cache is not None:
-                cache_key = make_cache_key("execute_read_query", {"query": query, "session_id": session_id})
+                cache_key = make_cache_key(
+                    "execute_read_query",
+                    {
+                        "query": query,
+                        "session_id": session_id,
+                        "user_role": user_ctx.user_role or "",
+                    },
+                )
                 cached_result = await cache.get(cache_key)
                 if cached_result is not None:
                     log.info("query_cache_hit", session_id=session_id)

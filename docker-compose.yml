@@ -445,6 +445,11 @@ services:
       AGENT_CONTEXT_TOKEN_LIMIT: ${AGENT_CONTEXT_TOKEN_LIMIT:-6000}
       AGENT_RECURSION_LIMIT: ${AGENT_RECURSION_LIMIT:-10}
       MCP_STARTUP_TIMEOUT: "30"
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
+      # In-cluster URL: agents call langfuse over the compose network,
+      # not via the host's localhost:3001 port mapping.
+      LANGFUSE_HOST: http://langfuse:3000
       <<: *otel-env
     depends_on:
       data-mcp:

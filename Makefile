@@ -19,6 +19,11 @@
 #
 # Plus:
 #
+#   make logs     Tail logs for one or all services. Examples:
+#                   make logs                    (all services, follow)
+#                   make logs S=analytics-agent  (one service, follow)
+#                   make logs S=data-mcp N=200   (last 200 lines, follow)
+#
 #   make help     List the targets.
 #
 # Notes:
@@ -28,7 +33,7 @@
 #     single source of truth.
 # ============================================================
 
-.PHONY: setup start stop restart help
+.PHONY: setup start stop restart logs help
 
 VENV    := .venv
 PYTHON  := $(VENV)/bin/python3
@@ -69,6 +74,12 @@ stop: ## Stop everything (preserves data)
 	@echo "✅ Stack stopped — data volumes preserved"
 
 restart: stop start ## Stop then start
+
+# Override on the command line:  make logs S=analytics-agent N=200
+S ?=
+N ?= 100
+logs: ## Tail logs (S=service, N=lines; defaults: all services, last 100)
+	$(COMPOSE) logs -f --tail=$(N) $(S)
 
 help: ## Show this help
 	@awk 'BEGIN{FS=":.*## "} \

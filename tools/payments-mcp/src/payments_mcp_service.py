@@ -168,3 +168,82 @@ class PaymentsMcpService(McpService):
                 await cache.set(cache_key, result)
 
             return result
+
+        @mcp.tool()
+        async def get_bank_payment_summary(bank_name: str, auth_context: str = "") -> str:
+            """
+            Get bank-perspective payment-volume summary for a financial institution.
+
+            Use this when the user asks about a *bank* (the financial institution
+            facilitating the payment) — not a *party* (the corporate counterparty).
+            Banks appear on fact_payments as "PayorBank"/"PayeeBank"; parties appear
+            as "PayorName"/"PayeeName". Names containing "Bank", "Bancorp",
+            "Financial", "Trust", "N.A.", or "Credit Union" are typically banks.
+
+            Returns:
+              - bank profile (type, regulator, clearing networks, AML rating, status)
+              - originating volume (as PayorBank) by rail
+              - beneficiary volume (as PayeeBank) by rail
+              - volume trend vs prior period
+              - transaction status mix (Completed / Pending / Failed / Returned)
+              - top 10 parties originating through this bank
+              - top 10 parties receiving through this bank
+              - top 10 counterparty banks on the other side of transactions
+
+            Fuzzy name matching: short forms like "BMO" resolve to the full name
+            ("BMO Harris Bank (US)") via dim_bank lookup.
+
+            The look-back window is fixed at 360 days.
+
+            Args:
+                bank_name: Bank name (full or partial — fuzzy matching supported).
+                auth_context: HMAC-signed auth token (system-injected, do not set).
+
+            Returns:
+                JSON string with bank-perspective analytics, or error JSON.
+            """
+            if not bank_name or not bank_name.strip():
+                return make_error("invalid_input", "bank_name must not be empty.")
+
+            bank_name = bank_name.strip()[:256]
+
+            user_ctx = verify_auth_context(auth_context)
+
+            is_authorized = await svc.authorizer.authorize(
+                "get_bank_payment_summary",
+                {"bank_name": bank_name, "user_role": user_ctx.user_role},
+            )
+            if not is_authorized:
+                log.warning("opa_denied", tool="get_bank_payment_summary")
+                return make_error("unauthorized", "Execution blocked by policy engine.")
+
+            cache = svc._cache
+            cache_key = None
+            if cache is not None:
+                cache_key = make_cache_key(
+                    "get_bank_payment_summary",
+                    {"bank_name": bank_name},
+                )
+                cached = await cache.get(cache_key)
+                if cached is not None:
+                    log.info("bank_summary_cache_hit", bank=bank_name)
+                    return cached
+
+            log.info("bank_summary_tool_call", bank=bank_name, role=user_ctx.user_role)
+
+            try:
+                result = await svc.payments_service.get_bank_summary(bank_name)
+            except Exception as exc:
+                exc_type = type(exc).__name__
+                log.error(
+                    "bank_summary_error",
+                    exc_type=exc_type,
+                    error=str(exc),
+                    exc_info=True,
+                )
+                return make_error("service_error", f"A {exc_type} occurred. Please try again.")
+
+            if cache is not None and cache_key is not None:
+                await cache.set(cache_key, result)
+
+            return result

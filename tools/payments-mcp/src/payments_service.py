@@ -382,3 +382,329 @@ class PaymentsService:
             output = output[:self.max_result_bytes] + "\n... [RESULTS TRUNCATED]"
 
         return output
+
+    # ── Bank perspective ────────────────────────────────────────────────────
+
+    async def _resolve_bank_name(
+        self, conn, bank_name: str
+    ) -> tuple[Optional[str], list[str]]:
+        """Resolve a fuzzy bank name to the exact BankName in dim_bank.
+
+        Same lookup order as _resolve_client_name: exact → prefix → substring,
+        with fact_payments fallback for banks that appear on transactions
+        but not in dim_bank (orphaned correspondent banks etc.).
+        """
+        row = await conn.fetchrow(
+            'SELECT "BankName" FROM bankdw.dim_bank WHERE lower("BankName") = lower($1) LIMIT 1',
+            bank_name,
+        )
+        if row:
+            return row["BankName"], []
+
+        rows = await conn.fetch(
+            'SELECT DISTINCT "BankName" FROM bankdw.dim_bank '
+            'WHERE "BankName" ILIKE $1 ORDER BY "BankName" LIMIT 5',
+            f"{bank_name}%",
+        )
+        if rows:
+            names = [r["BankName"] for r in rows]
+            return names[0], (names if len(names) > 1 else [])
+
+        rows = await conn.fetch(
+            'SELECT DISTINCT "BankName" FROM bankdw.dim_bank '
+            'WHERE "BankName" ILIKE $1 ORDER BY "BankName" LIMIT 5',
+            f"%{bank_name}%",
+        )
+        if rows:
+            names = [r["BankName"] for r in rows]
+            return names[0], (names if len(names) > 1 else [])
+
+        row = await conn.fetchrow(
+            """
+            SELECT name FROM (
+                SELECT DISTINCT "PayorBank" AS name FROM bankdw.fact_payments WHERE "PayorBank" ILIKE $1
+                UNION
+                SELECT DISTINCT "PayeeBank" AS name FROM bankdw.fact_payments WHERE "PayeeBank" ILIKE $1
+            ) t ORDER BY name LIMIT 1
+            """,
+            f"%{bank_name}%",
+        )
+        if row:
+            return row["name"], []
+
+        return None, []
+
+    async def get_bank_summary(self, bank_name: str, days: int = _DEFAULT_DAYS) -> str:
+        """
+        Get payment-volume summary for a bank (financial institution perspective).
+
+        Use this for questions about a *bank* — not a corporate party. The bank
+        appears on fact_payments as PayorBank (originating side) or PayeeBank
+        (beneficiary side). Parties are different: they appear as PayorName /
+        PayeeName and are queried via get_summary().
+
+        Args:
+            bank_name: Bank name (fuzzy matching: 'BMO' → 'BMO Harris Bank (US)').
+            days:      Look-back window. Defaults to 360.
+
+        Returns:
+            JSON string with bank-perspective analytics, or error JSON.
+        """
+        async with self.db_pool.acquire() as conn:
+            async with conn.transaction(isolation="repeatable_read", readonly=True):
+
+                resolved_name, similar_names = await self._resolve_bank_name(conn, bank_name)
+                if resolved_name is None:
+                    return json.dumps({
+                        "error": "bank_not_found",
+                        "message": (
+                            f"No bank found matching '{bank_name}'. "
+                            "Try a more specific name (e.g. 'JPMorgan' instead of 'JPM')."
+                        ),
+                        "searched_name": bank_name,
+                    })
+
+                original_search = bank_name
+                bank_name = resolved_name
+
+                # 1. Bank profile from dim_bank (single row).
+                bank_row = await conn.fetchrow(
+                    """
+                    SELECT "BankName", "BankType", "BankRoleType", "Regulator",
+                           "ClearingNetworksSupported", "BSAAMLProgramRating",
+                           "SanctionsComplianceStatus", "BankStatus",
+                           "OwnershipType", "HeadquartersState", "HeadquartersCity"
+                    FROM bankdw."dim_bank"
+                    WHERE "BankName" = $1
+                    LIMIT 1
+                    """,
+                    bank_name,
+                )
+
+                # 2. As originator (sending) — volume by rail.
+                originating = await conn.fetch(
+                    """
+                    SELECT "TransactionType" AS payment_type,
+                           SUM("Amount")     AS total,
+                           COUNT(*)          AS tx_count
+                    FROM bankdw."fact_payments"
+                    WHERE "PayorBank" = $1
+                      AND "Status" = 'Completed'
+                      AND "TransactionDate" >= CURRENT_DATE - ($2::int * INTERVAL '1 day')
+                    GROUP BY "TransactionType"
+                    ORDER BY total DESC
+                    """,
+                    bank_name, days,
+                )
+
+                # 3. As beneficiary (receiving) — volume by rail.
+                beneficiary = await conn.fetch(
+                    """
+                    SELECT "TransactionType" AS payment_type,
+                           SUM("Amount")     AS total,
+                           COUNT(*)          AS tx_count
+                    FROM bankdw."fact_payments"
+                    WHERE "PayeeBank" = $1
+                      AND "Status" = 'Completed'
+                      AND "TransactionDate" >= CURRENT_DATE - ($2::int * INTERVAL '1 day')
+                    GROUP BY "TransactionType"
+                    ORDER BY total DESC
+                    """,
+                    bank_name, days,
+                )
+
+                if not originating and not beneficiary:
+                    return json.dumps({
+                        "error": "no_data",
+                        "message": (
+                            f"No completed payments through '{bank_name}' in the last {days} days."
+                        ),
+                    })
+
+                # 4. Prior period for trend (originating side).
+                prior = await conn.fetchrow(
+                    """
+                    SELECT SUM("Amount") AS total
+                    FROM bankdw."fact_payments"
+                    WHERE "PayorBank" = $1
+                      AND "Status" = 'Completed'
+                      AND "TransactionDate" >= CURRENT_DATE - ($2::int * INTERVAL '1 day') * 2
+                      AND "TransactionDate" <  CURRENT_DATE - ($2::int * INTERVAL '1 day')
+                    """,
+                    bank_name, days,
+                )
+
+                # 5. Status mix across both sides — exception-rate signal.
+                status_mix = await conn.fetch(
+                    """
+                    SELECT "Status" AS status,
+                           COUNT(*) AS cnt,
+                           SUM("Amount") AS total
+                    FROM bankdw."fact_payments"
+                    WHERE ("PayorBank" = $1 OR "PayeeBank" = $1)
+                      AND "TransactionDate" >= CURRENT_DATE - ($2::int * INTERVAL '1 day')
+                    GROUP BY "Status"
+                    ORDER BY cnt DESC
+                    """,
+                    bank_name, days,
+                )
+
+                # 6. Top originators — parties sending most through this bank.
+                top_originators = await conn.fetch(
+                    """
+                    SELECT "PayorName"      AS party_name,
+                           "TransactionType" AS payment_type,
+                           SUM("Amount")    AS total,
+                           COUNT(*)         AS tx_count
+                    FROM bankdw."fact_payments"
+                    WHERE "PayorBank" = $1
+                      AND "Status" = 'Completed'
+                      AND "TransactionDate" >= CURRENT_DATE - ($2::int * INTERVAL '1 day')
+                    GROUP BY "PayorName", "TransactionType"
+                    ORDER BY total DESC
+                    LIMIT 10
+                    """,
+                    bank_name, days,
+                )
+
+                # 7. Top beneficiaries — parties receiving most through this bank.
+                top_beneficiaries = await conn.fetch(
+                    """
+                    SELECT "PayeeName"      AS party_name,
+                           "TransactionType" AS payment_type,
+                           SUM("Amount")    AS total,
+                           COUNT(*)         AS tx_count
+                    FROM bankdw."fact_payments"
+                    WHERE "PayeeBank" = $1
+                      AND "Status" = 'Completed'
+                      AND "TransactionDate" >= CURRENT_DATE - ($2::int * INTERVAL '1 day')
+                    GROUP BY "PayeeName", "TransactionType"
+                    ORDER BY total DESC
+                    LIMIT 10
+                    """,
+                    bank_name, days,
+                )
+
+                # 8. Counterparty banks — the OTHER bank on each transaction.
+                counterparty_banks = await conn.fetch(
+                    """
+                    SELECT counterparty_bank,
+                           SUM(amt) AS total,
+                           SUM(cnt) AS tx_count
+                    FROM (
+                        SELECT "PayeeBank" AS counterparty_bank,
+                               "Amount"    AS amt,
+                               1           AS cnt
+                        FROM bankdw."fact_payments"
+                        WHERE "PayorBank" = $1
+                          AND "Status" = 'Completed'
+                          AND "TransactionDate" >= CURRENT_DATE - ($2::int * INTERVAL '1 day')
+                        UNION ALL
+                        SELECT "PayorBank", "Amount", 1
+                        FROM bankdw."fact_payments"
+                        WHERE "PayeeBank" = $1
+                          AND "Status" = 'Completed'
+                          AND "TransactionDate" >= CURRENT_DATE - ($2::int * INTERVAL '1 day')
+                    ) sub
+                    WHERE counterparty_bank <> $1
+                    GROUP BY counterparty_bank
+                    ORDER BY total DESC
+                    LIMIT 10
+                    """,
+                    bank_name, days,
+                )
+
+        # ── Aggregate ────────────────────────────────────────────────────────
+        total_originating = sum(float(r["total"]) for r in originating)
+        total_beneficiary = sum(float(r["total"]) for r in beneficiary)
+
+        by_type: dict = {}
+        for r in originating:
+            pt = r["payment_type"]
+            by_type.setdefault(pt, {"originator_usd": 0.0, "beneficiary_usd": 0.0, "tx_count": 0})
+            by_type[pt]["originator_usd"] += float(r["total"])
+            by_type[pt]["tx_count"] += r["tx_count"]
+        for r in beneficiary:
+            pt = r["payment_type"]
+            by_type.setdefault(pt, {"originator_usd": 0.0, "beneficiary_usd": 0.0, "tx_count": 0})
+            by_type[pt]["beneficiary_usd"] += float(r["total"])
+            by_type[pt]["tx_count"] += r["tx_count"]
+
+        prior_total = float(prior["total"] or 0) if prior and prior["total"] else 0.0
+        trend_pct = None
+        trend_label = "STABLE"
+        if prior_total > 0:
+            trend_pct = round(((total_originating - prior_total) / prior_total) * 100, 1)
+            trend_label = (
+                "INCREASING" if trend_pct > 5
+                else "DECLINING" if trend_pct < -5
+                else "STABLE"
+            )
+
+        bank_profile = (
+            {
+                "type":              bank_row["BankType"],
+                "role_type":         bank_row["BankRoleType"],
+                "regulator":         bank_row["Regulator"],
+                "clearing_networks": bank_row["ClearingNetworksSupported"],
+                "aml_rating":        bank_row["BSAAMLProgramRating"],
+                "sanctions_status":  bank_row["SanctionsComplianceStatus"],
+                "ownership":         bank_row["OwnershipType"],
+                "headquarters":      f"{bank_row['HeadquartersCity']}, {bank_row['HeadquartersState']}",
+                "status":            bank_row["BankStatus"],
+            }
+            if bank_row else None
+        )
+
+        result = {
+            "bank_name": bank_name,
+            **({"searched_as": original_search, "other_matches": similar_names}
+               if original_search.lower() != bank_name.lower() else {}),
+            "period_days": days,
+            "bank_profile": bank_profile,
+            "as_originator_usd": round(total_originating, 2),
+            "as_beneficiary_usd": round(total_beneficiary, 2),
+            "by_payment_type": by_type,
+            "volume_trend_pct": trend_pct,
+            "trend_label": trend_label,
+            "transaction_status_mix": [
+                {
+                    "status": r["status"],
+                    "count": r["cnt"],
+                    "total_usd": round(float(r["total"] or 0), 2),
+                }
+                for r in status_mix
+            ],
+            "top_originators": [
+                {
+                    "party": r["party_name"],
+                    "payment_type": r["payment_type"],
+                    "total_usd": round(float(r["total"]), 2),
+                    "tx_count": r["tx_count"],
+                }
+                for r in top_originators
+            ],
+            "top_beneficiaries": [
+                {
+                    "party": r["party_name"],
+                    "payment_type": r["payment_type"],
+                    "total_usd": round(float(r["total"]), 2),
+                    "tx_count": r["tx_count"],
+                }
+                for r in top_beneficiaries
+            ],
+            "top_counterparty_banks": [
+                {
+                    "bank": r["counterparty_bank"],
+                    "total_usd": round(float(r["total"]), 2),
+                    "tx_count": int(r["tx_count"]),
+                }
+                for r in counterparty_banks
+            ],
+            "retrieved_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+        output = json.dumps(result, default=str)
+        if len(output) > self.max_result_bytes:
+            output = output[:self.max_result_bytes] + "\n... [RESULTS TRUNCATED]"
+        return output
