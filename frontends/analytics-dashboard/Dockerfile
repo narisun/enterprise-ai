@@ -12,6 +12,14 @@ COPY . .
 # Set build-time env for the API rewrite target
 ENV ANALYTICS_AGENT_URL=http://analytics-agent:8000
 
+# Auth0 placeholders for build — the Auth0Client is lazily initialised at
+# request time so these are never used, but next build resolves the module
+# graph statically and would warn without them.
+ENV AUTH0_DOMAIN=placeholder.auth0.com
+ENV AUTH0_CLIENT_ID=placeholder
+ENV AUTH0_CLIENT_SECRET=placeholder
+ENV AUTH0_SECRET=placeholder-secret-at-least-32-bytes-long
+
 RUN npm run build
 
 # ── Runtime stage ──────────────────────────────────────────
