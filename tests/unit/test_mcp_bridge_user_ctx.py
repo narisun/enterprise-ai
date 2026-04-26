@@ -26,7 +26,7 @@ async def test_get_langchain_tools_accepts_user_ctx_keyword():
     """Signature accepts user_ctx; bridge with no session returns []."""
     from platform_sdk.mcp_bridge import MCPToolBridge
 
-    bridge = MCPToolBridge(server_name="test", server_url="http://127.0.0.1:0")
+    bridge = MCPToolBridge(sse_url="http://127.0.0.1:0")
     ctx = _FakeUserContext(auth_token="t1")
 
     tools = await bridge.get_langchain_tools(user_ctx=ctx)
@@ -46,7 +46,7 @@ async def test_invoke_closure_uses_user_ctx_auth_token_over_contextvar():
 
     # Build a bridge with a mocked active MCP session that returns one tool
     # and records call_tool kwargs so we can inspect what auth_context was used.
-    bridge = MCPToolBridge(server_name="test", server_url="http://127.0.0.1:0")
+    bridge = MCPToolBridge(sse_url="http://127.0.0.1:0")
 
     fake_tool_meta = MagicMock()
     fake_tool_meta.name = "echo"
@@ -99,7 +99,7 @@ async def test_invoke_closure_falls_back_to_contextvar_when_user_ctx_is_none():
         reset_user_auth_token,
     )
 
-    bridge = MCPToolBridge(server_name="test", server_url="http://127.0.0.1:0")
+    bridge = MCPToolBridge(sse_url="http://127.0.0.1:0")
 
     fake_tool_meta = MagicMock()
     fake_tool_meta.name = "echo"
