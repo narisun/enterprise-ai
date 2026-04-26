@@ -24,7 +24,7 @@ from langchain_core.messages import HumanMessage
 from pydantic import BaseModel, Field
 
 from .graph import build_enterprise_agent
-from .mcp_bridge import MCPToolBridge, reset_session_id, set_session_id
+from platform_sdk.mcp_bridge import MCPToolBridge, reset_session_id, set_session_id
 
 # Import shared SDK
 from platform_sdk import Agent, AgentConfig, MCPConfig, get_logger, make_api_key_verifier
