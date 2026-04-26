@@ -116,6 +116,7 @@ After `make setup`:
 | Analytics Dashboard | http://localhost:3003 | Next.js + Vercel AI SDK |
 | Analytics Agent API | http://localhost:8086 | FastAPI; LangGraph orchestrator |
 | Generic Agent API | http://localhost:8000 | Legacy ReAct chat agent |
+| **Langfuse UI** | **http://localhost:3001** | **LLM trace UI — see [Observability](#observability)** |
 | LiteLLM Proxy | http://localhost:4000 | LLM routing |
 | OPA | http://localhost:8181 | Policy engine |
 | Data MCP | http://localhost:8080 | Secure read-only SQL |
@@ -197,10 +198,36 @@ Cross-cutting:
 
 ## Observability
 
-The OTel collector receives spans on `:4317` (gRPC) and `:4318` (HTTP) and prints them to its own stdout via the `debug` exporter at `verbosity=detailed`.
+The OTel collector receives spans on `:4317` (gRPC) and `:4318` (HTTP) and forwards them to two destinations:
+
+1. **Langfuse v2** at http://localhost:3001 — UI for inspecting LLM trace trees
+2. **debug exporter** — stdout (`docker logs -f ai-otel-collector`)
+
+### First-run: connect Langfuse to OTel
+
+After `make setup`, Langfuse is running but the collector doesn't yet have credentials to push to it. Three steps:
 
 ```bash
-# Watch traces in real time
+# 1. Open Langfuse, register an account, create a project.
+open http://localhost:3001
+
+# 2. Settings > API Keys → "Create new API keys" → copy the public + secret keys.
+
+# 3. Paste them into .env and generate the OTel auth header:
+LANGFUSE_PUBLIC_KEY=pk-lf-...
+LANGFUSE_SECRET_KEY=sk-lf-...
+LANGFUSE_OTEL_AUTH=$(echo -n "$LANGFUSE_PUBLIC_KEY:$LANGFUSE_SECRET_KEY" | base64)
+
+# 4. Restart so the collector picks up the new auth header.
+make restart
+```
+
+After that, every request to the analytics-agent shows up as a trace tree in the Langfuse UI within seconds.
+
+### Day-to-day inspection
+
+```bash
+# Watch raw spans in real time (most useful for debugging)
 docker logs -f ai-otel-collector
 
 # Span/metric counters
@@ -208,9 +235,14 @@ curl -s http://localhost:8888/metrics | grep -E "^otelcol_(receiver_accepted|exp
 
 # Collector health
 curl -s http://localhost:13133/
+
+# Langfuse health
+curl -s http://localhost:3001/api/public/health
 ```
 
-To upgrade to a hosted backend (Langfuse, Datadog, Honeycomb, etc.):
+### Adding a different backend
+
+The Langfuse exporter is one branch of the trace pipeline. To add Datadog, Honeycomb, or a second Langfuse:
 
 1. Add the exporter to `platform/otel/otel-local.yaml`
 2. Append it to `service.pipelines.traces.exporters`
@@ -310,6 +342,7 @@ Common issues:
 | `Bind for 0.0.0.0:5432 failed: port is already allocated` | Another Postgres on the host. Stop it or change the host port mapping in `docker-compose.yml`. |
 | `make help` prints "Binary file Makefile matches" | The Makefile got NUL-byte-corrupted on a stale branch. `git checkout main -- Makefile`. |
 | No traces in `docker logs ai-otel-collector` | No request has hit the agents yet — see "Verify It Works" above. |
+| No traces in Langfuse UI | `LANGFUSE_OTEL_AUTH` is unset or wrong. Regenerate: `echo -n "$LANGFUSE_PUBLIC_KEY:$LANGFUSE_SECRET_KEY" \| base64`. Then `make restart`. Check `docker logs ai-otel-collector` for `401` errors from the Langfuse exporter. |
 | Dashboard returns 401 | Set `AUTH0_*` in `.env` or use the dev-bypass `X-User-Email` header. |
 | Test fixtures missing (no `bankdw.*`/`salesforce.*` schemas) | Postgres init scripts only run on a fresh volume. `make setup` wipes and reloads. |
 | `.env` changes not taking effect | Docker reads `.env` only at container `up`. Run `make restart`. |

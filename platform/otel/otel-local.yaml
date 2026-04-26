@@ -3,14 +3,18 @@
 #
 # OTel Collector — local development configuration.
 #
-# Spans/metrics arrive from agents and are exported to the
-# `debug` exporter (stdout). To inspect:
-#   docker logs ai-otel-collector
+# Spans/metrics arrive from agents and are exported to:
+#   1. debug             — stdout (visible via `docker logs ai-otel-collector`)
+#   2. otlphttp/langfuse — Langfuse v2 OTLP endpoint at /api/public/otel
 #
-# When richer observability is wanted, add a backend exporter
-# (LangFuse, Datadog, Honeycomb, etc.) below and append it to
-# the `exporters:` list under `service.pipelines.traces`. No
-# application code changes are required.
+# The Langfuse pipeline branch is failure-tolerant: if the auth header
+# is missing or invalid the exporter logs and drops, while the debug
+# exporter still receives the spans — observability never breaks just
+# because Langfuse is misconfigured.
+#
+# Auth: LANGFUSE_OTEL_AUTH must be the base64 of "public_key:secret_key".
+# Generate after registering a project at http://localhost:3001:
+#   echo -n "$LANGFUSE_PUBLIC_KEY:$LANGFUSE_SECRET_KEY" | base64
 # ============================================================
 
 receivers:
@@ -42,6 +46,15 @@ exporters:
   debug:
     verbosity: detailed
 
+  # Langfuse v2 OTLP ingestion endpoint.
+  # Authentication: Basic base64(LANGFUSE_PUBLIC_KEY:LANGFUSE_SECRET_KEY)
+  otlphttp/langfuse:
+    endpoint: http://langfuse:3000/api/public/otel
+    tls:
+      insecure: true
+    headers:
+      Authorization: "Basic ${env:LANGFUSE_OTEL_AUTH}"
+
 extensions:
   health_check:
     endpoint: 0.0.0.0:13133
@@ -52,7 +65,7 @@ service:
     traces:
       receivers:  [otlp]
       processors: [memory_limiter, resource, batch]
-      exporters:  [debug]
+      exporters:  [debug, otlphttp/langfuse]
     metrics:
       receivers:  [otlp]
       processors: [memory_limiter, resource, batch]
