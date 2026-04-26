@@ -106,7 +106,7 @@ class DataMcpService(McpService):
             user_ctx = verify_auth_context(auth_context)
 
             # OPA authorization (resolved at request time)
-            is_authorized = await svc._authorizer.authorize(
+            is_authorized = await svc.authorizer.authorize(
                 "execute_read_query",
                 {"query": query, "session_id": session_id, "user_role": user_ctx.user_role},
             )
