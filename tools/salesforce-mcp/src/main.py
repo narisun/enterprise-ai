@@ -8,7 +8,7 @@ from mcp.server.fastmcp import FastMCP
 
 from platform_sdk import configure_logging, get_logger
 
-from .SalesforceMcpService import SalesforceMcpService
+from .salesforce_mcp_service import SalesforceMcpService
 
 configure_logging()
 log = get_logger(__name__)

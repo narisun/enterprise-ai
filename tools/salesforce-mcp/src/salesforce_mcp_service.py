@@ -21,7 +21,7 @@ from tools_shared.mcp_auth import get_agent_context, verify_auth_context
 
 import asyncpg
 
-from .SalesforceService import SalesforceService
+from .salesforce_service import SalesforceService
 
 configure_logging()
 log = get_logger(__name__)
