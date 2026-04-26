@@ -1,21 +1,26 @@
 # ============================================================
 # enterprise-ai — Single-host dev stack
 #
-# Four lifecycle targets keep the mental model small:
+# Five lifecycle targets keep the mental model small:
 #
-#   make setup    Wipe volumes, rebuild images, start everything,
-#                 reload bankdw + salesforce test fixtures from CSVs.
-#                 Use after changing Dockerfiles or seed SQL, or when
-#                 you want a clean slate.
+#   make setup    Wipe ONLY the test-fixture volume (pgdata), rebuild
+#                 images, reload bankdw + salesforce CSVs. Langfuse
+#                 user accounts and API keys are PRESERVED so you do
+#                 not have to re-register the dashboard after every run.
 #
 #   make start    Bring up anything that isn't already running.
-#                 Idempotent. Preserves data.
+#                 Idempotent. Preserves all data.
 #
 #   make stop     Stop every container in the stack. Preserves data
 #                 (volumes stay), so `make start` resumes where you
 #                 left off.
 #
 #   make restart  Stop, then start. Same as: make stop && make start.
+#
+#   make wipe     Nuke EVERYTHING — including the Langfuse database
+#                 (you will need to re-register the dashboard and
+#                 generate fresh API keys). Use only when you want a
+#                 truly clean slate. Rare.
 #
 # Plus:
 #
@@ -33,12 +38,19 @@
 #     single source of truth.
 # ============================================================
 
-.PHONY: setup start stop restart logs help
+.PHONY: setup start stop restart wipe logs help
 
 VENV    := .venv
 PYTHON  := $(VENV)/bin/python3
 PIP     := $(PYTHON) -m pip
 COMPOSE := docker compose
+PROJECT := enterprise-ai
+
+# Volumes that hold ephemeral test fixtures — wiped by `make setup`.
+# Volumes NOT listed here (notably langfuse-db-data) survive `make setup`
+# so you don't have to re-register the Langfuse dashboard after every
+# fixture refresh.
+WIPEABLE_VOLUMES := $(PROJECT)_pgdata
 
 # Auto-create the venv + install platform-sdk on first run.
 $(PYTHON):
@@ -49,10 +61,12 @@ $(PYTHON):
 	$(PIP) install -e platform-sdk/ --quiet
 	@echo "✅ venv ready"
 
-setup: $(PYTHON) ## Wipe volumes, rebuild images, load fresh test data
+setup: $(PYTHON) ## Wipe test fixtures, rebuild images, reload data (preserves Langfuse login)
 	@test -f .env || (echo "ERROR: .env not found — run: cp .env.example .env" && exit 1)
-	@echo "→ Tearing down existing stack and removing volumes..."
-	$(COMPOSE) down -v --remove-orphans
+	@echo "→ Stopping containers (Langfuse data preserved)..."
+	$(COMPOSE) down --remove-orphans
+	@echo "→ Removing test-fixture volume so init scripts re-run..."
+	-@docker volume rm $(WIPEABLE_VOLUMES) 2>/dev/null || true
 	@echo "→ Building images and starting containers..."
 	$(COMPOSE) up -d --build
 	@echo ""
@@ -63,6 +77,14 @@ setup: $(PYTHON) ## Wipe volumes, rebuild images, load fresh test data
 	@echo "   LiteLLM proxy:   http://localhost:4000"
 	@echo "   OPA:             http://localhost:8181"
 	@echo "   PostgreSQL:      localhost:5432  (admin / \$$POSTGRES_PASSWORD)"
+	@echo "   Langfuse:        http://localhost:3001  (login persisted across setup)"
+
+wipe: ## Nuke everything (incl. Langfuse users/keys). Re-register required.
+	@test -f .env || (echo "ERROR: .env not found — run: cp .env.example .env" && exit 1)
+	@echo "⚠  This removes ALL volumes including Langfuse user accounts."
+	@echo "→ Tearing down stack and removing every named volume..."
+	$(COMPOSE) down -v --remove-orphans
+	@echo "✅ Wipe complete — run \`make setup\` to bring up a fresh stack."
 
 start: $(PYTHON) ## Start anything not yet running (preserves data)
 	@test -f .env || (echo "ERROR: .env not found — run: cp .env.example .env" && exit 1)
