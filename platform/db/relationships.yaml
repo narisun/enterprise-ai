@@ -2,13 +2,78 @@
 # platform/db/relationships.yaml
 #
 # Domain semantics that aren't expressible as PostgreSQL foreign keys:
-#   - perspectives: the analytical angles a banking analyst asks from
-#   - joins: text-match joins (string equality, no FK enforcement)
+#   - glossary:     team-specific banking terminology (volume vs value, …)
+#   - perspectives: analytical angles a banking analyst asks from
+#   - joins:        text-match joins (string equality, no FK enforcement)
 #
 # Loaded at agent startup by platform_sdk.schema_introspection.
 # Edit this file to teach the agent how the warehouse fits together;
 # you do NOT need to touch any prompts.
 # ============================================================
+
+# ----------------------------------------------------------------
+# GLOSSARY — terms the analytics team uses with a specific meaning
+# ----------------------------------------------------------------
+# Banking has overloaded vocabulary. These bindings make the agent
+# answer the question the analyst actually asked instead of the one
+# it guessed. Add new terms here when you notice the agent mixing up
+# domain words.
+
+glossary:
+  - term: volume
+    definition: |
+      Number of transactions — i.e. COUNT(*). NOT the dollar amount.
+      "Volume by rail" → COUNT(*) GROUP BY "TransactionType".
+      "Wire volume for BMO" → COUNT(*) WHERE "TransactionType" = 'Domestic Wire'
+        AND ("PayorBank" ILIKE '%BMO%' OR "PayeeBank" ILIKE '%BMO%').
+      If the user wants dollars, they will say "value", "amount", or "$".
+
+  - term: value
+    definition: |
+      Total dollar amount transacted — i.e. SUM("Amount").
+      Default to SUM(ABS("Amount")) so signed cancellations between
+      debits and credits don't silently reduce the total. Switch to
+      SUM("Amount") (signed) ONLY when the user explicitly asks for
+      "net", "netted", "net flow", "net position", or "balance change".
+      "Value by rail" → SUM(ABS("Amount")) GROUP BY "TransactionType".
+
+  - term: count
+    definition: |
+      Synonym for "volume". Number of transactions, COUNT(*).
+
+  - term: amount
+    definition: |
+      Synonym for "value". Sum of the "Amount" column. Default to
+      SUM(ABS("Amount")); use signed sum only on explicit "net" request.
+
+  - term: net / netted
+    definition: |
+      Signed sum — SUM("Amount") — so credits offset debits. The user
+      is asking about a net flow or balance change, not a gross total.
+
+  - term: gross
+    definition: |
+      Signed-magnitude sum — SUM(ABS("Amount")). Same as the default
+      interpretation of "value" / "amount". Stated explicitly to
+      contrast with "net".
+
+  - term: top N
+    definition: |
+      Order DESC and LIMIT N. The N defaults to 10 when the user
+      doesn't specify ("top accounts" → LIMIT 10).
+
+  - term: trend / trending
+    definition: |
+      Comparison of the recent period to a prior period of equal
+      length. Default windows: last 6 months vs prior 6 months,
+      OR last 90 days vs prior 90 days. Use a CASE-by-window pattern
+      with date_trunc + interval arithmetic.
+
+  - term: completed
+    definition: |
+      "Status" = 'Completed' on bankdw."fact_payments". Exclude
+      Pending / Failed / Returned / Reversed unless the user explicitly
+      asks about exceptions / failures / disputes.
 
 # ----------------------------------------------------------------
 # PERSPECTIVES — three independent angles into bankdw."fact_payments"

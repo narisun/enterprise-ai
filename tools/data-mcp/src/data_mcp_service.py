@@ -173,7 +173,10 @@ class DataMcpService(McpService):
                 return make_error("unauthorized", "Execution blocked by policy engine.")
 
             cache = svc._cache
-            cache_key = make_cache_key("get_schema_context", {"v": 1})
+            # Bump version on schema-shape changes (new section in relationships.yaml,
+            # new column-comment file, etc.) so existing redis caches don't serve
+            # stale Markdown. Last bump: glossary section added.
+            cache_key = make_cache_key("get_schema_context", {"v": 2})
             if cache is not None:
                 cached = await cache.get(cache_key)
                 if cached is not None:
