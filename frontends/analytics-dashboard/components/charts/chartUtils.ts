@@ -50,6 +50,50 @@ export function isDateColumnName(name: string): boolean {
 }
 
 /**
+ * Infer the right format hint for one DataTable column from its name.
+ *
+ * `format_hint` on ChartMetadata is component-level — but a single table
+ * routinely mixes currency, counts, and percentages across columns. Trust
+ * the column name first; fall back to the metadata hint only when no
+ * pattern matches. The fallback prevents a metadata `format_hint: "currency"`
+ * from stamping a `$` on every count column.
+ */
+export function inferColumnFormat(
+  colName: string,
+  fallback?: ChartMetadata["format_hint"],
+): ChartMetadata["format_hint"] | undefined {
+  const lower = colName.toLowerCase();
+
+  // Counts / quantities → plain number, never currency.
+  if (
+    /^(tx_)?count$|_count$|^cnt$|_cnt$|^qty$|^num(_|$)|_num$|^n_/.test(lower) ||
+    lower.endsWith("_count") ||
+    lower.endsWith("_cnt") ||
+    lower === "count" ||
+    lower === "transactions" ||
+    lower === "txn_count" ||
+    lower === "rows"
+  ) {
+    return "number";
+  }
+
+  // Percent / rate → percent.
+  if (/^pct$|_pct$|^percent$|_percent$|^rate$|_rate$|^ratio$|_ratio$|trend_pct/.test(lower)) {
+    return "percent";
+  }
+
+  // Money columns → currency.
+  if (
+    /amount|total|revenue|volume|balance|usd|price|cost|spend|premium|gross|net/.test(lower) ||
+    lower.endsWith("_usd")
+  ) {
+    return "currency";
+  }
+
+  return fallback;
+}
+
+/**
  * Format a date value (integer YYYYMMDD, ISO string, or Date-parseable string)
  * into a human-readable format.
  */
