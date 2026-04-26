@@ -8,7 +8,7 @@ from mcp.server.fastmcp import FastMCP
 
 from platform_sdk import configure_logging, get_logger
 
-from .DataMcpService import DataMcpService
+from .data_mcp_service import DataMcpService
 
 configure_logging()
 log = get_logger(__name__)
