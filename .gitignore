@@ -59,6 +59,9 @@ Thumbs.db
 .idea/
 *.swp
 
+# Claude Code local tool state (machine-specific; never commit)
+.claude/
+
 # Local tool binaries — install via package manager, never commit
 skaffold
 skaffold.exe
