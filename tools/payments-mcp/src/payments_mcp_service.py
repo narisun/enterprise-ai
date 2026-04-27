@@ -78,18 +78,32 @@ class PaymentsMcpService(McpService):
         @mcp.tool()
         async def get_payment_summary(client_name: str, auth_context: str = "") -> str:
             """
-            Get bank payment transaction summary for a client.
+            Get an aggregated payment-summary SNAPSHOT for one client over a
+            fixed 360-day window. NOT a time-series — the response collapses
+            the whole window to a single set of totals plus a current-vs-prior
+            comparison. Use this for "what is X's payment profile?" questions.
 
-            Queries the bank data warehouse (bankdw schema) using the client's company
-            name as the join key. Supports fuzzy name matching — partial names like
-            "IBM", "Pepsi", or "Google" are automatically resolved to the full party
-            name via ILIKE prefix/substring search against dim_party and fact_payments.
+            For TIME-SERIES / TREND questions ("over the last 30 days",
+            "monthly volume", "weekly trend", any "trend over time" phrasing)
+            do NOT call this tool. Use execute_read_query on data-mcp with
+            an explicit date bucket — e.g.
+              SELECT date_trunc('day', "TransactionDate") AS day, COUNT(*) AS tx_count, ...
+              FROM bankdw.fact_payments
+              WHERE ...
+              GROUP BY day ORDER BY day;
+            That gives the synthesis layer a real date-keyed series it can
+            render as a LineChart.
 
-            Returns outbound/inbound volumes by payment rail (ACH/Wire/RTP), trend vs
-            prior period, top counterparties, sending bank diversity, transaction status
-            mix, and party compliance profile (fields visible per caller's clearance level).
+            Queries the bank data warehouse (bankdw schema) using the client's
+            company name. Fuzzy name matching: partial names like "IBM",
+            "Pepsi", "Google" resolve via ILIKE against dim_party and
+            fact_payments.
 
-            The look-back window is fixed at 360 days.
+            Returns: outbound/inbound volume totals by payment rail
+            (single number per rail, NOT per day), trend % vs the prior
+            360-day period, top counterparties, sending-bank diversity,
+            transaction status mix, party compliance profile (fields visible
+            per caller's clearance level).
 
             Args:
                 client_name: Company name (full or partial — fuzzy matching supported).
@@ -172,19 +186,29 @@ class PaymentsMcpService(McpService):
         @mcp.tool()
         async def get_bank_payment_summary(bank_name: str, auth_context: str = "") -> str:
             """
-            Get bank-perspective payment-volume summary for a financial institution.
+            Get an aggregated bank-perspective payment SNAPSHOT for one
+            financial institution over a fixed 360-day window. NOT a
+            time-series — every "by rail" / "trend" field collapses the
+            full window into single numbers.
 
-            Use this when the user asks about a *bank* (the financial institution
-            facilitating the payment) — not a *party* (the corporate counterparty).
-            Banks appear on fact_payments as "PayorBank"/"PayeeBank"; parties appear
-            as "PayorName"/"PayeeName". Names containing "Bank", "Bancorp",
-            "Financial", "Trust", "N.A.", or "Credit Union" are typically banks.
+            Use this when the user asks about a *bank* (the financial
+            institution facilitating the payment) — not a *party* (the
+            corporate counterparty). Banks appear on fact_payments as
+            "PayorBank"/"PayeeBank"; parties appear as "PayorName"/"PayeeName".
+            Names containing "Bank", "Bancorp", "Financial", "Trust", "N.A.",
+            or "Credit Union" are typically banks.
+
+            For TIME-SERIES / TREND questions about a bank ("BMO volume
+            trend over last 30 days", "weekly count at JPMorgan"), do NOT
+            call this tool — it has no per-day buckets. Use execute_read_query
+            on data-mcp with date_trunc('day' | 'week' | 'month', ...) and
+            GROUP BY the bucket.
 
             Returns:
               - bank profile (type, regulator, clearing networks, AML rating, status)
-              - originating volume (as PayorBank) by rail
-              - beneficiary volume (as PayeeBank) by rail
-              - volume trend vs prior period
+              - originating volume (as PayorBank) by rail — single total per rail
+              - beneficiary volume (as PayeeBank) by rail — single total per rail
+              - volume trend % vs prior 360-day period (single number, not a series)
               - transaction status mix (Completed / Pending / Failed / Returned)
               - top 10 parties originating through this bank
               - top 10 parties receiving through this bank
@@ -192,8 +216,6 @@ class PaymentsMcpService(McpService):
 
             Fuzzy name matching: short forms like "BMO" resolve to the full name
             ("BMO Harris Bank (US)") via dim_bank lookup.
-
-            The look-back window is fixed at 360 days.
 
             Args:
                 bank_name: Bank name (full or partial — fuzzy matching supported).
