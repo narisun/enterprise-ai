@@ -85,10 +85,24 @@ wipe: hits=1 rule_deps=0
 
 ---
 
+## Section 5 — `services/` folder (added during review)
+
+The `services/continuous_embedding_pipeline/` subtree was the only contents of `services/`. Pass 1's orphan finder flagged its modules; the verification subagent kept them as a "DI root" because `container.py` ties them together. But `container.py` itself has no consumer: not in `docker-compose.yml`, not invoked by Make/CI/Docker, no pytest collection from `pyproject.toml` testpaths.
+
+User decision: delete the entire `services/` folder.
+
+- [x] `services/continuous_embedding_pipeline/**` (22 files: pyproject.toml, src/, tests/, .ruff_cache/) — removed
+- [x] `TECHNOLOGY_STACK.md` "ML / Embedding Pipeline" section — removed (described the deleted service)
+
+After deletion: `services/` directory is empty and removed from tracking. Tests match baseline; ruff error count dropped from 128 → 109 (19 of the pre-existing errors lived inside the deleted subtree).
+
+---
+
 ## Decision log
 
 - 2026-04-28 — Section 3 (scripts): both `cloud-deploy.sh` and `cloud-tls.sh` held. The legacy cloud-deploy path is out of cleanup scope per spec; when retired, retire it as one focused PR alongside `infra/azure/` and `docker-compose.cloud.yml`.
 - 2026-04-28 — Section 4 (env vars): all 3 zero-hit candidates removed (`APP_ENV`, `APP_VERSION`, `CHAINLIT_AUTH_SECRET`). The "Chat UI (Chainlit)" section header in `.env.example` was removed alongside `CHAINLIT_AUTH_SECRET`.
+- 2026-04-28 — Section 5 (services/): the entire `services/continuous_embedding_pipeline/` subtree was deleted. Verification before deletion: no docker-compose service, no Make target, no CI workflow, no `pyproject.toml` testpaths entry, no consumer outside the subtree. Tests match baseline post-deletion; pre-existing ruff errors inside the subtree (19) cleared.
 
 ---
 
