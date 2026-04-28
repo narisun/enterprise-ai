@@ -71,7 +71,12 @@ Baked into `cleanup.toml` at repo root, consumed by `vulture` / `knip` / `deptry
 - `vulture` over Python source dirs (review)
 - `deptry` against root + `platform-sdk/` (review)
 - `knip` in `frontends/analytics-dashboard/` (mixed)
-- AST orphan-file graph seeded from: `agents/analytics-agent/src/app.py`, generic agent entry, each MCP `server.py`, every `tests/` root, dashboard `app/` and `pages/`
+- AST orphan-file graph seeded from these entry points:
+  - `agents/analytics-agent/src/app.py`
+  - `agents/src/server.py` and `agents/src/enterprise_agent_service.py`
+  - For each MCP (`data-mcp`, `salesforce-mcp`, `payments-mcp`, `news-search-mcp`): both `tools/<mcp>/src/main.py` and `tools/<mcp>/src/server.py`
+  - Every `tests/` root and every `conftest.py`
+  - Dashboard `frontends/analytics-dashboard/app/` and any `pages/` (Next.js convention files: `page.tsx`, `layout.tsx`, `route.ts`, `loading.tsx`, `error.tsx`, `middleware.ts`)
 
 **Pass 2 — Wiring / infra cleanup** (branch: `cleanup/pass-2-wiring`)
 
