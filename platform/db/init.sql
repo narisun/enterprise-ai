@@ -78,28 +78,5 @@ CREATE TABLE IF NOT EXISTS schema_version (
 );
 
 INSERT INTO schema_version (version, description) VALUES
-    (1, 'Initial schema: checkpoints, checkpoint_writes, agent_audit_log, workspace')
-ON CONFLICT DO NOTHING;
-
--- ============================================================
--- Example workspace schema (created per-session by the agent)
--- In production, workspace schemas are created dynamically by the
--- agent session bootstrap process.
--- ============================================================
-CREATE SCHEMA IF NOT EXISTS ws_123e4567_e89b_12d3_a456_426614174000;
-
-SET search_path TO ws_123e4567_e89b_12d3_a456_426614174000, public;
-
--- Example table for integration tests
-CREATE TABLE IF NOT EXISTS sample_data (
-    id      SERIAL      PRIMARY KEY,
-    name    TEXT        NOT NULL,
-    value   NUMERIC(15,2),
-    created TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-INSERT INTO sample_data (name, value) VALUES
-    ('Account Alpha',  1234567.89),
-    ('Account Beta',    987654.32),
-    ('Account Gamma',  456789.01)
+    (1, 'Initial schema: checkpoints, checkpoint_writes, agent_audit_log')
 ON CONFLICT DO NOTHING;
