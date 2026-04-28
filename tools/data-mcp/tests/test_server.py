@@ -8,7 +8,7 @@ Tests cover:
 - Empty result handling
 - Truncation of large results
 """
-import json
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -26,21 +26,26 @@ def env_vars(monkeypatch):
 
 # ---- UUID Validation --------------------------------------------------------
 
+
 class TestIsValidUuid:
     def test_valid_uuid_returns_true(self):
         from src.server import _is_valid_uuid
+
         assert _is_valid_uuid("123e4567-e89b-12d3-a456-426614174000") is True
 
     def test_invalid_string_returns_false(self):
         from src.server import _is_valid_uuid
+
         assert _is_valid_uuid("not-a-uuid") is False
 
     def test_empty_string_returns_false(self):
         from src.server import _is_valid_uuid
+
         assert _is_valid_uuid("") is False
 
     def test_sql_injection_attempt_returns_false(self):
         from src.server import _is_valid_uuid
+
         assert _is_valid_uuid("'; DROP TABLE users; --") is False
 
 
@@ -59,11 +64,13 @@ def _make_opa_mock(authorized: bool) -> MagicMock:
 @pytest.mark.asyncio
 async def test_rejects_mutating_query_after_opa_allow():
     """Regex guard blocks non-SELECT even if OPA approves."""
-    with patch("src.server._opa", _make_opa_mock(True)), \
-         patch("src.server._tracer", MagicMock()), \
-         patch("src.server._db_pool", MagicMock()):
-
+    with (
+        patch("src.server._opa", _make_opa_mock(True)),
+        patch("src.server._tracer", MagicMock()),
+        patch("src.server._db_pool", MagicMock()),
+    ):
         from src.server import execute_read_query
+
         result = await execute_read_query("DROP TABLE accounts;", VALID_SESSION)
 
     assert "Security policy violation" in result
@@ -72,11 +79,13 @@ async def test_rejects_mutating_query_after_opa_allow():
 @pytest.mark.asyncio
 async def test_rejects_invalid_session_id():
     """UUID check blocks queries with a malformed session_id."""
-    with patch("src.server._opa", _make_opa_mock(True)), \
-         patch("src.server._tracer", MagicMock()), \
-         patch("src.server._db_pool", MagicMock()):
-
+    with (
+        patch("src.server._opa", _make_opa_mock(True)),
+        patch("src.server._tracer", MagicMock()),
+        patch("src.server._db_pool", MagicMock()),
+    ):
         from src.server import execute_read_query
+
         result = await execute_read_query("SELECT 1", "not-a-valid-uuid")
 
     assert "Invalid session_id" in result
@@ -85,11 +94,13 @@ async def test_rejects_invalid_session_id():
 @pytest.mark.asyncio
 async def test_opa_denial_blocks_execution():
     """When OPA returns False the query is never executed."""
-    with patch("src.server._opa", _make_opa_mock(False)), \
-         patch("src.server._tracer", MagicMock()), \
-         patch("src.server._db_pool", MagicMock()):
-
+    with (
+        patch("src.server._opa", _make_opa_mock(False)),
+        patch("src.server._tracer", MagicMock()),
+        patch("src.server._db_pool", MagicMock()),
+    ):
         from src.server import execute_read_query
+
         result = await execute_read_query("SELECT 1", VALID_SESSION)
 
     assert "Unauthorized" in result
@@ -112,11 +123,13 @@ async def test_returns_no_records_message_on_empty_result():
     mock_pool = MagicMock()
     mock_pool.acquire = MagicMock(return_value=mock_conn)
 
-    with patch("src.server._opa", _make_opa_mock(True)), \
-         patch("src.server._tracer", MagicMock()), \
-         patch("src.server._db_pool", mock_pool):
-
+    with (
+        patch("src.server._opa", _make_opa_mock(True)),
+        patch("src.server._tracer", MagicMock()),
+        patch("src.server._db_pool", mock_pool),
+    ):
         from src.server import execute_read_query
+
         result = await execute_read_query("SELECT 1", VALID_SESSION)
 
     assert "No records found" in result
@@ -135,7 +148,8 @@ async def test_truncates_large_results():
                 keys=lambda: large_row.keys(),
                 values=lambda: large_row.values(),
             )
-        ] * 100
+        ]
+        * 100
     )
     mock_conn.execute = AsyncMock()
     mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
@@ -153,13 +167,15 @@ async def test_truncates_large_results():
     mock_config = MagicMock()
     mock_config.max_result_bytes = 100
 
-    with patch("src.server._opa", _make_opa_mock(True)), \
-         patch("src.server._tracer", MagicMock()), \
-         patch("src.server._db_pool", mock_pool), \
-         patch("src.server._config", mock_config), \
-         patch("json.dumps", return_value="x" * 200):
-
+    with (
+        patch("src.server._opa", _make_opa_mock(True)),
+        patch("src.server._tracer", MagicMock()),
+        patch("src.server._db_pool", mock_pool),
+        patch("src.server._config", mock_config),
+        patch("json.dumps", return_value="x" * 200),
+    ):
         from src.server import execute_read_query
+
         result = await execute_read_query("SELECT data FROM big_table", VALID_SESSION)
 
     assert "TRUNCATED" in result

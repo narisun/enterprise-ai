@@ -42,11 +42,9 @@ class SentenceTransformerProtocol(Protocol):
         warmup_steps: int,
         output_path: str,
         **kwargs,
-    ) -> None:
-        ...
+    ) -> None: ...
 
-    def encode(self, sentences: list[str], **kwargs) -> list:
-        ...
+    def encode(self, sentences: list[str], **kwargs) -> list: ...
 
 
 class EmbeddingTrainer:
@@ -71,6 +69,7 @@ class EmbeddingTrainer:
         self._settings = settings
 
         import torch
+
         torch.manual_seed(self._settings.seed)
         if torch.cuda.is_available():
             torch.cuda.manual_seed_all(self._settings.seed)
@@ -93,7 +92,7 @@ class EmbeddingTrainer:
         Path
             The directory where the fine-tuned model was saved.
         """
-        from sentence_transformers import InputExample, losses
+        from sentence_transformers import losses
         from torch.utils.data import DataLoader
 
         output_path = Path(self._settings.finetuned_model_output_dir)
@@ -120,8 +119,7 @@ class EmbeddingTrainer:
             span.set_attribute("training.warmup_steps", warmup_steps)
 
         logger.info(
-            "Starting MNRL fine-tune: %d examples, %d epochs, lr=%.2e, "
-            "warmup=%d steps",
+            "Starting MNRL fine-tune: %d examples, %d epochs, lr=%.2e, warmup=%d steps",
             len(examples),
             self._settings.num_epochs,
             self._settings.learning_rate,

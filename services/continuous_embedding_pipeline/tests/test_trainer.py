@@ -19,7 +19,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from src.domain.models import DomainCategory, TrainingPair
+from src.domain.models import TrainingPair
 from src.training.trainer import EmbeddingTrainer
 
 
@@ -133,7 +133,9 @@ class TestEmbeddingTrainer:
             trainer.fit(sample_training_pairs)
 
             mock_tracer.start_as_current_span.assert_called_once_with("embedding_finetune")
-            mock_span.set_attribute.assert_any_call("training.num_pairs", len(sample_training_pairs))
+            mock_span.set_attribute.assert_any_call(
+                "training.num_pairs", len(sample_training_pairs)
+            )
 
     def test_fit_creates_output_directory(
         self,

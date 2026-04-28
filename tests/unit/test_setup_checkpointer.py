@@ -4,6 +4,7 @@ Locks the contract added by the existing fix so future refactors cannot
 quietly remove the .setup() call. The first multi-turn request against
 an empty Postgres would otherwise fail with 'relation does not exist'.
 """
+
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -60,10 +61,9 @@ async def test_setup_called_before_returning():
     ):
         from platform_sdk.agent import setup_checkpointer
 
-        result = await setup_checkpointer()
+        await setup_checkpointer()
         call_order.append("returned")
 
     assert call_order == ["setup", "returned"], (
-        f"setup_checkpointer must await setup() before returning; "
-        f"got order: {call_order}"
+        f"setup_checkpointer must await setup() before returning; got order: {call_order}"
     )
