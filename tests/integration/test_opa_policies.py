@@ -7,8 +7,8 @@ are immediately obvious in CI output.
 
 Requires: OPA container running (docker-compose.test.yml).
 """
+
 import pytest
-import pytest_asyncio
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio(loop_scope="session")]
 
@@ -20,16 +20,17 @@ _VALID_SESSION = "550e8400-e29b-41d4-a716-446655440000"
 _INVALID_SESSION = "not-a-uuid"
 
 
-async def _decide(client, tool: str, agent_role: str, session_id: str = _VALID_SESSION,
-                  environment: str = "local") -> bool:
+async def _decide(
+    client, tool: str, agent_role: str, session_id: str = _VALID_SESSION, environment: str = "local"
+) -> bool:
     """POST to OPA and return the allow boolean."""
     resp = await client.post(
         _OPA_PATH,
         json={
             "input": {
-                "tool":        tool,
-                "agent_role":  agent_role,
-                "session_id":  session_id,
+                "tool": tool,
+                "agent_role": agent_role,
+                "session_id": session_id,
                 "environment": environment,
             }
         },
@@ -42,6 +43,7 @@ async def _decide(client, tool: str, agent_role: str, session_id: str = _VALID_S
 # SECTION 1: Authorized agent role is allowed for all RM tools
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class TestAuthorizedAgent:
     async def test_get_payment_summary_allowed(self, opa_client):
         assert await _decide(opa_client, "get_payment_summary", _AUTHORIZED_AGENT) is True
@@ -53,7 +55,12 @@ class TestAuthorizedAgent:
         assert await _decide(opa_client, "search_company_news", _AUTHORIZED_AGENT) is True
 
     async def test_all_whitelisted_agents_allowed(self, opa_client):
-        for role in ["commercial_banking_agent", "data_analyst_agent", "compliance_agent", "analytics_agent"]:
+        for role in [
+            "commercial_banking_agent",
+            "data_analyst_agent",
+            "compliance_agent",
+            "analytics_agent",
+        ]:
             result = await _decide(opa_client, "get_payment_summary", role)
             assert result is True, f"Expected allow for role={role}"
 
@@ -61,6 +68,7 @@ class TestAuthorizedAgent:
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION 2: Unknown / unauthorized agent role is denied
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class TestUnauthorizedAgent:
     async def test_rogue_agent_denied_payment(self, opa_client):
@@ -83,6 +91,7 @@ class TestUnauthorizedAgent:
 # SECTION 3: execute_read_query requires valid session UUID
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class TestExecuteReadQuerySessionValidation:
     async def test_valid_session_allowed(self, opa_client):
         result = await _decide(
@@ -97,14 +106,14 @@ class TestExecuteReadQuerySessionValidation:
         assert result is False
 
     async def test_empty_session_denied(self, opa_client):
-        result = await _decide(
-            opa_client, "execute_read_query", _AUTHORIZED_AGENT, session_id=""
-        )
+        result = await _decide(opa_client, "execute_read_query", _AUTHORIZED_AGENT, session_id="")
         assert result is False
 
     async def test_sql_injection_in_session_denied(self, opa_client):
         result = await _decide(
-            opa_client, "execute_read_query", _AUTHORIZED_AGENT,
+            opa_client,
+            "execute_read_query",
+            _AUTHORIZED_AGENT,
             session_id="'; DROP TABLE users; --",
         )
         assert result is False
@@ -113,6 +122,7 @@ class TestExecuteReadQuerySessionValidation:
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION 4: Default-deny baseline
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class TestDefaultDeny:
     async def test_no_input_fields_denied(self, opa_client):

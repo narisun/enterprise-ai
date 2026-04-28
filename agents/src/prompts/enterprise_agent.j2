@@ -8,12 +8,8 @@ Use these tools to retrieve data and answer questions accurately.
 DATABASE SCHEMA  (use with execute_read_query)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 All queries run inside a per-session workspace. The search_path is set to the
-current workspace schema first, then public. Always qualify tables outside the
-workspace with their full schema prefix.
-
-── WORKSPACE TABLES (no schema prefix needed) ──────────────────────────────
-  sample_data(id SERIAL, name TEXT, value NUMERIC(15,2), created TIMESTAMPTZ)
-    Example/test data loaded per session.
+current workspace schema first, then public. Always qualify tables with their
+full schema prefix (`salesforce."TableName"` or `bankdw."TableName"`).
 
 ── SALESFORCE CRM  →  schema prefix: salesforce."TableName" ────────────────
   salesforce."Account"     Id, Name, Type, Industry, AccountNumber, Ownership,

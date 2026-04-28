@@ -6,14 +6,14 @@ Extends McpService to handle:
 - Result caching with TTL
 - Delegation to DataQueryService for business logic
 """
-import json
+
 import os
 from typing import Any, Optional
 
 import asyncpg
 from opentelemetry import trace
 
-from platform_sdk import MCPConfig, configure_logging, get_logger, make_error, setup_telemetry
+from platform_sdk import MCPConfig, configure_logging, get_logger, make_error
 from platform_sdk.base import McpService
 from platform_sdk.cache import make_cache_key
 from platform_sdk.protocols import Authorizer, CacheStore
@@ -184,19 +184,13 @@ class DataMcpService(McpService):
                     return cached
 
             schemas = ["bankdw", "salesforce"]
-            yaml_path = os.getenv(
-                "RELATIONSHIPS_YAML_PATH", "/app/platform/db/relationships.yaml"
-            )
+            yaml_path = os.getenv("RELATIONSHIPS_YAML_PATH", "/app/platform/db/relationships.yaml")
             try:
-                ctx = await introspect_schema(
-                    svc._db_pool, schemas, relationships_path=yaml_path
-                )
+                ctx = await introspect_schema(svc._db_pool, schemas, relationships_path=yaml_path)
                 result = format_for_prompt(ctx)
             except Exception as exc:
                 log.error("schema_introspection_failed", error=str(exc))
-                return make_error(
-                    "introspection_failed", f"Schema introspection error: {exc}"
-                )
+                return make_error("introspection_failed", f"Schema introspection error: {exc}")
 
             log.info(
                 "schema_context_built",

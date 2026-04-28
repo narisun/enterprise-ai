@@ -75,20 +75,6 @@ The platform has two distinct frontends serving different user personas.
 
 ---
 
-## ML / Embedding Pipeline
-
-The `services/continuous_embedding_pipeline` service implements a data-flywheel for continuously improving domain-specific embedding models.
-
-| Technology | Purpose | More Information |
-|---|---|---|
-| **Sentence Transformers** | Base embedding model framework. Provides pre-trained models and the MNRL (Multiple Negatives Ranking Loss) fine-tuning loop for adapting embeddings to the banking domain. | https://www.sbert.net |
-| **PyTorch** | Deep learning runtime used by Sentence Transformers for model training and inference. | https://pytorch.org |
-| **HuggingFace Datasets** | Dataset loading, hard-negative mining, and evaluation dataset construction for the embedding fine-tuning pipeline. | https://huggingface.co/docs/datasets |
-| **pgvector (Python client)** | Python client for the pgvector PostgreSQL extension. Used by the embedding pipeline to store and retrieve embedding vectors for similarity search and hard-negative mining. | https://github.com/pgvector/pgvector-python |
-| **dependency-injector** | IoC container used in the embedding pipeline service for wiring together configurable pipeline stages (mining, training, evaluation, deployment). | https://python-dependency-injector.ets-labs.org |
-
----
-
 ## Policy & Security
 
 | Technology | Purpose | More Information |

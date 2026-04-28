@@ -5,9 +5,10 @@ Handles:
 - Tavily API integration (async with thread executor)
 - Signal derivation from article sentiment and types
 """
+
 import asyncio
 from datetime import datetime, timedelta, timezone
-from typing import Any, Optional
+from typing import Any
 
 
 # Mock news data for the 4 seed companies
@@ -26,7 +27,9 @@ _MOCK_NEWS: dict[str, list] = {
         {
             "title": "Acme Manufacturing Q4 revenue beats estimates",
             "source": "Bloomberg",
-            "published_date": (datetime.now(timezone.utc) - timedelta(days=12)).strftime("%Y-%m-%d"),
+            "published_date": (datetime.now(timezone.utc) - timedelta(days=12)).strftime(
+                "%Y-%m-%d"
+            ),
             "url": "https://mock.internal/bloomberg/acme-q4-results",
             "summary": "Acme Manufacturing reported Q4 revenue of $142M, beating analyst estimates by 8%. Management cited strong demand from automotive and aerospace customers.",
             "sentiment": "positive",
@@ -48,7 +51,9 @@ _MOCK_NEWS: dict[str, list] = {
         {
             "title": "GlobalTech Corp CFO Michael Chen departs for competitor",
             "source": "Wall Street Journal",
-            "published_date": (datetime.now(timezone.utc) - timedelta(days=55)).strftime("%Y-%m-%d"),
+            "published_date": (datetime.now(timezone.utc) - timedelta(days=55)).strftime(
+                "%Y-%m-%d"
+            ),
             "url": "https://mock.internal/wsj/globaltech-cfo-departure",
             "summary": "GlobalTech Corp CFO Michael Chen has resigned to join a competing enterprise SaaS firm. The company has appointed Angela Novak as interim CFO while conducting a permanent search.",
             "sentiment": "negative",
@@ -57,7 +62,9 @@ _MOCK_NEWS: dict[str, list] = {
         {
             "title": "GlobalTech Corp announces 8% workforce reduction amid cost cuts",
             "source": "TechCrunch",
-            "published_date": (datetime.now(timezone.utc) - timedelta(days=30)).strftime("%Y-%m-%d"),
+            "published_date": (datetime.now(timezone.utc) - timedelta(days=30)).strftime(
+                "%Y-%m-%d"
+            ),
             "url": "https://mock.internal/techcrunch/globaltech-layoffs",
             "summary": "GlobalTech Corp is reducing headcount by approximately 960 employees (8%) as part of a broader cost optimization initiative. The company cited slower enterprise software spending in Q4.",
             "sentiment": "negative",
@@ -66,7 +73,9 @@ _MOCK_NEWS: dict[str, list] = {
         {
             "title": "GlobalTech Corp banking relationship review underway",
             "source": "Financial Times",
-            "published_date": (datetime.now(timezone.utc) - timedelta(days=20)).strftime("%Y-%m-%d"),
+            "published_date": (datetime.now(timezone.utc) - timedelta(days=20)).strftime(
+                "%Y-%m-%d"
+            ),
             "url": "https://mock.internal/ft/globaltech-banking-review",
             "summary": "GlobalTech Corp is conducting a comprehensive banking relationship review under new CFO Angela Novak. Multiple banks including JPMorgan and regional players are competing for the business.",
             "sentiment": "neutral",
@@ -77,7 +86,9 @@ _MOCK_NEWS: dict[str, list] = {
         {
             "title": "Meridian Healthcare completes acquisition of MedImage Canada",
             "source": "Modern Healthcare",
-            "published_date": (datetime.now(timezone.utc) - timedelta(days=110)).strftime("%Y-%m-%d"),
+            "published_date": (datetime.now(timezone.utc) - timedelta(days=110)).strftime(
+                "%Y-%m-%d"
+            ),
             "url": "https://mock.internal/modernhealthcare/meridian-medimage",
             "summary": "Meridian Healthcare has completed the $45M acquisition of MedImage Canada, a leading medical imaging technology company. The deal adds 80 employees and expands Meridian's diagnostic capabilities into the Canadian market.",
             "sentiment": "positive",
@@ -86,7 +97,9 @@ _MOCK_NEWS: dict[str, list] = {
         {
             "title": "Meridian Healthcare receives $12M CMS quality bonus",
             "source": "Healthcare Finance",
-            "published_date": (datetime.now(timezone.utc) - timedelta(days=15)).strftime("%Y-%m-%d"),
+            "published_date": (datetime.now(timezone.utc) - timedelta(days=15)).strftime(
+                "%Y-%m-%d"
+            ),
             "url": "https://mock.internal/healthcarefinance/meridian-cms-bonus",
             "summary": "Meridian Healthcare received a $12M CMS value-based care quality bonus, reflecting its four-star patient satisfaction rating. The funds will support new outpatient clinic expansion.",
             "sentiment": "positive",
@@ -170,15 +183,19 @@ class NewsSearchService:
         )
         articles = []
         for r in response.get("results", []):
-            articles.append({
-                "title": r.get("title", ""),
-                "source": r.get("url", "").split("/")[2] if r.get("url") else "Unknown",
-                "published_date": r.get("published_date", datetime.now(timezone.utc).strftime("%Y-%m-%d")),
-                "url": r.get("url", ""),
-                "summary": r.get("content", "")[:500],
-                "sentiment": "neutral",
-                "signal_type": "news",
-            })
+            articles.append(
+                {
+                    "title": r.get("title", ""),
+                    "source": r.get("url", "").split("/")[2] if r.get("url") else "Unknown",
+                    "published_date": r.get(
+                        "published_date", datetime.now(timezone.utc).strftime("%Y-%m-%d")
+                    ),
+                    "url": r.get("url", ""),
+                    "summary": r.get("content", "")[:500],
+                    "sentiment": "neutral",
+                    "signal_type": "news",
+                }
+            )
         return articles
 
     def _get_mock_articles(self, company_name: str) -> list:

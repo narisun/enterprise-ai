@@ -7,10 +7,10 @@ Handles:
 - Result truncation by byte size
 - OpenTelemetry span instrumentation
 """
+
 import json
 import re
 import uuid
-from typing import Optional
 
 import asyncpg
 from opentelemetry import trace
@@ -32,7 +32,9 @@ def _is_valid_uuid(val: str) -> bool:
 class DataQueryService:
     """Pure business logic for executing read-only SQL queries."""
 
-    def __init__(self, db_pool: asyncpg.Pool, tracer: trace.Tracer, max_result_bytes: int = 15_000) -> None:
+    def __init__(
+        self, db_pool: asyncpg.Pool, tracer: trace.Tracer, max_result_bytes: int = 15_000
+    ) -> None:
         """
         Initialize the data query service.
 
@@ -74,7 +76,9 @@ class DataQueryService:
             query = query.rstrip().rstrip(";").rstrip()
             if not re.match(r"^\s*SELECT\b", query, re.IGNORECASE) or ";" in query:
                 span.set_status(trace.StatusCode.ERROR, "Query security validation failed")
-                return "ERROR: Security policy violation — only single SELECT queries are permitted."
+                return (
+                    "ERROR: Security policy violation — only single SELECT queries are permitted."
+                )
 
             schema_name = f"ws_{session_id.replace('-', '_')}"
 
@@ -109,8 +113,10 @@ class DataQueryService:
 
                         if len(output) > self.max_result_bytes:
                             span.set_attribute("db.truncated", True)
-                            log.warning("result_truncated", session_id=session_id, bytes=len(output))
-                            output = output[:self.max_result_bytes] + "\n... [RESULTS TRUNCATED]"
+                            log.warning(
+                                "result_truncated", session_id=session_id, bytes=len(output)
+                            )
+                            output = output[: self.max_result_bytes] + "\n... [RESULTS TRUNCATED]"
 
                         return output
 

@@ -10,21 +10,22 @@ Requires: pgvector with docker-compose.test.yml test fixtures loaded.
 Key regression: KeyError 'status' — ensures the status_mix query returns
 a 'status' key (lowercase alias), not the unaliased 'Status' column.
 """
+
 import pytest
-import pytest_asyncio
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio(loop_scope="session")]
 
 # Known client from 31_test_bankdw_seed.sql
 CLIENT_MICROSOFT = "Microsoft Corp."
-CLIENT_FORD      = "Ford Motor Company"
-CLIENT_UNKNOWN   = "NoSuchCompany_XYZ_DoesNotExist"
-DAYS             = 360
+CLIENT_FORD = "Ford Motor Company"
+CLIENT_UNKNOWN = "NoSuchCompany_XYZ_DoesNotExist"
+DAYS = 360
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION 1: Microsoft Corp. has payment data (seeded baseline)
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class TestOutboundQuery:
     async def test_returns_rows_for_microsoft(self, db_pool):
@@ -41,7 +42,8 @@ class TestOutboundQuery:
             GROUP BY "TransactionType", "Currency"
             ORDER BY total DESC
             """,
-            CLIENT_MICROSOFT, DAYS,
+            CLIENT_MICROSOFT,
+            DAYS,
         )
         assert len(rows) > 0, "Microsoft Corp. should have outbound transactions in test data"
 
@@ -53,7 +55,8 @@ class TestOutboundQuery:
             WHERE "PayorName" = $1 AND "Status" = 'Completed'
               AND "TransactionDate" >= CURRENT_DATE - ($2::int * INTERVAL '1 day')
             """,
-            CLIENT_MICROSOFT, DAYS,
+            CLIENT_MICROSOFT,
+            DAYS,
         )
         total = float(rows[0]["total"] or 0)
         assert total > 0
@@ -65,7 +68,8 @@ class TestOutboundQuery:
             WHERE "PayorName" = $1 AND "Status" = 'Completed'
               AND "TransactionDate" >= CURRENT_DATE - ($2::int * INTERVAL '1 day')
             """,
-            CLIENT_UNKNOWN, DAYS,
+            CLIENT_UNKNOWN,
+            DAYS,
         )
         assert rows[0]["n"] == 0
 
@@ -93,7 +97,8 @@ class TestInboundQuery:
             GROUP BY "TransactionType"
             ORDER BY total DESC
             """,
-            CLIENT_MICROSOFT, DAYS,
+            CLIENT_MICROSOFT,
+            DAYS,
         )
         # Inbound may be 0 rows depending on seed; just must not raise
         assert isinstance(rows, list)
@@ -104,6 +109,7 @@ class TestStatusMixQuery:
     Regression test for KeyError: 'status'.
     The query must alias "Status" AS status (lowercase) for Python dict access.
     """
+
     async def test_status_key_lowercase(self, db_pool):
         rows = await db_pool.fetch(
             """
@@ -114,12 +120,13 @@ class TestStatusMixQuery:
             GROUP BY "Status"
             ORDER BY cnt DESC
             """,
-            CLIENT_MICROSOFT, DAYS,
+            CLIENT_MICROSOFT,
+            DAYS,
         )
         assert len(rows) > 0, "Should have status rows for Microsoft"
         # This is the regression check — accessing r["status"] must not raise KeyError
         for row in rows:
-            _ = row["status"]   # raises KeyError if alias is missing
+            _ = row["status"]  # raises KeyError if alias is missing
             _ = row["cnt"]
             _ = row["total"]
 
@@ -154,7 +161,8 @@ class TestTopCounterpartiesQuery:
             ORDER BY total_usd DESC
             LIMIT 8
             """,
-            CLIENT_MICROSOFT, DAYS,
+            CLIENT_MICROSOFT,
+            DAYS,
         )
         assert len(rows) <= 8
 
@@ -183,7 +191,8 @@ class TestPriorPeriodQuery:
               AND "TransactionDate" >= CURRENT_DATE - ($2::int * INTERVAL '1 day') * 2
               AND "TransactionDate" <  CURRENT_DATE - ($2::int * INTERVAL '1 day')
             """,
-            CLIENT_MICROSOFT, DAYS,
+            CLIENT_MICROSOFT,
+            DAYS,
         )
         # total may be None if no data in the prior period
         assert row is not None
@@ -206,14 +215,14 @@ class TestDimPartyQuery:
 
     async def test_unknown_client_returns_none(self, db_pool):
         row = await db_pool.fetchrow(
-            "SELECT * FROM bankdw.\"dim_party\" WHERE \"PartyName\" = $1 LIMIT 1",
+            'SELECT * FROM bankdw."dim_party" WHERE "PartyName" = $1 LIMIT 1',
             CLIENT_UNKNOWN,
         )
         assert row is None
 
     async def test_party_has_kyc_status(self, db_pool):
         row = await db_pool.fetchrow(
-            "SELECT \"KYCStatus\" AS kyc_status FROM bankdw.\"dim_party\" WHERE \"PartyName\" = $1",
+            'SELECT "KYCStatus" AS kyc_status FROM bankdw."dim_party" WHERE "PartyName" = $1',
             CLIENT_MICROSOFT,
         )
         if row:
@@ -234,7 +243,8 @@ class TestPayorBanksQuery:
             GROUP BY "PayorBank"
             ORDER BY total DESC
             """,
-            CLIENT_MICROSOFT, DAYS,
+            CLIENT_MICROSOFT,
+            DAYS,
         )
         assert isinstance(rows, list)
         if rows:

@@ -1,0 +1,3 @@
+# Dead-code cleanup tools (dev only — not runtime)
+vulture==2.13
+deptry==0.20.0

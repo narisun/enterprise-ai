@@ -7,14 +7,13 @@ Environment variables required:
   LITELLM_BASE_URL     — LiteLLM proxy (or OPENAI_API_KEY for direct OpenAI)
   EVAL_JUDGE_MODEL     — judge model name, default gpt-4o-mini
 """
+
 import json
 import os
 import time
 from pathlib import Path
 
-import httpx
 import pytest
-import pytest_asyncio
 
 from .judge import LLMJudge
 
@@ -22,6 +21,7 @@ FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 
 # ── Fixtures loading ───────────────────────────────────────────────────────────
+
 
 def load_fixture(name: str) -> dict:
     path = FIXTURES_DIR / name
@@ -51,6 +51,7 @@ def fixture_readonly() -> dict:
 
 # ── LLM judge ─────────────────────────────────────────────────────────────────
 
+
 @pytest.fixture(scope="session")
 def judge() -> LLMJudge:
     return LLMJudge.from_env()
@@ -68,16 +69,17 @@ def jwt_secret() -> str:
 
 # ── JWT factory ────────────────────────────────────────────────────────────────
 
+
 @pytest.fixture(scope="session")
 def make_jwt(jwt_secret):
     def _make(persona: dict) -> str:
         import jwt as pyjwt
+
         now = int(time.time())
         return pyjwt.encode(
             {**persona, "iat": now, "exp": now + 3600},
             jwt_secret,
             algorithm="HS256",
         )
+
     return _make
-
-

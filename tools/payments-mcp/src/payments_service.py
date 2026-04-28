@@ -6,6 +6,7 @@ Handles:
 - Compliance column masking
 - Result formatting
 """
+
 import asyncpg
 import json
 from datetime import datetime, timezone
@@ -98,7 +99,9 @@ class PaymentsService:
 
         return None, []
 
-    async def get_summary(self, client_name: str, col_mask: list[str], days: int = _DEFAULT_DAYS) -> str:
+    async def get_summary(
+        self, client_name: str, col_mask: list[str], days: int = _DEFAULT_DAYS
+    ) -> str:
         """
         Get bank payment transaction summary for a client.
 
@@ -119,23 +122,23 @@ class PaymentsService:
         """
         async with self.db_pool.acquire() as conn:
             async with conn.transaction(isolation="repeatable_read", readonly=True):
-
                 # Resolve fuzzy client name to exact PartyName
                 resolved_name, similar_names = await self._resolve_client_name(conn, client_name)
                 if resolved_name is None:
-                    return json.dumps({
-                        "error": "client_not_found",
-                        "message": (
-                            f"No party found matching '{client_name}' in the payments database. "
-                            "Try a different spelling or the full legal entity name."
-                        ),
-                        "searched_name": client_name,
-                    })
+                    return json.dumps(
+                        {
+                            "error": "client_not_found",
+                            "message": (
+                                f"No party found matching '{client_name}' in the payments database. "
+                                "Try a different spelling or the full legal entity name."
+                            ),
+                            "searched_name": client_name,
+                        }
+                    )
 
                 # Use the resolved exact name for all subsequent queries
                 original_search = client_name
                 client_name = resolved_name
-                executed_sql: list[str] = []  # Track SQL for transparency
 
                 # 1. Outbound volume by payment rail (client as Payor)
                 outbound = await conn.fetch(
@@ -173,14 +176,16 @@ class PaymentsService:
                 )
 
                 if not outbound and not inbound:
-                    return json.dumps({
-                        "error": "no_data",
-                        "message": (
-                            "No completed payment transactions found for the requested client "
-                            f"in the last {days} days. "
-                            "Verify the client name matches the bank party name exactly."
-                        ),
-                    })
+                    return json.dumps(
+                        {
+                            "error": "no_data",
+                            "message": (
+                                "No completed payment transactions found for the requested client "
+                                f"in the last {days} days. "
+                                "Verify the client name matches the bank party name exactly."
+                            ),
+                        }
+                    )
 
                 # 3. Prior period outbound — for trend calculation
                 prior = await conn.fetchrow(
@@ -269,7 +274,7 @@ class PaymentsService:
 
         # ── Aggregate ────────────────────────────────────────────────────────────
         total_out = sum(float(r["total"]) for r in outbound)
-        total_in  = sum(float(r["total"]) for r in inbound)
+        total_in = sum(float(r["total"]) for r in inbound)
 
         by_type: dict = {}
         for r in outbound:
@@ -287,7 +292,9 @@ class PaymentsService:
         trend_label = "STABLE"
         if prior_total > 0:
             trend_pct = round(((total_out - prior_total) / prior_total) * 100, 1)
-            trend_label = "INCREASING" if trend_pct > 5 else ("DECLINING" if trend_pct < -5 else "STABLE")
+            trend_label = (
+                "INCREASING" if trend_pct > 5 else ("DECLINING" if trend_pct < -5 else "STABLE")
+            )
 
         # Apply column mask to compliance fields before including in response
         party_dict = dict(party) if party else None
@@ -296,7 +303,7 @@ class PaymentsService:
         # Build representative SQL for transparency / UI display
         _sql_queries = [
             (
-                f'-- Outbound payment volume by rail\n'
+                f"-- Outbound payment volume by rail\n"
                 f'SELECT "TransactionType", SUM("Amount") AS total, COUNT(*) AS tx_count, "Currency"\n'
                 f'FROM bankdw."fact_payments"\n'
                 f"WHERE \"PayorName\" = '{client_name}'\n"
@@ -305,7 +312,7 @@ class PaymentsService:
                 f'GROUP BY "TransactionType", "Currency"\nORDER BY total DESC'
             ),
             (
-                f'-- Inbound payment volume\n'
+                f"-- Inbound payment volume\n"
                 f'SELECT "TransactionType", SUM("Amount") AS total, COUNT(*) AS tx_count\n'
                 f'FROM bankdw."fact_payments"\n'
                 f"WHERE \"PayeeName\" = '{client_name}'\n"
@@ -314,7 +321,7 @@ class PaymentsService:
                 f'GROUP BY "TransactionType"\nORDER BY total DESC'
             ),
             (
-                f'-- Top counterparties\n'
+                f"-- Top counterparties\n"
                 f'SELECT "PayeeName", "PayeeBank", "TransactionType", SUM("Amount") AS total_usd, COUNT(*) AS tx_count\n'
                 f'FROM bankdw."fact_payments"\n'
                 f"WHERE \"PayorName\" = '{client_name}'\n"
@@ -323,7 +330,7 @@ class PaymentsService:
                 f'GROUP BY "PayeeName", "PayeeBank", "TransactionType"\nORDER BY total_usd DESC\nLIMIT 8'
             ),
             (
-                f'-- Party compliance profile\n'
+                f"-- Party compliance profile\n"
                 f'SELECT "CustomerSegment", "KYCStatus", "AMLRiskCategory", "RiskRating",\n'
                 f'       "SanctionsScreeningStatus", "PEPFlag", "FraudMonitoringSegment",\n'
                 f'       "RelationshipStartDate", "CustomerStatus"\n'
@@ -334,7 +341,11 @@ class PaymentsService:
 
         result = {
             "client_name": client_name,
-            **({"searched_as": original_search, "other_matches": similar_names} if original_search.lower() != client_name.lower() else {}),
+            **(
+                {"searched_as": original_search, "other_matches": similar_names}
+                if original_search.lower() != client_name.lower()
+                else {}
+            ),
             "period_days": days,
             "total_outbound_usd": round(total_out, 2),
             "total_inbound_usd": round(total_in, 2),
@@ -342,11 +353,19 @@ class PaymentsService:
             "volume_trend_pct": trend_pct,
             "trend_label": trend_label,
             "sending_banks": [
-                {"bank": r["bank_name"], "tx_count": r["tx_count"], "total_usd": round(float(r["total"]), 2)}
+                {
+                    "bank": r["bank_name"],
+                    "tx_count": r["tx_count"],
+                    "total_usd": round(float(r["total"]), 2),
+                }
                 for r in payor_banks
             ],
             "transaction_status_mix": [
-                {"status": r["status"], "count": r["cnt"], "total_usd": round(float(r["total"] or 0), 2)}
+                {
+                    "status": r["status"],
+                    "count": r["cnt"],
+                    "total_usd": round(float(r["total"] or 0), 2),
+                }
                 for r in status_mix
             ],
             "top_counterparties": [
@@ -361,16 +380,20 @@ class PaymentsService:
                 for r in top_counterparties
             ],
             "party_profile": {
-                "segment":             masked_party.get("segment") if masked_party else None,
-                "kyc_status":          masked_party.get("kyc_status") if masked_party else None,
-                "aml_risk_category":   masked_party.get("aml_risk") if masked_party else None,
-                "risk_rating":         masked_party.get("risk_rating") if masked_party else None,
-                "sanctions_status":    masked_party.get("sanctions_status") if masked_party else None,
-                "pep_flag":            masked_party.get("pep_flag") if masked_party else None,
-                "fraud_segment":       masked_party.get("fraud_segment") if masked_party else None,
-                "relationship_since":  masked_party.get("relationship_since") if masked_party else None,
-                "customer_status":     masked_party.get("customer_status") if masked_party else None,
-            } if masked_party else None,
+                "segment": masked_party.get("segment") if masked_party else None,
+                "kyc_status": masked_party.get("kyc_status") if masked_party else None,
+                "aml_risk_category": masked_party.get("aml_risk") if masked_party else None,
+                "risk_rating": masked_party.get("risk_rating") if masked_party else None,
+                "sanctions_status": masked_party.get("sanctions_status") if masked_party else None,
+                "pep_flag": masked_party.get("pep_flag") if masked_party else None,
+                "fraud_segment": masked_party.get("fraud_segment") if masked_party else None,
+                "relationship_since": masked_party.get("relationship_since")
+                if masked_party
+                else None,
+                "customer_status": masked_party.get("customer_status") if masked_party else None,
+            }
+            if masked_party
+            else None,
             "retrieved_at": datetime.now(timezone.utc).isoformat(),
             "_sql_queries": _sql_queries,
         }
@@ -379,15 +402,13 @@ class PaymentsService:
 
         # Enforce result size limit
         if len(output) > self.max_result_bytes:
-            output = output[:self.max_result_bytes] + "\n... [RESULTS TRUNCATED]"
+            output = output[: self.max_result_bytes] + "\n... [RESULTS TRUNCATED]"
 
         return output
 
     # ── Bank perspective ────────────────────────────────────────────────────
 
-    async def _resolve_bank_name(
-        self, conn, bank_name: str
-    ) -> tuple[Optional[str], list[str]]:
+    async def _resolve_bank_name(self, conn, bank_name: str) -> tuple[Optional[str], list[str]]:
         """Resolve a fuzzy bank name to the exact BankName in dim_bank.
 
         Same lookup order as _resolve_client_name: exact → prefix → substring,
@@ -452,17 +473,18 @@ class PaymentsService:
         """
         async with self.db_pool.acquire() as conn:
             async with conn.transaction(isolation="repeatable_read", readonly=True):
-
                 resolved_name, similar_names = await self._resolve_bank_name(conn, bank_name)
                 if resolved_name is None:
-                    return json.dumps({
-                        "error": "bank_not_found",
-                        "message": (
-                            f"No bank found matching '{bank_name}'. "
-                            "Try a more specific name (e.g. 'JPMorgan' instead of 'JPM')."
-                        ),
-                        "searched_name": bank_name,
-                    })
+                    return json.dumps(
+                        {
+                            "error": "bank_not_found",
+                            "message": (
+                                f"No bank found matching '{bank_name}'. "
+                                "Try a more specific name (e.g. 'JPMorgan' instead of 'JPM')."
+                            ),
+                            "searched_name": bank_name,
+                        }
+                    )
 
                 original_search = bank_name
                 bank_name = resolved_name
@@ -494,7 +516,8 @@ class PaymentsService:
                     GROUP BY "TransactionType"
                     ORDER BY total DESC
                     """,
-                    bank_name, days,
+                    bank_name,
+                    days,
                 )
 
                 # 3. As beneficiary (receiving) — volume by rail.
@@ -510,16 +533,19 @@ class PaymentsService:
                     GROUP BY "TransactionType"
                     ORDER BY total DESC
                     """,
-                    bank_name, days,
+                    bank_name,
+                    days,
                 )
 
                 if not originating and not beneficiary:
-                    return json.dumps({
-                        "error": "no_data",
-                        "message": (
-                            f"No completed payments through '{bank_name}' in the last {days} days."
-                        ),
-                    })
+                    return json.dumps(
+                        {
+                            "error": "no_data",
+                            "message": (
+                                f"No completed payments through '{bank_name}' in the last {days} days."
+                            ),
+                        }
+                    )
 
                 # 4. Prior period for trend (originating side).
                 prior = await conn.fetchrow(
@@ -531,7 +557,8 @@ class PaymentsService:
                       AND "TransactionDate" >= CURRENT_DATE - ($2::int * INTERVAL '1 day') * 2
                       AND "TransactionDate" <  CURRENT_DATE - ($2::int * INTERVAL '1 day')
                     """,
-                    bank_name, days,
+                    bank_name,
+                    days,
                 )
 
                 # 5. Status mix across both sides — exception-rate signal.
@@ -546,7 +573,8 @@ class PaymentsService:
                     GROUP BY "Status"
                     ORDER BY cnt DESC
                     """,
-                    bank_name, days,
+                    bank_name,
+                    days,
                 )
 
                 # 6. Top originators — parties sending most through this bank.
@@ -564,7 +592,8 @@ class PaymentsService:
                     ORDER BY total DESC
                     LIMIT 10
                     """,
-                    bank_name, days,
+                    bank_name,
+                    days,
                 )
 
                 # 7. Top beneficiaries — parties receiving most through this bank.
@@ -582,7 +611,8 @@ class PaymentsService:
                     ORDER BY total DESC
                     LIMIT 10
                     """,
-                    bank_name, days,
+                    bank_name,
+                    days,
                 )
 
                 # 8. Counterparty banks — the OTHER bank on each transaction.
@@ -611,7 +641,8 @@ class PaymentsService:
                     ORDER BY total DESC
                     LIMIT 10
                     """,
-                    bank_name, days,
+                    bank_name,
+                    days,
                 )
 
         # ── Aggregate ────────────────────────────────────────────────────────
@@ -636,30 +667,32 @@ class PaymentsService:
         if prior_total > 0:
             trend_pct = round(((total_originating - prior_total) / prior_total) * 100, 1)
             trend_label = (
-                "INCREASING" if trend_pct > 5
-                else "DECLINING" if trend_pct < -5
-                else "STABLE"
+                "INCREASING" if trend_pct > 5 else "DECLINING" if trend_pct < -5 else "STABLE"
             )
 
         bank_profile = (
             {
-                "type":              bank_row["BankType"],
-                "role_type":         bank_row["BankRoleType"],
-                "regulator":         bank_row["Regulator"],
+                "type": bank_row["BankType"],
+                "role_type": bank_row["BankRoleType"],
+                "regulator": bank_row["Regulator"],
                 "clearing_networks": bank_row["ClearingNetworksSupported"],
-                "aml_rating":        bank_row["BSAAMLProgramRating"],
-                "sanctions_status":  bank_row["SanctionsComplianceStatus"],
-                "ownership":         bank_row["OwnershipType"],
-                "headquarters":      f"{bank_row['HeadquartersCity']}, {bank_row['HeadquartersState']}",
-                "status":            bank_row["BankStatus"],
+                "aml_rating": bank_row["BSAAMLProgramRating"],
+                "sanctions_status": bank_row["SanctionsComplianceStatus"],
+                "ownership": bank_row["OwnershipType"],
+                "headquarters": f"{bank_row['HeadquartersCity']}, {bank_row['HeadquartersState']}",
+                "status": bank_row["BankStatus"],
             }
-            if bank_row else None
+            if bank_row
+            else None
         )
 
         result = {
             "bank_name": bank_name,
-            **({"searched_as": original_search, "other_matches": similar_names}
-               if original_search.lower() != bank_name.lower() else {}),
+            **(
+                {"searched_as": original_search, "other_matches": similar_names}
+                if original_search.lower() != bank_name.lower()
+                else {}
+            ),
             "period_days": days,
             "bank_profile": bank_profile,
             "as_originator_usd": round(total_originating, 2),
@@ -706,5 +739,5 @@ class PaymentsService:
 
         output = json.dumps(result, default=str)
         if len(output) > self.max_result_bytes:
-            output = output[:self.max_result_bytes] + "\n... [RESULTS TRUNCATED]"
+            output = output[: self.max_result_bytes] + "\n... [RESULTS TRUNCATED]"
         return output

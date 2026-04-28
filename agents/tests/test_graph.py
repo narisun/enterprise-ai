@@ -6,7 +6,7 @@ Tests verify:
 - System prompt is rendered from the template
 - Missing INTERNAL_API_KEY raises a clear error
 """
-import os
+
 import pytest
 from unittest.mock import MagicMock, patch
 
@@ -34,6 +34,7 @@ class TestBuildEnterpriseAgent:
         with patch("src.graph.ChatOpenAI"), patch("src.graph.create_react_agent") as mock_agent:
             mock_agent.return_value = MagicMock()
             from src.graph import build_enterprise_agent
+
             agent = build_enterprise_agent(tools)
         assert agent is not None
 
@@ -42,6 +43,7 @@ class TestBuildEnterpriseAgent:
         with patch("src.graph.ChatOpenAI"), patch("src.graph.create_react_agent") as mock_agent:
             mock_agent.return_value = MagicMock()
             from src.graph import build_enterprise_agent
+
             agent = build_enterprise_agent([])
         assert agent is not None
 
@@ -65,6 +67,7 @@ class TestLoadSystemPrompt:
     def test_renders_tool_names(self):
         """Tool names are injected into the prompt template."""
         from src.graph import load_system_prompt
+
         rendered = load_system_prompt(
             "enterprise_agent.j2",
             tool_names=["execute_read_query", "search_documents"],
@@ -75,5 +78,6 @@ class TestLoadSystemPrompt:
     def test_renders_without_optional_context(self):
         """Template renders even when optional context vars are omitted."""
         from src.graph import load_system_prompt
+
         rendered = load_system_prompt("enterprise_agent.j2")
         assert len(rendered) > 0
