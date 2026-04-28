@@ -68,8 +68,8 @@ wipe: hits=1 rule_deps=0
 
 ## Section 3 — Scripts (review)
 
-- [ ] `scripts/cloud-deploy.sh` — 0 hits in scanned scope (Makefile, README, .github/, docs/, root pyproject.toml). The script's own header references `make cloud-deploy VM_IP=<ip>`, but no such target exists in the current Makefile. Same for `infra/azure/cloud-init.yaml` and `docker-compose.cloud.yml`. — tier: `review`
-- [ ] `scripts/cloud-tls.sh` — same situation. — tier: `review`
+- [?] `scripts/cloud-deploy.sh` — held; the legacy cloud-deploy path (incl. `infra/azure/`, `docker-compose.cloud.yml`) is out of cleanup scope per spec. If/when that path is retired, retire it as one focused PR (Terraform + cloud-compose + scripts together) — tier: `review` → `hold`
+- [?] `scripts/cloud-tls.sh` — same — tier: `review` → `hold`
 
 **Context:** the spec explicitly excludes `docker-compose.cloud.yml` and `infra/azure/` Terraform from cleanup scope ("legacy production deploy (revisit pending)" per `README.md`). These two scripts are the user-facing operations side of that legacy cloud-deploy path. If the cloud-deploy path is being kept (just paused), the scripts should stay even though the make target is missing. If the cloud-deploy path is being abandoned, they can go with the rest.
 
@@ -77,9 +77,9 @@ wipe: hits=1 rule_deps=0
 
 ## Section 4 — .env.example keys (review)
 
-- [ ] `APP_ENV` — 0 hits — tier: `review` (likely no longer read; was probably used by an older app initialization)
-- [ ] `APP_VERSION` — 0 hits — tier: `review` (same — likely a legacy version-tag stub)
-- [ ] `CHAINLIT_AUTH_SECRET` — 0 hits — tier: `review` (Chainlit was an early chat-UI framework that the current Next.js dashboard replaced; almost certainly dead)
+- [x] `APP_ENV` — 0 hits — tier: `review` — removed (no consumer in code or compose)
+- [x] `APP_VERSION` — 0 hits — tier: `review` — removed (no consumer in code or compose)
+- [x] `CHAINLIT_AUTH_SECRET` — 0 hits — tier: `review` — removed (Chainlit replaced by Next.js dashboard; section header in `.env.example` also removed)
 
 **Auto-keep (already verified):** `MINIO_ROOT_PASSWORD`, `MINIO_ROOT_USER` are consumed only by `docker-compose.cloud.yml`, which is out of cleanup scope. They are NOT zero-hit when that file is included; we exclude it from the scan but keep these keys. All `*_API_KEY` / `*_SECRET` / `*_PASSWORD` keys have ≥1 hit and are actively consumed.
 
@@ -87,7 +87,8 @@ wipe: hits=1 rule_deps=0
 
 ## Decision log
 
-_(Empty — append entries here during review.)_
+- 2026-04-28 — Section 3 (scripts): both `cloud-deploy.sh` and `cloud-tls.sh` held. The legacy cloud-deploy path is out of cleanup scope per spec; when retired, retire it as one focused PR alongside `infra/azure/` and `docker-compose.cloud.yml`.
+- 2026-04-28 — Section 4 (env vars): all 3 zero-hit candidates removed (`APP_ENV`, `APP_VERSION`, `CHAINLIT_AUTH_SECRET`). The "Chat UI (Chainlit)" section header in `.env.example` was removed alongside `CHAINLIT_AUTH_SECRET`.
 
 ---
 
