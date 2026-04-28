@@ -1,0 +1,22 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "entry": [
+    "app/**/page.{ts,tsx}",
+    "app/**/layout.{ts,tsx}",
+    "app/**/route.{ts,tsx}",
+    "app/**/loading.{ts,tsx}",
+    "app/**/error.{ts,tsx}",
+    "app/**/not-found.{ts,tsx}",
+    "middleware.ts",
+    "next.config.{js,ts,mjs}",
+    "tailwind.config.{js,ts}",
+    "postcss.config.{js,mjs}"
+  ],
+  "project": ["**/*.{ts,tsx}"],
+  "ignore": ["**/.next/**", "**/node_modules/**"],
+  "ignoreDependencies": [
+    "@types/*",
+    "eslint-*",
+    "@tailwindcss/*"
+  ]
+}
