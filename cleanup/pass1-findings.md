@@ -88,13 +88,13 @@ _No findings._
 
 ## Section 2 — vulture (review)
 
-- [ ] `agents/analytics-agent/src/ports.py:30` — unused variable `convo_id` (100% confidence) — tier: `review`
-- [ ] `agents/analytics-agent/src/ports.py:35` — unused variable `convo_id` (100% confidence) — tier: `review`
-- [ ] `platform-sdk/platform_sdk/security.py:92` — unused variable `exc_tb` (100% confidence) — tier: `review`
-- [ ] `platform-sdk/platform_sdk/security.py:92` — unused variable `exc_val` (100% confidence) — tier: `review`
-- [ ] `services/continuous_embedding_pipeline/src/training/trainer.py:40` — unused variable `train_objectives` (100% confidence) — tier: `review`
-- [ ] `services/continuous_embedding_pipeline/src/training/trainer.py:41` — unused variable `epochs` (100% confidence) — tier: `review`
-- [ ] `services/continuous_embedding_pipeline/src/training/trainer.py:48` — unused variable `sentences` (100% confidence) — tier: `review`
+- [~] `agents/analytics-agent/src/ports.py:30` — unused variable `convo_id` (100% confidence) — tier: `review` — kept (Protocol method parameter, part of `ConversationStore.load` contract)
+- [~] `agents/analytics-agent/src/ports.py:35` — unused variable `convo_id` (100% confidence) — tier: `review` — kept (Protocol method parameter, part of `ConversationStore.delete` contract)
+- [~] `platform-sdk/platform_sdk/security.py:92` — unused variable `exc_tb` (100% confidence) — tier: `review` — kept (`__aexit__` signature fixed by Python context-manager protocol)
+- [~] `platform-sdk/platform_sdk/security.py:92` — unused variable `exc_val` (100% confidence) — tier: `review` — kept (`__aexit__` signature fixed by Python context-manager protocol)
+- [~] `services/continuous_embedding_pipeline/src/training/trainer.py:40` — unused variable `train_objectives` (100% confidence) — tier: `review` — kept (`SentenceTransformerProtocol.fit` parameter, mirrors external API)
+- [~] `services/continuous_embedding_pipeline/src/training/trainer.py:41` — unused variable `epochs` (100% confidence) — tier: `review` — kept (`SentenceTransformerProtocol.fit` parameter, mirrors external API)
+- [~] `services/continuous_embedding_pipeline/src/training/trainer.py:48` — unused variable `sentences` (100% confidence) — tier: `review` — kept (`SentenceTransformerProtocol.encode` parameter, mirrors external API)
 
 ---
 
@@ -242,7 +242,7 @@ _No findings._
 
 ## Decision log
 
-_(Empty section — append entries here during review.)_
+- 2026-04-27 — Vulture Section 2: all 7 findings kept. Each is a Protocol method parameter or `__aexit__` standard parameter — names are part of the contract or external API shape, vulture can't see consumers structurally. No source change; no allowlist change (rejected as unnecessary churn for a one-time scan).
 
 ---
 
