@@ -102,53 +102,53 @@ _No findings._
 
 ### package: `platform-sdk` (pyproject.toml)
 
-- [ ] `platform-sdk` — unused declared dep `opentelemetry-sdk` (file: pyproject.toml) — tier: `review`
-- [ ] `platform-sdk` — unused declared dep `opentelemetry-exporter-otlp` (file: pyproject.toml) — tier: `review`
-- [ ] `platform-sdk` — unused declared dep `opentelemetry-instrumentation-openai` (file: pyproject.toml) — tier: `review`
-- [ ] `platform-sdk` — unused declared dep `opentelemetry-instrumentation-langchain` (file: pyproject.toml) — tier: `review`
-- [ ] `platform-sdk` — unused declared dep `langchain` (file: pyproject.toml) — tier: `review`
-- [ ] `platform-sdk` — unused declared dep `pyyaml` (file: pyproject.toml) — tier: `review`
-- [ ] `platform-sdk` — unused declared dep `langgraph-checkpoint-postgres` (file: pyproject.toml) — tier: `review`
+- [~] `platform-sdk` — unused declared dep `opentelemetry-sdk` (file: pyproject.toml) — tier: `review` — kept (auto-instrumentation via env vars / opentelemetry-instrument; no static import expected)
+- [~] `platform-sdk` — unused declared dep `opentelemetry-exporter-otlp` (file: pyproject.toml) — tier: `review` — kept (auto-instrumentation via env vars / opentelemetry-instrument; no static import expected)
+- [~] `platform-sdk` — unused declared dep `opentelemetry-instrumentation-openai` (file: pyproject.toml) — tier: `review` — kept (auto-instrumentation via env vars / opentelemetry-instrument; no static import expected)
+- [~] `platform-sdk` — unused declared dep `opentelemetry-instrumentation-langchain` (file: pyproject.toml) — tier: `review` — kept (auto-instrumentation via env vars / opentelemetry-instrument; no static import expected)
+- [x] `platform-sdk` — unused declared dep `langchain` (file: pyproject.toml) — tier: `review` — removed
+- [~] `platform-sdk` — unused declared dep `pyyaml` (file: pyproject.toml) — tier: `review` — kept (imported in platform_sdk/schema_introspection.py:29)
+- [~] `platform-sdk` — unused declared dep `langgraph-checkpoint-postgres` (file: pyproject.toml) — tier: `review` — kept (loaded indirectly by langgraph checkpointer setup)
 
 ### package: `agents` (requirements.txt)
 
-- [ ] `agents` — unused declared dep `langchain` (file: requirements.txt) — tier: `review`
-- [ ] `agents` — unused declared dep `langchain-openai` (file: requirements.txt) — tier: `review`
-- [ ] `agents` — unused declared dep `mcp` (file: requirements.txt) — tier: `review`
-- [ ] `agents` — unused declared dep `uvicorn` (file: requirements.txt) — tier: `review`
-- [ ] `agents` — unused declared dep `opentelemetry-sdk` (file: requirements.txt) — tier: `review`
-- [ ] `agents` — unused declared dep `opentelemetry-exporter-otlp` (file: requirements.txt) — tier: `review`
-- [ ] `agents` — unused declared dep `opentelemetry-instrumentation-fastapi` (file: requirements.txt) — tier: `review`
-- [ ] `agents` — unused declared dep `langfuse` (file: requirements.txt) — tier: `review`
+- [x] `agents` — unused declared dep `langchain` (file: requirements.txt) — tier: `review` — removed
+- [x] `agents` — unused declared dep `langchain-openai` (file: requirements.txt) — tier: `review` — removed
+- [x] `agents` — unused declared dep `mcp` (file: requirements.txt) — tier: `review` — removed
+- [~] `agents` — unused declared dep `uvicorn` (file: requirements.txt) — tier: `review` — kept (Dockerfile CMD entry point in agents/Dockerfile and agents/analytics-agent/Dockerfile)
+- [~] `agents` — unused declared dep `opentelemetry-sdk` (file: requirements.txt) — tier: `review` — kept (auto-instrumentation via env vars / opentelemetry-instrument; no static import expected)
+- [~] `agents` — unused declared dep `opentelemetry-exporter-otlp` (file: requirements.txt) — tier: `review` — kept (auto-instrumentation via env vars / opentelemetry-instrument; no static import expected)
+- [~] `agents` — unused declared dep `opentelemetry-instrumentation-fastapi` (file: requirements.txt) — tier: `review` — kept (auto-instrumentation via env vars / opentelemetry-instrument; no static import expected)
+- [~] `agents` — unused declared dep `langfuse` (file: requirements.txt) — tier: `review` — kept (OTel exporter / runtime use; not statically imported)
 
 ### package: `data-mcp` (requirements.txt)
 
-- [ ] `data-mcp` — unused declared dep `httpx` (file: requirements.txt) — tier: `review`
-- [ ] `data-mcp` — unused declared dep `opentelemetry-sdk` (file: requirements.txt) — tier: `review`
-- [ ] `data-mcp` — unused declared dep `opentelemetry-exporter-otlp` (file: requirements.txt) — tier: `review`
-- [ ] `data-mcp` — unused declared dep `langfuse` (file: requirements.txt) — tier: `review`
+- [x] `data-mcp` — unused declared dep `httpx` (file: requirements.txt) — tier: `review` — removed
+- [~] `data-mcp` — unused declared dep `opentelemetry-sdk` (file: requirements.txt) — tier: `review` — kept (auto-instrumentation via env vars / opentelemetry-instrument; no static import expected)
+- [~] `data-mcp` — unused declared dep `opentelemetry-exporter-otlp` (file: requirements.txt) — tier: `review` — kept (auto-instrumentation via env vars / opentelemetry-instrument; no static import expected)
+- [~] `data-mcp` — unused declared dep `langfuse` (file: requirements.txt) — tier: `review` — kept (OTel exporter / runtime use; not statically imported)
 
 ### package: `salesforce-mcp` (requirements.txt)
 
-- [ ] `salesforce-mcp` — unused declared dep `httpx` (file: requirements.txt) — tier: `review`
-- [ ] `salesforce-mcp` — unused declared dep `opentelemetry-sdk` (file: requirements.txt) — tier: `review`
-- [ ] `salesforce-mcp` — unused declared dep `opentelemetry-exporter-otlp` (file: requirements.txt) — tier: `review`
-- [ ] `salesforce-mcp` — unused declared dep `langfuse` (file: requirements.txt) — tier: `review`
+- [x] `salesforce-mcp` — unused declared dep `httpx` (file: requirements.txt) — tier: `review` — removed
+- [~] `salesforce-mcp` — unused declared dep `opentelemetry-sdk` (file: requirements.txt) — tier: `review` — kept (auto-instrumentation via env vars / opentelemetry-instrument; no static import expected)
+- [~] `salesforce-mcp` — unused declared dep `opentelemetry-exporter-otlp` (file: requirements.txt) — tier: `review` — kept (auto-instrumentation via env vars / opentelemetry-instrument; no static import expected)
+- [~] `salesforce-mcp` — unused declared dep `langfuse` (file: requirements.txt) — tier: `review` — kept (OTel exporter / runtime use; not statically imported)
 
 ### package: `payments-mcp` (requirements.txt)
 
-- [ ] `payments-mcp` — unused declared dep `httpx` (file: requirements.txt) — tier: `review`
-- [ ] `payments-mcp` — unused declared dep `opentelemetry-sdk` (file: requirements.txt) — tier: `review`
-- [ ] `payments-mcp` — unused declared dep `opentelemetry-exporter-otlp` (file: requirements.txt) — tier: `review`
-- [ ] `payments-mcp` — unused declared dep `langfuse` (file: requirements.txt) — tier: `review`
+- [x] `payments-mcp` — unused declared dep `httpx` (file: requirements.txt) — tier: `review` — removed
+- [~] `payments-mcp` — unused declared dep `opentelemetry-sdk` (file: requirements.txt) — tier: `review` — kept (auto-instrumentation via env vars / opentelemetry-instrument; no static import expected)
+- [~] `payments-mcp` — unused declared dep `opentelemetry-exporter-otlp` (file: requirements.txt) — tier: `review` — kept (auto-instrumentation via env vars / opentelemetry-instrument; no static import expected)
+- [~] `payments-mcp` — unused declared dep `langfuse` (file: requirements.txt) — tier: `review` — kept (OTel exporter / runtime use; not statically imported)
 
 ### package: `news-search-mcp` (requirements.txt)
 
-- [ ] `news-search-mcp` — unused declared dep `httpx` (file: requirements.txt) — tier: `review`
-- [ ] `news-search-mcp` — unused declared dep `tavily-python` (file: requirements.txt) — tier: `review`
-- [ ] `news-search-mcp` — unused declared dep `opentelemetry-sdk` (file: requirements.txt) — tier: `review`
-- [ ] `news-search-mcp` — unused declared dep `opentelemetry-exporter-otlp` (file: requirements.txt) — tier: `review`
-- [ ] `news-search-mcp` — unused declared dep `langfuse` (file: requirements.txt) — tier: `review`
+- [x] `news-search-mcp` — unused declared dep `httpx` (file: requirements.txt) — tier: `review` — removed
+- [~] `news-search-mcp` — unused declared dep `tavily-python` (file: requirements.txt) — tier: `review` — kept (used in production with API key; falls back to mocks in dev)
+- [~] `news-search-mcp` — unused declared dep `opentelemetry-sdk` (file: requirements.txt) — tier: `review` — kept (auto-instrumentation via env vars / opentelemetry-instrument; no static import expected)
+- [~] `news-search-mcp` — unused declared dep `opentelemetry-exporter-otlp` (file: requirements.txt) — tier: `review` — kept (auto-instrumentation via env vars / opentelemetry-instrument; no static import expected)
+- [~] `news-search-mcp` — unused declared dep `langfuse` (file: requirements.txt) — tier: `review` — kept (OTel exporter / runtime use; not statically imported)
 
 > **DEP001 findings (missing imports) deliberately skipped** — known noise from editable `platform_sdk` install and `tools/shared/` paths not listed in per-service requirements.txt.
 
@@ -243,6 +243,7 @@ _No findings._
 ## Decision log
 
 - 2026-04-27 — Vulture Section 2: all 7 findings kept. Each is a Protocol method parameter or `__aexit__` standard parameter — names are part of the contract or external API shape, vulture can't see consumers structurally. No source change; no allowlist change (rejected as unnecessary churn for a one-time scan).
+- 2026-04-27 — Deptry Section 3: 8 of 32 declared deps removed (4× httpx in MCPs, mcp in agents, langchain in agents and platform-sdk, langchain-openai in agents). 24 kept — runtime auto-instrumentation (OTel + langfuse), Dockerfile entry point (uvicorn), production runtime (tavily-python, langgraph-checkpoint-postgres), or actually imported (pyyaml). Stack smoke deferred to Phase F gate.
 
 ---
 
