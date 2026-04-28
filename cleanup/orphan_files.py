@@ -84,7 +84,14 @@ def module_to_paths(module: str, all_files: set[Path]) -> list[Path]:
         except ValueError:
             continue
         rel_parts = rel.with_suffix("").parts
-        # Match suffix: e.g. `platform_sdk.auth.context` matches any file
+        # Treat a package's __init__.py as the package itself: drop the
+        # trailing "__init__" segment so `foo/bar/__init__.py` represents
+        # the dotted module `foo.bar`.
+        if rel_parts and rel_parts[-1] == "__init__":
+            rel_parts = rel_parts[:-1]
+        if not rel_parts:
+            continue
+        # Match suffix: `platform_sdk.auth.context` matches any file
         # ending in those segments.
         if len(rel_parts) >= len(parts) and rel_parts[-len(parts):] == tuple(parts):
             candidates.append(f)
