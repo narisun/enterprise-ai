@@ -201,42 +201,42 @@ _No findings._
 
 ### Review (10)
 
-- [ ] `agents/analytics-agent/src/middleware/rate_limiter.py` — tier: `review`
-- [ ] `agents/analytics-agent/src/services/conversation_service.py` — tier: `review`
-- [ ] `platform-sdk/platform_sdk/testing.py` — tier: `review`
-- [ ] `services/continuous_embedding_pipeline/src/container.py` — tier: `review`
-- [ ] `services/continuous_embedding_pipeline/src/evaluation/ragas_gate.py` — tier: `review`
-- [ ] `services/continuous_embedding_pipeline/src/mining/hard_negatives.py` — tier: `review`
-- [ ] `services/continuous_embedding_pipeline/src/training/trainer.py` — tier: `review`
-- [ ] `tools/shared/_pytest_setup.py` — tier: `review`
-- [ ] `tools/shared/mcp_auth.py` — tier: `review`
-- [ ] `tools/shared/tool_error_boundary.py` — tier: `review`
+- [x] `agents/analytics-agent/src/middleware/rate_limiter.py` — tier: `review` — removed (genuinely orphan; never wired into `app.py`, no tests)
+- [~] `agents/analytics-agent/src/services/conversation_service.py` — tier: `review` — kept (imported by `routes/conversations.py` and `tests/component/test_conversation_service.py`; finder excludes test roots)
+- [~] `platform-sdk/platform_sdk/testing.py` — tier: `review` — kept (imported by `tests/conftest.py` and `tests/integration/conftest.py`; finder excludes test roots)
+- [~] `services/continuous_embedding_pipeline/src/container.py` — tier: `review` — kept (DI root for ragas_gate / hard_negatives / trainer; embedding pipeline service is real code)
+- [~] `services/continuous_embedding_pipeline/src/evaluation/ragas_gate.py` — tier: `review` — kept (imported by `src/container.py`)
+- [~] `services/continuous_embedding_pipeline/src/mining/hard_negatives.py` — tier: `review` — kept (imported by `src/container.py` and `tests/test_mining.py`)
+- [~] `services/continuous_embedding_pipeline/src/training/trainer.py` — tier: `review` — kept (imported by `src/container.py` and `tests/test_trainer.py`)
+- [~] `tools/shared/_pytest_setup.py` — tier: `review` — kept (loaded via `from shared._pytest_setup import setup_tool_pytest_env` in salesforce-mcp + payments-mcp conftests)
+- [~] `tools/shared/mcp_auth.py` — tier: `review` — kept (imported as `tools_shared.mcp_auth` in 6 MCP service files via Dockerfile path alias)
+- [x] `tools/shared/tool_error_boundary.py` — tier: `review` — removed (no consumers; README mentions in prose but no code uses it)
 
 ### Hold — framework convention, finder can't model (23)
 
-- [ ] `agents/analytics-agent/src/__init__.py` — tier: `hold` — framework convention, finder can't model
-- [ ] `agents/analytics-agent/src/domain/__init__.py` — tier: `hold` — framework convention, finder can't model
-- [ ] `agents/analytics-agent/src/middleware/__init__.py` — tier: `hold` — framework convention, finder can't model
-- [ ] `agents/analytics-agent/src/nodes/__init__.py` — tier: `hold` — framework convention, finder can't model
-- [ ] `agents/analytics-agent/src/routes/__init__.py` — tier: `hold` — framework convention, finder can't model
-- [ ] `agents/analytics-agent/src/schemas/__init__.py` — tier: `hold` — framework convention, finder can't model
-- [ ] `agents/analytics-agent/src/streaming/__init__.py` — tier: `hold` — framework convention, finder can't model
-- [ ] `agents/conftest.py` — tier: `hold` — framework convention, finder can't model
-- [ ] `agents/src/__init__.py` — tier: `hold` — framework convention, finder can't model
-- [ ] `services/continuous_embedding_pipeline/src/__init__.py` — tier: `hold` — framework convention, finder can't model
-- [ ] `services/continuous_embedding_pipeline/src/domain/__init__.py` — tier: `hold` — framework convention, finder can't model
-- [ ] `services/continuous_embedding_pipeline/src/evaluation/__init__.py` — tier: `hold` — framework convention, finder can't model
-- [ ] `services/continuous_embedding_pipeline/src/mining/__init__.py` — tier: `hold` — framework convention, finder can't model
-- [ ] `services/continuous_embedding_pipeline/src/training/__init__.py` — tier: `hold` — framework convention, finder can't model
-- [ ] `tools/data-mcp/conftest.py` — tier: `hold` — framework convention, finder can't model
-- [ ] `tools/data-mcp/src/__init__.py` — tier: `hold` — framework convention, finder can't model
-- [ ] `tools/news-search-mcp/conftest.py` — tier: `hold` — framework convention, finder can't model
-- [ ] `tools/news-search-mcp/src/__init__.py` — tier: `hold` — framework convention, finder can't model
-- [ ] `tools/payments-mcp/conftest.py` — tier: `hold` — framework convention, finder can't model
-- [ ] `tools/payments-mcp/src/__init__.py` — tier: `hold` — framework convention, finder can't model
-- [ ] `tools/salesforce-mcp/conftest.py` — tier: `hold` — framework convention, finder can't model
-- [ ] `tools/salesforce-mcp/src/__init__.py` — tier: `hold` — framework convention, finder can't model
-- [ ] `tools/shared/__init__.py` — tier: `hold` — framework convention, finder can't model
+- [?] `agents/analytics-agent/src/__init__.py` — tier: `hold` — framework convention, finder can't model
+- [?] `agents/analytics-agent/src/domain/__init__.py` — tier: `hold` — framework convention, finder can't model
+- [?] `agents/analytics-agent/src/middleware/__init__.py` — tier: `hold` — framework convention, finder can't model
+- [?] `agents/analytics-agent/src/nodes/__init__.py` — tier: `hold` — framework convention, finder can't model
+- [?] `agents/analytics-agent/src/routes/__init__.py` — tier: `hold` — framework convention, finder can't model
+- [?] `agents/analytics-agent/src/schemas/__init__.py` — tier: `hold` — framework convention, finder can't model
+- [?] `agents/analytics-agent/src/streaming/__init__.py` — tier: `hold` — framework convention, finder can't model
+- [?] `agents/conftest.py` — tier: `hold` — framework convention, finder can't model
+- [?] `agents/src/__init__.py` — tier: `hold` — framework convention, finder can't model
+- [?] `services/continuous_embedding_pipeline/src/__init__.py` — tier: `hold` — framework convention, finder can't model
+- [?] `services/continuous_embedding_pipeline/src/domain/__init__.py` — tier: `hold` — framework convention, finder can't model
+- [?] `services/continuous_embedding_pipeline/src/evaluation/__init__.py` — tier: `hold` — framework convention, finder can't model
+- [?] `services/continuous_embedding_pipeline/src/mining/__init__.py` — tier: `hold` — framework convention, finder can't model
+- [?] `services/continuous_embedding_pipeline/src/training/__init__.py` — tier: `hold` — framework convention, finder can't model
+- [?] `tools/data-mcp/conftest.py` — tier: `hold` — framework convention, finder can't model
+- [?] `tools/data-mcp/src/__init__.py` — tier: `hold` — framework convention, finder can't model
+- [?] `tools/news-search-mcp/conftest.py` — tier: `hold` — framework convention, finder can't model
+- [?] `tools/news-search-mcp/src/__init__.py` — tier: `hold` — framework convention, finder can't model
+- [?] `tools/payments-mcp/conftest.py` — tier: `hold` — framework convention, finder can't model
+- [?] `tools/payments-mcp/src/__init__.py` — tier: `hold` — framework convention, finder can't model
+- [?] `tools/salesforce-mcp/conftest.py` — tier: `hold` — framework convention, finder can't model
+- [?] `tools/salesforce-mcp/src/__init__.py` — tier: `hold` — framework convention, finder can't model
+- [?] `tools/shared/__init__.py` — tier: `hold` — framework convention, finder can't model
 
 ---
 
@@ -245,6 +245,7 @@ _No findings._
 - 2026-04-27 — Vulture Section 2: all 7 findings kept. Each is a Protocol method parameter or `__aexit__` standard parameter — names are part of the contract or external API shape, vulture can't see consumers structurally. No source change; no allowlist change (rejected as unnecessary churn for a one-time scan).
 - 2026-04-27 — Deptry Section 3: 8 of 32 declared deps removed (4× httpx in MCPs, mcp in agents, langchain in agents and platform-sdk, langchain-openai in agents). 24 kept — runtime auto-instrumentation (OTel + langfuse), Dockerfile entry point (uvicorn), production runtime (tavily-python, langgraph-checkpoint-postgres), or actually imported (pyyaml). Stack smoke deferred to Phase F gate.
 - 2026-04-27 — Knip Section 4 (E3): 9 files deleted (`git rm`); 4 exports de-exported in `chartUtils.ts` (symbols retained as private — all had internal callers); `ScrollBar` export dropped from `scroll-area.tsx` (retained privately, used by `ScrollArea`); 2 types (`StreamUIComponent`, `FollowUpSuggestionsData`) fully deleted from `lib/types.ts`; 4 Radix npm deps uninstalled (`react-collapsible`, `react-dialog`, `react-slot`, `react-tooltip`) — all confirmed orphan post file-delete, 51 total packages removed; `class-variance-authority` also confirmed orphan (sole consumer `button.tsx` deleted) — uninstalled; `ai` kept (Vercel AI SDK dynamic use); `tailwindcss` kept (build pipeline). No restorations required. `tsc --noEmit` clean; production build green.
+- 2026-04-27 — Orphan files Section 5 (E4): 2 of 10 review-tier candidates removed — `agents/analytics-agent/src/middleware/rate_limiter.py` (genuinely never wired) and `tools/shared/tool_error_boundary.py` (no consumers). 8 kept — verified false positives where the AST finder couldn't see consumers (test-root exclusions, `from foo import submodule` pattern, Dockerfile path aliases). 23 `__init__.py`/`conftest.py` candidates left in hold tier as framework conventions. Per-suite test counts match baseline (no regressions).
 
 ---
 
