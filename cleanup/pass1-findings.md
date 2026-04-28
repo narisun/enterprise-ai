@@ -158,38 +158,38 @@ _No findings._
 
 ### Unused files (9)
 
-- [ ] `components/settings/SettingsPanel.tsx` — tier: `review`
-- [ ] `components/sidebar/NewChatButton.tsx` — tier: `review`
-- [ ] `components/ui/badge.tsx` — tier: `review`
-- [ ] `components/ui/button.tsx` — tier: `review`
-- [ ] `components/ui/card.tsx` — tier: `review`
-- [ ] `components/ui/collapsible.tsx` — tier: `review`
-- [ ] `components/ui/input.tsx` — tier: `review`
-- [ ] `components/ui/sheet.tsx` — tier: `review`
-- [ ] `components/ui/tooltip.tsx` — tier: `review`
+- [x] `components/settings/SettingsPanel.tsx` — tier: `review` — removed
+- [x] `components/sidebar/NewChatButton.tsx` — tier: `review` — removed
+- [x] `components/ui/badge.tsx` — tier: `review` — removed
+- [x] `components/ui/button.tsx` — tier: `review` — removed
+- [x] `components/ui/card.tsx` — tier: `review` — removed
+- [x] `components/ui/collapsible.tsx` — tier: `review` — removed
+- [x] `components/ui/input.tsx` — tier: `review` — removed
+- [x] `components/ui/sheet.tsx` — tier: `review` — removed
+- [x] `components/ui/tooltip.tsx` — tier: `review` — removed
 
 ### Unused exports (5)
 
-- [ ] `components/charts/chartUtils.ts:formatDateTimeValue` — tier: `review`
-- [ ] `components/charts/chartUtils.ts:AXIS_LABEL_MAX_LEN` — tier: `review`
-- [ ] `components/charts/chartUtils.ts:truncateLabel` — tier: `review`
-- [ ] `components/charts/chartUtils.ts:buildShortNameMap` — tier: `review`
-- [ ] `components/ui/scroll-area.tsx:ScrollBar` — tier: `review`
+- [x] `components/charts/chartUtils.ts:formatDateTimeValue` — tier: `review` — removed (export dropped; symbol kept private — used internally by `formatValue`)
+- [x] `components/charts/chartUtils.ts:AXIS_LABEL_MAX_LEN` — tier: `review` — removed (export dropped; symbol kept private — used internally by `truncateLabel` / `buildShortNameMap`)
+- [x] `components/charts/chartUtils.ts:truncateLabel` — tier: `review` — removed (export dropped; symbol kept private — used internally by `buildShortNameMap`)
+- [x] `components/charts/chartUtils.ts:buildShortNameMap` — tier: `review` — removed (export dropped; symbol kept private — no external callers)
+- [x] `components/ui/scroll-area.tsx:ScrollBar` — tier: `review` — removed (export dropped; symbol kept private — used internally by `ScrollArea`)
 
 ### Unused types (2)
 
-- [ ] `lib/types.ts:StreamUIComponent` — tier: `review`
-- [ ] `lib/types.ts:FollowUpSuggestionsData` — tier: `review`
+- [x] `lib/types.ts:StreamUIComponent` — tier: `review` — removed (no internal or external references)
+- [x] `lib/types.ts:FollowUpSuggestionsData` — tier: `review` — removed (no internal or external references)
 
 ### Unused dependencies (7)
 
-- [ ] `@radix-ui/react-collapsible` (dependencies, package.json) — tier: `review`
-- [ ] `@radix-ui/react-dialog` (dependencies, package.json) — tier: `review`
-- [ ] `@radix-ui/react-slot` (dependencies, package.json) — tier: `review`
-- [ ] `@radix-ui/react-tooltip` (dependencies, package.json) — tier: `review`
-- [ ] `ai` (dependencies, package.json) — tier: `review`
-- [ ] `class-variance-authority` (dependencies, package.json) — tier: `review`
-- [ ] `tailwindcss` (devDependencies, package.json) — tier: `review`
+- [x] `@radix-ui/react-collapsible` (dependencies, package.json) — tier: `review` — removed (confirmed orphan after file deletes; uninstalled with 51 transitive packages)
+- [x] `@radix-ui/react-dialog` (dependencies, package.json) — tier: `review` — removed (confirmed orphan after file deletes; uninstalled with 51 transitive packages)
+- [x] `@radix-ui/react-slot` (dependencies, package.json) — tier: `review` — removed (confirmed orphan after file deletes; uninstalled with 51 transitive packages)
+- [x] `@radix-ui/react-tooltip` (dependencies, package.json) — tier: `review` — removed (confirmed orphan after file deletes; uninstalled with 51 transitive packages)
+- [~] `ai` (dependencies, package.json) — tier: `review` — kept (Vercel AI SDK; `useChat` resolves dynamically; deleting breaks streaming chat)
+- [x] `class-variance-authority` (dependencies, package.json) — tier: `review` — removed (orphaned after `button.tsx` delete; no remaining importers; uninstalled)
+- [~] `tailwindcss` (devDependencies, package.json) — tier: `review` — kept (used by Tailwind 4 build pipeline via @tailwindcss/postcss; not statically imported)
 
 ### Duplicates / unlisted / unresolved (tier: `hold`)
 
@@ -244,6 +244,7 @@ _No findings._
 
 - 2026-04-27 — Vulture Section 2: all 7 findings kept. Each is a Protocol method parameter or `__aexit__` standard parameter — names are part of the contract or external API shape, vulture can't see consumers structurally. No source change; no allowlist change (rejected as unnecessary churn for a one-time scan).
 - 2026-04-27 — Deptry Section 3: 8 of 32 declared deps removed (4× httpx in MCPs, mcp in agents, langchain in agents and platform-sdk, langchain-openai in agents). 24 kept — runtime auto-instrumentation (OTel + langfuse), Dockerfile entry point (uvicorn), production runtime (tavily-python, langgraph-checkpoint-postgres), or actually imported (pyyaml). Stack smoke deferred to Phase F gate.
+- 2026-04-27 — Knip Section 4 (E3): 9 files deleted (`git rm`); 4 exports de-exported in `chartUtils.ts` (symbols retained as private — all had internal callers); `ScrollBar` export dropped from `scroll-area.tsx` (retained privately, used by `ScrollArea`); 2 types (`StreamUIComponent`, `FollowUpSuggestionsData`) fully deleted from `lib/types.ts`; 4 Radix npm deps uninstalled (`react-collapsible`, `react-dialog`, `react-slot`, `react-tooltip`) — all confirmed orphan post file-delete, 51 total packages removed; `class-variance-authority` also confirmed orphan (sole consumer `button.tsx` deleted) — uninstalled; `ai` kept (Vercel AI SDK dynamic use); `tailwindcss` kept (build pipeline). No restorations required. `tsc --noEmit` clean; production build green.
 
 ---
 

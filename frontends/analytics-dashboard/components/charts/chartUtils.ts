@@ -118,7 +118,7 @@ export function formatDateValue(value: number | string): string {
 /**
  * Format a datetime value into a human-readable format with time.
  */
-export function formatDateTimeValue(value: number | string): string {
+function formatDateTimeValue(value: number | string): string {
   const dateStr = formatDateValue(value);
   if (typeof value === "string" && value.includes("T")) {
     const d = new Date(value);
@@ -200,7 +200,7 @@ export function getSeriesNames(data: ChartDataPoint[]): string[] {
 // Axis label truncation
 
 /** Max characters to display on a chart axis tick before shortening. */
-export const AXIS_LABEL_MAX_LEN = 16;
+const AXIS_LABEL_MAX_LEN = 16;
 
 /**
  * Strip common institutional / geographic suffixes that add length without
@@ -225,7 +225,7 @@ function simplifyCategory(text: string): string {
  * if the result is still over maxLen characters.
  * Returns the simplified string unchanged when it already fits.
  */
-export function truncateLabel(text: string, maxLen = AXIS_LABEL_MAX_LEN): string {
+function truncateLabel(text: string, maxLen = AXIS_LABEL_MAX_LEN): string {
   const simplified = simplifyCategory(text);
   if (simplified.length <= maxLen) return simplified;
   // Cut at the last word boundary before (maxLen - 1) and add an ellipsis
@@ -240,7 +240,7 @@ export function truncateLabel(text: string, maxLen = AXIS_LABEL_MAX_LEN): string
  * whose display label differs from the original (i.e. was shortened).
  * Used to render a name legend and to show full names in tooltips.
  */
-export function buildShortNameMap(
+function buildShortNameMap(
   categories: string[],
   maxLen = AXIS_LABEL_MAX_LEN,
 ): Map<string, string> {
