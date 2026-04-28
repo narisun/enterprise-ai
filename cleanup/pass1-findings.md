@@ -251,4 +251,18 @@ _No findings._
 
 ## Closing notes
 
-_(Empty — populated at end of pass.)_
+**Pass 1 complete — 2026-04-27**
+
+- **Commits in Pass 1:** 10 (`839cce9` setup → `47c2b53` final orphan removals)
+- **Diff vs main:** 59 files changed, ~170 net lines removed (2114 insertions / 2284 deletions; insertions are mostly findings-report lines and `ruff format` reflows of touched files)
+- **Net cleanup effect:**
+  - 42 unused imports + 4 unused locals removed (ruff)
+  - 8 declared-unused Python deps removed (deptry)
+  - 9 dashboard files + 5 npm deps + 5 unused exports + 2 unused types removed (knip)
+  - 2 orphan Python files removed (custom orphan finder)
+- **Test gate result:** PASSED — all 5 Python suites match baseline (no regressions); `tsc`, `npm run build`, `make setup` all green; `test_payments_sql.py` integration: 14/0 green; `test_opa_policies.py` integration: 10/5 (5 failures pre-existing — analytics_agent role mismatch in `tool_auth.rego` vs test expectations; not introduced by Pass 1).
+- **Pre-existing concerns surfaced (deferred — not Pass 1's scope):**
+  - 124 files have `ruff format` violations on main; only files touched by Pass 1 were formatted.
+  - `ai-analytics-dashboard` and `ai-langfuse` containers report Docker `(unhealthy)` due to docker-compose health-check probes hitting in-container `localhost:3000` while services listen on different ports — services respond correctly externally on 3003/3001.
+  - 5 OPA policy tests fail due to test/policy role-list mismatch.
+- **Items in `[?] hold` (deferred for future passes):** 23 framework-convention `__init__.py` and `conftest.py` candidates that the orphan finder can't model.
