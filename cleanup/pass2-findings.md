@@ -14,12 +14,13 @@
 
 ## Summary
 
-| Category              | Total | Candidates | Tier              |
-|-----------------------|------:|-----------:|-------------------|
-| docker-compose services |    14 |          0 | n/a (all wired)   |
-| Makefile targets      |     7 |          0 | n/a (all wired)   |
-| scripts               |     2 |          2 | review            |
-| .env.example keys     |    52 |          3 | review            |
+| Category                     | Total | Removed | Held | Kept | Notes                  |
+|------------------------------|------:|--------:|-----:|-----:|------------------------|
+| docker-compose services      |    14 |       0 |    0 |   14 | all wired              |
+| Makefile targets             |     7 |       0 |    0 |    7 | all wired              |
+| scripts                      |     2 |       0 |    2 |    0 | cloud-deploy retirement deferred |
+| .env.example keys            |    52 |       3 |    0 |   49 | APP_ENV, APP_VERSION, CHAINLIT_AUTH_SECRET |
+| services/ folder             |     1 |       1 |    0 |    0 | continuous_embedding_pipeline subtree (added during review) |
 
 ---
 
@@ -108,4 +109,13 @@ After deletion: `services/` directory is empty and removed from tracking. Tests 
 
 ## Closing notes
 
-_(Empty — populated at end of pass.)_
+**Pass 2 complete — 2026-04-28**
+
+- **Commits in Pass 2:** 3 (`8d62826` pre-review report → `0ae6964` env-var deletes → `d566d66` services/ deletion)
+- **Diff vs `cleanup/pass-1-code`:** 19 files changed, 1445 net lines removed (mostly the deleted services subtree)
+- **Net cleanup effect:**
+  - 3 unused `.env.example` keys removed (`APP_ENV`, `APP_VERSION`, `CHAINLIT_AUTH_SECRET`) plus the obsolete Chainlit section header
+  - 22 source/test files in `services/continuous_embedding_pipeline/` removed (entire unwired ML pipeline subtree)
+  - `TECHNOLOGY_STACK.md` "ML / Embedding Pipeline" section removed (described the deleted service)
+- **Deferred to a separate PR:** `scripts/cloud-deploy.sh` and `scripts/cloud-tls.sh` — held pending the user's decision on whether to retire the legacy cloud-deploy path (Terraform + cloud-compose + scripts together).
+- **Test gate result:** PASSED — Python suites match Pass 1 baseline (no new regressions); `tsc --noEmit` clean; ruff error count dropped from 128 → 109 (19 pre-existing errors lived inside the deleted subtree). Stack-smoke skipped because Pass 2's only runtime-visible change is the 3 deleted `.env.example` template keys, none of which were consumed at runtime.
