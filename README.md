@@ -1,3 +1,30 @@
+> # ⚠️ This monorepo has been split into 8 separate repos.
+>
+> Active development moved to the repos listed below. **This repository is
+> archived and preserved for historical reference only.** Code, history, and
+> issues here are read-only.
+>
+> ## New repos (all under `narisun/`, all tagged v0.4.0)
+>
+> | Repo | Purpose |
+> |---|---|
+> | [`ai-platform-sdk`](https://github.com/narisun/ai-platform-sdk) | Shared SDK: BaseAgentApp, McpService, mcp_auth, telemetry, OPA, cache, MCP bridge, pytest plugin, scaffolding CLI |
+> | [`ai-agent-analytics`](https://github.com/narisun/ai-agent-analytics) | Analytics agent (LangGraph + FastAPI orchestrator) |
+> | [`ai-mcp-data`](https://github.com/narisun/ai-mcp-data) | Read-only SQL MCP server |
+> | [`ai-mcp-salesforce`](https://github.com/narisun/ai-mcp-salesforce) | Salesforce CRM MCP server |
+> | [`ai-mcp-payments`](https://github.com/narisun/ai-mcp-payments) | Payments analytics MCP server |
+> | [`ai-mcp-news-search`](https://github.com/narisun/ai-mcp-news-search) | News search MCP server (Tavily) |
+> | [`ai-frontend-analytics`](https://github.com/narisun/ai-frontend-analytics) | Next.js dashboard (Vercel-deployed) |
+> | [`ai-dev-stack`](https://github.com/narisun/ai-dev-stack) | Local docker-compose orchestration + integration tests |
+>
+> Container images live at `ghcr.io/narisun/ai-python-base`, `ai-agent-analytics`,
+> `ai-mcp-{data,salesforce,payments,news-search}`, all at tag `0.4.0`.
+>
+> The restructure split was tracked in
+> [`docs/superpowers/plans/2026-04-30-multi-repo-restructure.md`](./docs/superpowers/plans/2026-04-30-multi-repo-restructure.md).
+>
+> ---
+
 # Enterprise AI — Agentic Platform
 
 Enterprise AI is an agentic platform for regulated financial-services workflows. It combines:
